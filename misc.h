@@ -28,15 +28,49 @@
 
 #include "basic.h"
 
-void set_user (const char *username);
-void set_group (const char *groupname);
+/* socket descriptor passed by inetd/xinetd server to us */
+#define INETD_SOCKET_DESCRIPTOR 0
+
+/* Get/Set UID of process */
+
+struct user_state {
+#if defined(HAVE_GETPWNAM) && defined(HAVE_SETUID)
+  const char *username;
+  struct passwd *pw;
+#endif
+};
+
+void get_user (const char *username, struct user_state *state);
+void set_user (const struct user_state *state);
+
+/* Get/Set GID of process */
+
+struct group_state {
+#if defined(HAVE_GETGRNAM) && defined(HAVE_SETGID)
+  const char *groupname;
+  struct group *gr;
+#endif
+};
+
+void get_group (const char *groupname, struct group_state *state);
+void set_group (const struct group_state *state);
+
 void set_nice (int niceval);
 void do_chroot (const char *path);
 
 void run_script (const char *command, const char *arg, int tun_mtu, int udp_mtu,
 		 const char *ifconfig_local, const char* ifconfig_remote);
 
-void write_pid (const char* filename);
+/* workspace for get_pid_file/write_pid */
+struct pid_state {
+#ifdef HAVE_GETPID
+  FILE *fp;
+  const char *filename;
+#endif
+};
+
+void get_pid_file (const char* filename, struct pid_state *state);
+void write_pid (const struct pid_state *state);
 
 void do_mlockall (bool print_msg); /* Disable paging */
 
@@ -51,8 +85,8 @@ void warn_if_group_others_accessible(const char* filename);
 int openvpn_system (const char *command);
 
 /* interpret the status code returned by system() */
-bool system_ok(int stat);
-const char *system_error_message (int stat);
+bool system_ok(int);
+const char *system_error_message (int);
 
 /* run system() with error check, return true if success,
    false if error, exit if error and fatal==true */
@@ -61,12 +95,22 @@ bool system_check (const char* command, const char* error_message, bool fatal);
 /* format a time_t as ascii, or use current time if 0 */
 const char* time_string (time_t t);
 
+/* Set standard file descriptors to /dev/null */
+void set_std_files_to_null ();
+
+/* Wrapper for chdir library function */
+int openvpn_chdir (const char* dir);
+
+/* dup inetd/xinetd socket descriptor and save */
+extern int inetd_socket_descriptor;
+void save_inetd_socket_descriptor ();
+
 /* init random() function, only used as source for weak random numbers, when !USE_CRYPTO */
-void init_random_seed();
+void init_random_seed(void);
 
 /* an analogue to the random() function, but use OpenSSL functions if available */
 #ifdef USE_CRYPTO
-long int get_random();
+long int get_random(void);
 #else
 #define get_random random
 #endif

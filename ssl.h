@@ -148,6 +148,11 @@
 #define TLS_MULTI_REFRESH 15    /* call tls_multi_process once every n seconds */
 #define TLS_MULTI_HORIZON 2     /* call tls_multi_process frequently for n seconds after
 				   every packet sent/received action */
+
+/* The SSL/TLS worker thread will wait at most this many seconds for the interprocess
+   communication pipe to the main thread to be ready to accept writes. */
+#define TLS_MULTI_THREAD_SEND_TIMEOUT 5
+
 /*
  * Buffer sizes (also see mtu.h).
  */
@@ -331,8 +336,8 @@ struct tls_multi
   struct tls_session session[TM_SIZE];
 };
 
-void init_ssl_lib ();
-void free_ssl_lib ();
+void init_ssl_lib (void);
+void free_ssl_lib (void);
 
 /* Build master SSL_CTX object that serves for the whole of openvpn instantiation */
 SSL_CTX *init_ssl (bool server,
@@ -366,7 +371,7 @@ void tls_pre_encrypt (struct tls_multi *multi,
 
 void tls_post_encrypt (struct tls_multi *multi, struct buffer *buf);
 
-void show_available_tls_ciphers ();
+void show_available_tls_ciphers (void);
 void get_highest_preference_tls_cipher (char *buf, int size);
 
 int pem_password_callback (char *buf, int size, int rwflag, void *u);
@@ -396,22 +401,29 @@ struct tt_ret
 
 struct thread_parms
 {
+# define TLS_THREAD_MAIN   0 
+# define TLS_THREAD_WORKER 1 
+# define TLS_THREAD_SOCKET(x) ((x)->sd[TLS_THREAD_MAIN])
+  int sd[2];
+
   struct tls_multi *multi;
   struct udp_socket *udp_socket;
   int nice;
   bool mlock;
-  int sd;
 };
 
-int tls_thread_create (struct tls_multi *multi,
-		       struct udp_socket *udp_socket,
-		       int nice, bool mlock);
+void tls_thread_create (struct thread_parms *state,
+			struct tls_multi *multi,
+			struct udp_socket *udp_socket,
+			int nice, bool mlock);
 
-int tls_thread_process (int sd);
+int tls_thread_process (struct thread_parms *state);
 
-void tls_thread_close (int sd);
+void tls_thread_close (struct thread_parms *state);
 
-int tls_thread_rec_buf (int sd, struct tt_ret* ttr, bool do_check_status);
+int tls_thread_rec_buf (struct thread_parms *state,
+			struct tt_ret* ttr,
+			bool do_check_status);
 
 #endif
 

@@ -39,7 +39,7 @@ struct buffer
 
 #define BPTR(buf)  ((buf)->data + (buf)->offset)
 #define BEND(buf)  (BPTR(buf) + (buf)->len)
-#define BLAST(buf) ((buf)->len ? BPTR(buf) + (buf)->len - 1 : NULL)
+#define BLAST(buf) (((buf)->data && (buf)->len) ? (BPTR(buf) + (buf)->len - 1) : NULL)
 #define BLEN(buf)  ((buf)->len)
 #define BDEF(buf)  ((buf)->data != NULL)
 #define BSTR(buf)  (char *)BPTR(buf)
@@ -47,7 +47,7 @@ struct buffer
 struct buffer alloc_buf (size_t size);
 struct buffer clone_buf (const struct buffer* buf);
 struct buffer alloc_buf_gc (size_t size);	/* allocate buffer with garbage collection */
-struct buffer clear_buf ();
+struct buffer clear_buf (void);
 void free_buf (struct buffer *buf);
 
 static inline bool
@@ -93,7 +93,7 @@ buf_set_read (struct buffer *buf, uint8_t *data, int size)
 
 /* Like strncpy but makes sure dest is always null terminated */
 static inline void
-strncpynt (char *dest, const char *src, int maxlen)
+strncpynt (char *dest, const char *src, size_t maxlen)
 {
   strncpy (dest, src, maxlen);
   if (maxlen > 0)
@@ -116,16 +116,20 @@ has_digit (const char* src)
 /*
  * printf append to a buffer with overflow check
  */
-void buf_printf (struct buffer *buf, char *format, ...);
+void buf_printf (struct buffer *buf, const char *format, ...)
+#ifdef __GNUC__
+    __attribute__ ((format (printf, 2, 3)))
+#endif
+    ;
 
 /*
  * remove trailing newline
  */
 static inline void
-buf_chomp (struct buffer *buf)
+buf_chomp (struct buffer *buf, uint8_t remove)
 {
   uint8_t *cp = BLAST(buf);
-  if (cp && *cp == '\n')
+  if (cp && *cp == remove)
     {
       *cp = '\0'; 
       --buf->len;
@@ -149,7 +153,7 @@ void convert_to_one_line (struct buffer *buf);
  */
 char *
 format_hex_ex (const uint8_t *data, int size, int maxoutput,
-	       int space_break, char* separator);
+	       int space_break, const char* separator);
 
 static inline char *
 format_hex (const uint8_t *data, int size, int maxoutput)
@@ -353,7 +357,7 @@ void gc_collect (int level);
 void x_gc_free (void *p);
 
 static inline int
-gc_new_level ()
+gc_new_level (void)
 {
   struct gc_thread* thread = &x_gc_thread[thread_number()];
   return ++thread->gc_level;

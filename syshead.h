@@ -134,7 +134,7 @@
 #endif
 
 #ifdef HAVE_ARPA_INET_H
-#ifndef TARGET_OPENBSD
+#if !defined(TARGET_OPENBSD) && !defined(__LCLINT__)
 #include <arpa/inet.h>
 #endif
 #endif
@@ -145,7 +145,7 @@
 
 #ifdef TARGET_LINUX
 
-#ifdef HAVE_NETINET_IF_ETHER_H
+#if defined(HAVE_NETINET_IF_ETHER_H) && !defined(__LCLINT__)
 #include <netinet/if_ether.h>
 #endif
 
@@ -251,10 +251,19 @@
 /*
  * Do we have the capability to report extended socket errors?
  */
-#if defined(HAVE_LINUX_TYPES_H) && defined(HAVE_LINUX_ERRQUEUE_H) && defined(HAVE_SOCK_EXTENDED_ERR) && defined(HAVE_MSGHDR) && defined(HAVE_CMSGHDR) && defined(CMSG_FIRSTHDR) && defined(CMSG_NXTHDR) && defined(IP_RECVERR) && defined(MSG_ERRQUEUE) && defined(SOL_IP)
+#if defined(HAVE_LINUX_TYPES_H) && defined(HAVE_LINUX_ERRQUEUE_H) && defined(HAVE_SOCK_EXTENDED_ERR) && defined(HAVE_MSGHDR) && defined(HAVE_CMSGHDR) && defined(CMSG_FIRSTHDR) && defined(CMSG_NXTHDR) && defined(IP_RECVERR) && defined(MSG_ERRQUEUE) && defined(SOL_IP) && defined(HAVE_IOVEC)
 #define EXTENDED_SOCKET_ERROR_CAPABILITY 1
 #else
 #define EXTENDED_SOCKET_ERROR_CAPABILITY 0
+#endif
+
+/*
+ * Do we have a syslog capability?
+ */
+#if defined(HAVE_OPENLOG) && defined(HAVE_SYSLOG)
+#define SYSLOG_CAPABILITY 1
+#else
+#define SYSLOG_CAPABILITY 0
 #endif
 
 #endif

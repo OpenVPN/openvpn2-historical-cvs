@@ -46,6 +46,40 @@
 
 #include "memdbg.h"
 
+/*
+ * When should we daemonize?
+ *
+ * Level 0 -- after option parsing (early)
+ * Level 1 -- after all initialization (late)
+ */
+#define DAEMONIZATION_LEVEL 1
+
+/*
+ * Should we become a daemon?
+ *  level == 0 after parameters have been parsed but before any initialization
+ *  level == 1 after initialization but before any SSL/TLS negotiation or
+ *    tunnel data is forwarded
+ *  first_time is true until first exit of openvpn() function
+ *
+ * Return true if we did it.
+ */
+static bool
+possibly_become_daemon (int level, const struct options* options, const bool first_time)
+{
+  bool ret = false;
+  if (first_time && options->daemon)
+    {
+      ASSERT (!options->inetd);
+      if (level == DAEMONIZATION_LEVEL)
+	{
+	  if (daemon (options->cd_dir != NULL, 0) < 0)
+	    msg (M_ERR, "daemon() failed");
+	  ret = true;
+	}
+    }
+  return ret;
+}
+
 /* Handle signals */
 
 static volatile int signal_received = 0;
@@ -272,8 +306,8 @@ openvpn (const struct options *options,
 
 #ifdef USE_PTHREAD
 
-  /* local socket descriptor used to communicate with TLS thread */
-  int tls_thread_socket = 0;
+  /* object containing TLS thread state */
+  struct thread_parms thread_parms;
 
   /* object sent to us by TLS thread */
   struct tt_ret tt_ret;
@@ -324,6 +358,16 @@ openvpn (const struct options *options,
    */
   bool ipv4_tun = (!options->tun_ipv6 && is_dev_type (options->dev, options->dev_type, "tun"));
 
+  /* workspace for get_pid_file/write_pid */
+  struct pid_state pid_state;
+
+  /* workspace for --user/--group */
+  struct user_state user_state;
+  struct group_state group_state;
+
+  /* temporary variable */
+  bool did_we_daemonize;
+
   /*
    * Special handling if signal arrives before
    * we are properly initialized.
@@ -343,21 +387,9 @@ openvpn (const struct options *options,
   CLEAR (frame_fragment_omit);
 #endif
 
-  if (first_time)
-    {
-      /* initialize threading if pthread configure option enabled */
-      thread_init();
-      
-      /* save process ID in a file */
-      write_pid (options->writepid);
-
-      /* should we disable paging? */
-      if (options->mlock)
-	do_mlockall (true);
-
-      /* chroot if requested */
-      do_chroot (options->chroot_dir);
-    }
+  /* should we disable paging? */
+  if (first_time && options->mlock)
+    do_mlockall (true);
 
   /*
    * Initialize advanced MTU negotiation and datagram fragmentation
@@ -467,7 +499,10 @@ openvpn (const struct options *options,
 	{
 #ifdef USE_PTHREAD
 	  if (first_time)
-	    work_thread_create(test_crypto_thread, (struct options*) options);
+	    {
+	      thread_init();
+	      work_thread_create(test_crypto_thread, (void*) options);
+	    }
 #endif
 	  frame_finalize_options (&frame, options);
 
@@ -635,7 +670,7 @@ openvpn (const struct options *options,
 #endif
 
   max_rw_size_udp = MAX_RW_SIZE_UDP (&frame);
-  frame_print (&frame, D_SHOW_PARMS, "Data Channel MTU parms");
+  frame_print (&frame, D_MTU_INFO, "Data Channel MTU parms");
 #ifdef FRAGMENT_ENABLE
   if (fragment)
     frame_print (&frame_fragment, D_FRAG_DEBUG, "Fragmentation MTU parms");
@@ -650,7 +685,7 @@ openvpn (const struct options *options,
       size = MAX_RW_SIZE_UDP (&tls_multi->opt.frame);
       if (size > max_rw_size_udp)
 	max_rw_size_udp = size;
-      frame_print (&tls_multi->opt.frame, D_SHOW_PARMS, "Control Channel MTU parms");
+      frame_print (&tls_multi->opt.frame, D_MTU_INFO, "Control Channel MTU parms");
     }
 #endif
 
@@ -704,7 +739,7 @@ openvpn (const struct options *options,
     }
   else
     {
-      msg (M_INFO, "Preserving previous tun/tap instance: %s", tuntap->actual);
+      msg (M_INFO, "Preserving previous TUN/TAP instance: %s", tuntap->actual);
     }
 
   /* initialize traffic shaper (i.e. transmit bandwidth limiter) */
@@ -714,12 +749,21 @@ openvpn (const struct options *options,
       shaper_msg (&shaper);
     }
 
-  /* drop privileges if requested */
   if (first_time)
     {
-      set_group (options->groupname);
-      set_user (options->username);
+      /* get user and/or group that we want to setuid/setgid to */
+      get_group (options->groupname, &group_state);
+      get_user (options->username, &user_state);
+
+      /* get --writepid file descriptor */
+      get_pid_file (options->writepid, &pid_state);
+
+      /* chroot if requested */
+      do_chroot (options->chroot_dir);
     }
+
+  /* become a daemon if --daemon */
+  did_we_daemonize = possibly_become_daemon (1, options, first_time);
 
   /* catch signals */
   signal (SIGINT, signal_handler);
@@ -728,11 +772,28 @@ openvpn (const struct options *options,
   signal (SIGUSR1, signal_handler);
   signal (SIGUSR2, signal_handler);
 
+  if (first_time)
+    {
+      /* should we disable paging? */
+      if (options->mlock && did_we_daemonize)
+	do_mlockall (true); /* call again in case we daemonized */
+
+      /* set user and/or group that we want to setuid/setgid to */
+      set_group (&group_state);
+      set_user (&user_state);
+
+      /* save process ID in a file */
+      write_pid (&pid_state);
+
+      /* initialize threading if pthread configure option enabled */
+      thread_init();
+    }
+
   /* start the TLS thread */
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
   if (tls_multi)
-    tls_thread_socket = tls_thread_create (tls_multi, &udp_socket,
-					   options->nice_work, options->mlock);
+    tls_thread_create (&thread_parms, tls_multi, &udp_socket,
+		       options->nice_work, options->mlock);
 #endif
 
   /* change scheduling priority if requested */
@@ -774,8 +835,8 @@ openvpn (const struct options *options,
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 #ifdef USE_PTHREAD
-  if (tls_multi && tls_thread_socket > fm)
-    fm = tls_thread_socket;
+  if (tls_multi && TLS_THREAD_SOCKET (&thread_parms) > fm)
+    fm = TLS_THREAD_SOCKET (&thread_parms);
 #else
   /* initialize tmp_int optimization that limits the number of times we call
      tls_multi_process in the main event loop */
@@ -837,7 +898,6 @@ openvpn (const struct options *options,
 	    }
 	}
 #endif
-
 
       current = time (NULL);
 
@@ -1047,7 +1107,7 @@ openvpn (const struct options *options,
 	    FD_SET (tuntap->fd, &reads);
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
 	  if (tls_multi)
-	    FD_SET (tls_thread_socket, &reads);
+	    FD_SET (TLS_THREAD_SOCKET (&thread_parms), &reads);
 #endif
 	}
 
@@ -1075,8 +1135,10 @@ openvpn (const struct options *options,
       /*
        * Wait for something to happen.
        */
-      if (!signal_received)
+      if (!signal_received) {
 	stat = select (fm, &reads, &writes, NULL, tv);
+	check_status (stat, "select", NULL);
+      }
 
       /* current should always be a reasonably up-to-date timestamp */
       current = time (NULL);
@@ -1090,8 +1152,8 @@ openvpn (const struct options *options,
 	  if (signal_received == SIGUSR2)
 	    {
 	      msg (M_INFO, "Current OpenVPN Statistics:");
-	      msg (M_INFO, " tun/tap read bytes:   " counter_format, tun_read_bytes);
-	      msg (M_INFO, " tun/tap write bytes:  " counter_format, tun_write_bytes);
+	      msg (M_INFO, " TUN/TAP read bytes:   " counter_format, tun_read_bytes);
+	      msg (M_INFO, " TUN/TAP write bytes:  " counter_format, tun_write_bytes);
 	      msg (M_INFO, " UDP read bytes:       " counter_format, udp_read_bytes);
 	      msg (M_INFO, " UDP write bytes:      " counter_format, udp_write_bytes);
 #ifdef USE_LZO
@@ -1124,11 +1186,9 @@ openvpn (const struct options *options,
 	  break;
 	}
 
-#if defined(USE_CRYPTO) && defined(USE_SSL)
       if (!stat) /* timeout? */
 	continue;
-#endif
-      check_status (stat, "select", NULL);
+
       if (stat > 0)
 	{
 	  /* Incoming data on UDP port */
@@ -1194,7 +1254,7 @@ openvpn (const struct options *options,
 			{
 #ifdef USE_PTHREAD
 			  /* tell TLS thread a packet is waiting */
-			  if (tls_thread_process (tls_thread_socket) == -1)
+			  if (tls_thread_process (&thread_parms) == -1)
 			    {
 			      msg (M_WARN, "TLS thread is not responding, exiting (1)");
 			      signal_received = 0;
@@ -1258,12 +1318,12 @@ openvpn (const struct options *options,
 
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
 	  /* Incoming data from TLS background thread */
-	  else if (tls_multi && FD_ISSET (tls_thread_socket, &reads))
+	  else if (tls_multi && FD_ISSET (TLS_THREAD_SOCKET (&thread_parms), &reads))
 	    {
 	      int s;
 	      ASSERT (!to_udp.len);
 
-	      s = tls_thread_rec_buf (tls_thread_socket, &tt_ret, true);
+	      s = tls_thread_rec_buf (&thread_parms, &tt_ret, true);
 	      if (s == 1)
 		{
 		  /*
@@ -1291,7 +1351,7 @@ openvpn (const struct options *options,
 	  else if (tuntap->fd >= 0 && FD_ISSET (tuntap->fd, &reads))
 	    {
 	      /*
-	       * Setup for read() call on tun/tap device.
+	       * Setup for read() call on TUN/TAP device.
 	       */
 	      ASSERT (!to_udp.len);
 	      buf = read_tun_buf;
@@ -1383,7 +1443,7 @@ openvpn (const struct options *options,
 	  else if (tuntap->fd >= 0 && FD_ISSET (tuntap->fd, &writes))
 	    {
 	      /*
-	       * Set up for write() call to tun/tap
+	       * Set up for write() call to TUN/TAP
 	       * device.
 	       */
 	      ASSERT (to_tun.len > 0);
@@ -1394,7 +1454,7 @@ openvpn (const struct options *options,
 	      if (to_tun.len <= MAX_RW_SIZE_TUN(&frame))
 		{
 		  /*
-		   * Write to tun/tap device.
+		   * Write to TUN/TAP device.
 		   */
 		  const int size = write_tun (tuntap, BPTR (&to_tun), BLEN (&to_tun));
 		  if (size > 0)
@@ -1407,7 +1467,7 @@ openvpn (const struct options *options,
 		      /* Did we write a different size packet than we intended? */
 		      if (size != BLEN (&to_tun))
 			msg (D_LINK_ERRORS,
-			     "tun/tap packet was fragmented on write to %s (tried=%d,actual=%d)",
+			     "TUN/TAP packet was fragmented on write to %s (tried=%d,actual=%d)",
 			     tuntap->actual,
 			     BLEN (&to_tun),
 			     size);
@@ -1446,6 +1506,7 @@ openvpn (const struct options *options,
 		   */
 		  int size;
 		  ASSERT (addr_defined (&to_udp_addr));
+
 		  /* In gremlin-test mode, we may choose to drop this packet */
 		  if (!options->gremlin || ask_gremlin())
 		    {
@@ -1490,7 +1551,7 @@ openvpn (const struct options *options,
 		      /* Did we write a different size packet than we intended? */
 		      if (size != BLEN (&to_udp))
 			msg (D_LINK_ERRORS,
-			     "UDP packet was fragmented on write to %s (tried=%d,actual=%d)",
+			     "UDP packet was truncated/expanded on write to %s (tried=%d,actual=%d)",
 			     print_sockaddr (&to_udp_addr),
 			     BLEN (&to_udp),
 			     size);
@@ -1532,7 +1593,7 @@ openvpn (const struct options *options,
     
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
   if (tls_multi)
-    tls_thread_close (tls_thread_socket);
+    tls_thread_close (&thread_parms);
 #endif
 
   free_buf (&read_udp_buf);
@@ -1582,14 +1643,14 @@ openvpn (const struct options *options,
     CLEAR (udp_socket_addr->local);
 
   /*
-   * Close tun/tap device
+   * Close TUN/TAP device
    */
   if ( !(signal_received == SIGUSR1 && options->persist_tun) )
     {
       char* tuntap_actual = (char *) gc_malloc (sizeof (tuntap->actual));
       strcpy (tuntap_actual, tuntap->actual);
 
-      msg (M_INFO, "Closing tun/tap device");
+      msg (M_INFO, "Closing TUN/TAP device");
       close_tun (tuntap);
 
       /* Run the down script -- note that it will run at reduced
@@ -1714,13 +1775,13 @@ main (int argc, char *argv[])
 #endif /* USE_CRYPTO */
 
     /*
-     * Persistent tun/tap device management mode?
+     * Persistent TUN/TAP device management mode?
      */
 #ifdef TUNSETPERSIST
     if (options.persist_config)
       {
 	/* sanity check on options for --mktun or --rmtun */
-	notnull (options.dev, "tun/tap device (--dev)");
+	notnull (options.dev, "TUN/TAP device (--dev)");
 	if (options.remote || options.ifconfig_local || options.ifconfig_remote
 #ifdef USE_CRYPTO
 	    || options.shared_secret_file
@@ -1747,7 +1808,7 @@ main (int argc, char *argv[])
 	}
       else
 #endif
-	notnull (options.dev, "tun/tap device (--dev)");
+	notnull (options.dev, "TUN/TAP device (--dev)");
 
       /*
        * Sanity check on daemon/inetd modes
@@ -1874,14 +1935,7 @@ main (int argc, char *argv[])
       set_mute_cutoff (options.mute);
 
       /* Become a daemon if requested */
-      if (first_time)
-	{
-	  if (options.daemon)
-	    {
-	      ASSERT (!options.inetd);
-	      become_daemon (options.cd_dir);
-	    }
-	}
+      possibly_become_daemon (0, &options, first_time);
 
       /* show all option settings */
       show_settings (&options);

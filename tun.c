@@ -44,8 +44,9 @@
 bool
 is_dev_type (const char *dev, const char *dev_type, const char *match_type)
 {
-  ASSERT (dev);
   ASSERT (match_type);
+  if (!dev)
+    return false;
   if (dev_type)
     return !strcmp (dev_type, match_type);
   else
@@ -233,7 +234,7 @@ do_ifconfig (const char *dev, const char *dev_type,
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "FreeBSD ifconfig failed", true);
 #else
-      msg (M_FATAL, "Sorry, but I don't know how to do 'ifconfig' commands on this operating system.  You should ifconfig your tun/tap device manually or use an --up script.");
+      msg (M_FATAL, "Sorry, but I don't know how to do 'ifconfig' commands on this operating system.  You should ifconfig your TUN/TAP device manually or use an --up script.");
 #endif
     }
 }
@@ -305,7 +306,7 @@ open_tun_generic (const char *dev, const char *dev_node, const char *dev_name,
 		  msg (D_READ_WRITE | M_ERRNO, "Tried opening %s (failed)", tunname);
 		}
 	      if (!dynamic_opened)
-		msg (M_FATAL, "Cannot allocate tun/tap dev dynamically");
+		msg (M_FATAL, "Cannot allocate TUN/TAP dev dynamically");
 	    }
 	  /*
 	   * explicit unit number specified
@@ -319,12 +320,12 @@ open_tun_generic (const char *dev, const char *dev_node, const char *dev_name,
       if (!dynamic_opened)
 	{
 	  if ((tt->fd = open (tunname, O_RDWR)) < 0)
-	    msg (M_ERR, "Cannot open tun/tap dev %s", tunname);
+	    msg (M_ERR, "Cannot open TUN/TAP dev %s", tunname);
 	}
 
       set_nonblock (tt->fd);
       set_cloexec (tt->fd); /* don't pass fd to scripts */
-      msg (M_INFO, "tun/tap device %s opened", tunname);
+      msg (M_INFO, "TUN/TAP device %s opened", tunname);
 
       /* tt->actual is passed to up and down scripts and used as the ifconfig dev name */
       strncpynt (tt->actual, (dynamic_opened ? dynamic_name : dev), sizeof (tt->actual));
@@ -374,10 +375,14 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node,
     }
   else
     {
-      if (!dev_node)
-	dev_node = "/dev/net/tun";
-      if ((tt->fd = open (dev_node, O_RDWR)) < 0)
-	msg (M_ERR, "Cannot open tun/tap dev %s", dev_node);
+      const char *node = dev_node;
+      if (!node)
+	node = "/dev/net/tun";
+      if ((tt->fd = open (node, O_RDWR)) < 0)
+	{
+	  msg (M_WARN | M_ERRNO, "Note: Cannot open TUN/TAP dev %s", node);
+	  goto linux_2_2_fallback;
+	}
 
       CLEAR (ifr);
       if (!tt->ipv6)
@@ -400,11 +405,14 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node,
 	strncpynt (ifr.ifr_name, dev, IFNAMSIZ);
 
       if (ioctl (tt->fd, TUNSETIFF, (void *) &ifr) < 0)
-	msg (M_WARN, "Cannot ioctl TUNSETIFF %s", dev);
+	{
+	  msg (M_WARN | M_ERRNO, "Note: Cannot ioctl TUNSETIFF %s", dev);
+	  goto linux_2_2_fallback;
+	}
 
       set_nonblock (tt->fd);
       set_cloexec (tt->fd);
-      msg (M_INFO, "tun/tap device %s opened", ifr.ifr_name);
+      msg (M_INFO, "TUN/TAP device %s opened", ifr.ifr_name);
       strncpynt (tt->actual, ifr.ifr_name, sizeof (tt->actual));
 
  
@@ -417,7 +425,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node,
 	  int		fd;
  
 	  if ((fd = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
-	    msg (M_WARN, "Cannot open control_fd", dev);
+	    msg (M_WARN, "Cannot open control_fd");
 	  else
 	    {
 	      strncpynt (r.ifr_name, tt->actual, IFNAMSIZ);
@@ -432,6 +440,12 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node,
 	    }
 	}
     }
+  return;
+
+ linux_2_2_fallback:
+  msg (M_INFO, "Note: Attempting fallback to kernel 2.2 TUN/TAP interface");
+  close_tun_generic (tt);
+  open_tun_generic (dev, dev_node, dev_name, ipv6, false, true, tt);
 }
 
 #else
@@ -625,7 +639,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node,
   set_cloexec (tt->fd);
   set_cloexec (tt->ip_fd);
 
-  msg (M_INFO, "tun/tap device %s opened", tt->actual);
+  msg (M_INFO, "TUN/TAP device %s opened", tt->actual);
  
   if (dev_name)
     msg (M_WARN, "Cannot rename dev %s to %s", dev, dev_name);
@@ -645,13 +659,13 @@ close_tun (struct tuntap* tt)
       strncpynt (ifr.ifr_name, tt->actual, sizeof (ifr.ifr_name));
 
      if (ioctl (tt->ip_fd, SIOCGIFFLAGS, &ifr) < 0)
-	msg (M_ERR, "Can't get iface flags");
+	msg (M_WARN | M_ERRNO, "Can't get iface flags");
 
       if (ioctl (tt->ip_fd, SIOCGIFMUXID, &ifr) < 0)
-	msg (M_ERR, "Can't get multiplexor id");
+	msg (M_WARN | M_ERRNO, "Can't get multiplexor id");
 
       if (ioctl (tt->ip_fd, I_PUNLINK, ifr.ifr_ip_muxid) < 0)
-	msg (M_ERR, "Can't unlink interface");
+	msg (M_WARN | M_ERRNO, "Can't unlink interface");
 
       close (tt->ip_fd);
       close (tt->fd);
@@ -680,6 +694,10 @@ read_tun (struct tuntap* tt, uint8_t *buf, int len)
 }
 
 #elif defined(TARGET_OPENBSD)
+
+#if !defined(HAVE_READV) || !defined(HAVE_WRITEV)
+#error openbsd build requires readv & writev library functions
+#endif
 
 void
 open_tun (const char *dev, const char *dev_type, const chart *dev_name,

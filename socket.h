@@ -29,7 +29,9 @@
 #include "buffer.h"
 #include "common.h"
 #include "error.h"
+#include "mtu.h"
 
+/* persistant across SIGUSR1s */
 struct udp_socket_addr
 {
   struct sockaddr_in local;
@@ -109,14 +111,14 @@ addr_match (const struct sockaddr_in *a1, const struct sockaddr_in *a2)
 extern unsigned int x_cs_info_level;
 extern unsigned int x_cs_verbose_level;
 
-void reset_check_status ();
+void reset_check_status (void);
 void set_check_status (unsigned int info_level, unsigned int verbose_level);
 void x_check_status (int status, const char *description, struct udp_socket *sock);
 
 static inline void
 check_status (int status, const char *description, struct udp_socket *sock)
 {
-  if ((status < 0 /*&& errno != EAGAIN*/) || check_debug_level (x_cs_verbose_level))
+  if (status < 0 || check_debug_level (x_cs_verbose_level))
     x_check_status (status, description, sock);
 }
 

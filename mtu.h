@@ -80,7 +80,7 @@ struct frame_dynamic {
 # define MTU_SET_TO_MAX -2
   int mtu_initial;
 
-  /* derived from control parameters, set by frame_set_mtu_dynamic_constraints */
+  /* derived from control parameters, set by frame_dynamic_finalize */
   int mtu_min;
   int mtu_max;
   int mtu;
@@ -109,7 +109,7 @@ struct frame {
 
   /*
    * extra_tun: max number of bytes in excess of tun mtu size that we might read
-   * or write from tun/tap device.
+   * or write from TUN/TAP device.
    */
   int extra_tun;
 
@@ -163,7 +163,7 @@ struct frame {
 
 /*
  * These values are used as maximum size constraints
- * on read() or write() from tun/tap device or UDP port.
+ * on read() or write() from TUN/TAP device or UDP port.
  */
 #define MAX_RW_SIZE_TUN(f)       (PAYLOAD_SIZE(f))
 #define MAX_RW_SIZE_UDP(f)       (EXPANDED_SIZE(f))
@@ -197,8 +197,18 @@ void frame_print (const struct frame *frame, int level, const char *prefix);
 void set_mtu_discover_type (int sd, int mtu_type);
 int translate_mtu_discover_type_name (const char *name);
 
+/*
+ * EXTENDED_SOCKET_ERROR_CAPABILITY functions -- print extra error info
+ * on socket errors, such as PMTU size.  As of 2003.05.11, only works
+ * on Linux 2.4.
+ */
+
+#if EXTENDED_SOCKET_ERROR_CAPABILITY
+
 void set_sock_extended_error_passing (int sd);
-int format_extended_socket_error (int fd, struct buffer *out);
+const char *format_extended_socket_error (int fd, int* mtu);
+
+#endif
 
 /*
  * Inline functions

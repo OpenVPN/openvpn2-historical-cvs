@@ -339,7 +339,8 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	    }
 	  else
 	    {
-	      msg (D_CRYPT_ERRORS, "%s: bad packet ID (may be a replay): %s", error_prefix, packet_id_net_print (&pin));
+	      msg (D_CRYPT_ERRORS, "%s: bad packet ID (may be a replay): %s",
+		   error_prefix, packet_id_net_print (&pin, true));
 	      goto error_exit;
 	    }
 	}

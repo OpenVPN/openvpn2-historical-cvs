@@ -55,25 +55,28 @@
 #define D_SHOW_KEYS          LOGLEV(6, 14, 0)   /* show data channel encryption keys */
 
 #define D_HANDSHAKE_VERBOSE  LOGLEV(7, 15, 0)   /* show detailed description of each handshake */
+#define D_TLS_DEBUG_MED      LOGLEV(7, 16, 0)   /* medium frequency info from tls_session routines */
 
 #define D_TLS_DEBUG          LOGLEV(8, 20, M_DEBUG)  /* show detailed info from TLS routines */
 #define D_CRYPTO_DEBUG       LOGLEV(8, 21, M_DEBUG)  /* show detailed info from crypto.c routines */
 #define D_COMP               LOGLEV(8, 22, M_DEBUG)  /* show compression info */
 #define D_READ_WRITE         LOGLEV(8, 23, M_DEBUG)  /* verbose account of all tun/UDP reads/writes/opens */
-#define D_REL_DEBUG          LOGLEV(8, 24, M_DEBUG)  /* show detailed info from reliable routines */
-#define D_PACKET_CONTENT     LOGLEV(8, 25, M_DEBUG)  /* show before/after encryption packet content */
-#define D_GREMLIN_VERBOSE    LOGLEV(8, 26, M_DEBUG)  /* show verbose info from gremlin module */
-#define D_TLS_NO_SEND_KEY    LOGLEV(8, 27, M_DEBUG)  /* show when no data channel send-key exists */
-#define D_THREAD_DEBUG       LOGLEV(8, 28, M_DEBUG)  /* show pthread debug information */
-#define D_REL_LOW            LOGLEV(8, 29, M_DEBUG)  /* show low frequency info from reliable layer */
-#define D_PID_DEBUG          LOGLEV(8, 30, M_DEBUG)  /* show packet-id debugging info */
-#define D_PID_PERSIST_DEBUG  LOGLEV(8, 31, M_DEBUG)  /* show packet-id persist debugging info */
-
-#define D_FRAG_DEBUG         LOGLEV(4, 8, M_DEBUG)  /* show fragment debugging info */
-#warning D_FRAG_DEBUG
+#define D_PACKET_CONTENT     LOGLEV(8, 24, M_DEBUG)  /* show before/after encryption packet content */
+#define D_TLS_NO_SEND_KEY    LOGLEV(8, 25, M_DEBUG)  /* show when no data channel send-key exists */
+#define D_THREAD_DEBUG       LOGLEV(8, 26, M_DEBUG)  /* show pthread debug information */
+#define D_REL_LOW            LOGLEV(8, 27, M_DEBUG)  /* show low frequency info from reliable layer */
+#define D_PID_DEBUG          LOGLEV(8, 38, M_DEBUG)  /* show packet-id debugging info */
+#define D_PID_PERSIST_DEBUG  LOGLEV(8, 29, M_DEBUG)  /* show packet-id persist debugging info */
+#define D_UDP_RW_VERBOSE     LOGLEV(8, 30, M_DEBUG)  /* show UDP reads/writes with greater verbosity */
 
 #define D_SHAPER             LOGLEV(9, 40, M_DEBUG)  /* show traffic shaper info */
 
 #define D_OPENSSL_LOCK       LOGLEV(10, 41, M_DEBUG) /* show OpenSSL locks */
 
+// DEBUGGING CHANGEME
+#define D_GREMLIN_VERBOSE    LOGLEV(5, 50, M_DEBUG)  /* show verbose info from gremlin module */
+#define D_FRAG_DEBUG         LOGLEV(5, 51, M_DEBUG)  /* show fragment debugging info */
+#define D_REL_DEBUG          LOGLEV(5, 52, M_DEBUG)  /* show detailed info from reliable routines */
+#define D_UDP_RW             LOGLEV(6, 53, M_DEBUG)  /* show UDP reads/writes */
+#define D_INTERVAL           LOGLEV(7, 54, M_DEBUG)  /* show interval.h debugging info */
 #endif

@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [1.3.2.20-MTU-6], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [1.3.2.20-MTU-7], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -57,6 +57,12 @@ AC_ARG_ENABLE(strict,
    [  --enable-strict         Enable strict compiler warnings],
    [STRICT="$enableval"],
    [STRICT="no"]
+)
+
+AC_ARG_ENABLE(strict-options,
+   [  --enable-strict-options Enable strict options check between peers],
+   [STRICT_OPTIONS="$enableval"],
+   [STRICT_OPTIONS="no"]
 )
 
 AC_ARG_WITH(ssl-headers,
@@ -381,6 +387,11 @@ fi
 dnl enable strict compiler warnings
 if test "$STRICT" = "yes"; then
    CFLAGS="$CFLAGS -Wall -W -Wpointer-arith -Wsign-compare -Winline"
+fi
+
+dnl enable strict options check between peers
+if test "$STRICT_OPTIONS" = "yes"; then
+   AC_DEFINE(STRICT_OPTIONS_CHECK, 1, [Enable strict options check between peers])
 fi
 
 AC_OUTPUT(Makefile openvpn.spec)

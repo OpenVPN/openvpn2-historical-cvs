@@ -53,3 +53,9 @@ const char *system_error_message (int stat);
 
 /* run system() with error check */
 void system_check (const char* command, const char* error_message, bool fatal);
+
+/* init random() function, only used as source for weak random numbers */
+void init_random_seed();
+
+/* format a time_t as ascii, or use current time if 0 */
+const char* time_string (time_t t);

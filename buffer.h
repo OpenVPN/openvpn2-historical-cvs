@@ -42,6 +42,7 @@ struct buffer
 #define BLAST(buf) ((buf)->len ? BPTR(buf) + (buf)->len - 1 : NULL)
 #define BLEN(buf)  ((buf)->len)
 #define BDEF(buf)  ((buf)->data != NULL)
+#define BSTR(buf)  (char *)BPTR(buf)
 
 struct buffer alloc_buf (size_t size);
 struct buffer clone_buf (const struct buffer* buf);
@@ -116,6 +117,20 @@ has_digit (const char* src)
  * printf append to a buffer with overflow check
  */
 void buf_printf (struct buffer *buf, char *format, ...);
+
+/*
+ * remove trailing newline
+ */
+static inline void
+buf_chomp (struct buffer *buf)
+{
+  uint8_t *cp = BLAST(buf);
+  if (cp && *cp == '\n')
+    {
+      *cp = '\0'; 
+      --buf->len;
+    }
+}
 
 /*
  * write a string to the end of a buffer that was

@@ -71,8 +71,9 @@ signal_handler_exit (int signum)
  */
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 #define TLS_MODE (tls_multi != NULL)
+#define PROTO_DUMP_FLAGS (check_debug_level (D_UDP_RW_VERBOSE) ? (PD_SHOW_DATA|PD_VERBOSE) : 0)
 #define PROTO_DUMP(buf) protocol_dump(buf, \
-				      PD_SHOW_DATA | \
+				      PROTO_DUMP_FLAGS | \
 				      (tls_multi ? PD_TLS : 0) | \
 				      (options->tls_auth_file ? ks->key_type.hmac_length : 0) \
 				      )
@@ -753,8 +754,7 @@ openvpn (const struct options *options,
 #else
   /* initialize tmp_int optimization that limits the number of times we call
      tls_multi_process in the main event loop */
-  CLEAR (tmp_int);
-  interval_trigger (&tmp_int, current);
+  interval_init (&tmp_int, TLS_MULTI_HORIZON, TLS_MULTI_REFRESH);
 #endif
 #endif
 
@@ -791,21 +791,28 @@ openvpn (const struct options *options,
        */
       if (tls_multi)
 	{
-	  time_t t = 0;
+	  interval_t wakeup = 0;
 
 	  if (interval_test (&tmp_int, current))
 	    {
-	      if (tls_multi_process (tls_multi, &to_udp, &to_udp_addr, &udp_socket, &t, current))
-		interval_trigger(&tmp_int, current);
-	    }
-	  interval_set_timeout (&tmp_int, current, &t);
+	      if (tls_multi_process (tls_multi, &to_udp, &to_udp_addr, &udp_socket, &wakeup, current))
+		interval_action (&tmp_int, current);
 
-	  tv = &timeval;
-	  timeval.tv_sec = t;
-	  timeval.tv_usec = 0;
-	  free_to_udp = false;
+	      interval_future_trigger (&tmp_int, wakeup, current);
+	      free_to_udp = false;
+	    }
+
+	  interval_schedule_wakeup (&tmp_int, current, &wakeup);
+
+	  if (wakeup)
+	    {
+	      timeval.tv_sec = wakeup;
+	      timeval.tv_usec = 0;
+	      tv = &timeval;
+	    }
 	}
 #endif
+
 
       current = time (NULL);
 
@@ -1118,7 +1125,7 @@ openvpn (const struct options *options,
 	      }
 
 	      /* log incoming packet */
-	      msg (D_PACKET_CONTENT, "UDP READ [%d] from %s: %s",
+	      msg (D_UDP_RW, "UDP READ [%d] from %s: %s",
 		   BLEN (&buf), print_sockaddr (&from), PROTO_DUMP (&buf));
 
 	      /*
@@ -1158,7 +1165,7 @@ openvpn (const struct options *options,
 			      break;
 			    }
 #else
-			  interval_trigger(&tmp_int, current);
+			  interval_action (&tmp_int, current);
 #endif /* USE_PTHREAD */
 			  /* reset packet received timer if TLS packet */
 			  if (options->ping_rec_timeout)
@@ -1447,7 +1454,7 @@ openvpn (const struct options *options,
 		    }
 
 		  /* Log packet send */
-		  msg (D_PACKET_CONTENT, "UDP WRITE [%d] to %s: %s",
+		  msg (D_UDP_RW, "UDP WRITE [%d] to %s: %s",
 		       BLEN (&to_udp), print_sockaddr (&to_udp_addr), PROTO_DUMP (&to_udp));
 		}
 	      else
@@ -1582,13 +1589,8 @@ main (int argc, char *argv[])
   bool first_time = true;
   int sig;
 
-  /*
-   * Initialize random number seed.  random() is only used when "weak" random numbers
-   * are acceptable.  OpenSSL routines are always used when cryptographically strong
-   * random numbers are required.
-   */
-  srandom ((unsigned int)time(NULL));
-
+  init_random_seed();                  /* init random() function, only used as
+					  source for weak random numbers */
   error_reset ();                      /* initialize error.c */
   reset_check_status ();               /* initialize status check code in socket.c */
 
@@ -1866,6 +1868,11 @@ main (int argc, char *argv[])
 #endif
 
  exit:
+
+#if defined(MEASURE_TLS_HANDSHAKE_STATS) && defined(USE_CRYPTO) && defined(USE_SSL)
+  show_tls_handshake_stats();
+#endif
+
   /* pop our garbage collection level */
   gc_free_level (gc_level);
 

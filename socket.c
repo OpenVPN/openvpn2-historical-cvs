@@ -364,5 +364,5 @@ print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* sep
 
       buf_printf (&out, "%d", port);
     }
-  return (char *)out.data;
+  return BSTR (&out);
 }

@@ -265,7 +265,7 @@ init_options (struct options *o)
   o->packet_id = true;
   o->iv = true;
 #ifdef USE_SSL
-  o->tls_timeout = 5;
+  o->tls_timeout = 2;
   o->renegotiate_seconds = 3600;
   o->handshake_window = 60;
   o->transition_window = 3600;
@@ -419,8 +419,7 @@ options_string (const struct options *o)
 {
   struct buffer out = alloc_buf (256);
   buf_printf (&out, "V1");
-#if 1
-#warning backward incompatibility
+#ifdef STRICT_OPTIONS_CHECK
   buf_printf (&out, " --dev-type %s", dev_type_string (o->dev, o->dev_type));
   if (o->udp_mtu_defined)
     buf_printf (&out, " --udp-mtu %d", o->udp_mtu);
@@ -444,10 +443,26 @@ options_string (const struct options *o)
 #endif
   if (o->mtu_dynamic)
     buf_printf (&out, " --mtu-dynamic");
-  return out.data;
+  return BSTR (&out);
 }
 
 #endif
+
+/*
+ * Compare option strings for equality.
+ * If the first two chars of the strings differ, it means that
+ * we are looking at different versions of the options string,
+ * therefore don't compare them and return true.
+ */
+bool options_cmp_equal (const char *s1, const char *s2, size_t n)
+{
+#ifndef STRICT_OPTIONS_CHECK
+  if (strncmp (s1, s2, 2))
+    return true;
+  else
+#endif
+    return !strncmp (s1, s2, n);
+}
 
 static char *
 comma_to_space (const char *src)

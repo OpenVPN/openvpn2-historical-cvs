@@ -32,6 +32,11 @@
 typedef unsigned long counter_type;
 
 /*
+ * Time intervals
+ */
+typedef int interval_t;
+
+/*
  * Printf formats for special types
  */
 #define counter_format        "%10lu"

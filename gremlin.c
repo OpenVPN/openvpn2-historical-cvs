@@ -40,14 +40,16 @@
 
 #if 1
 
-#define CORRUPT_ENABLE
-#define UP_DOWN_ENABLE
+// CHANGEME
+
+//#define CORRUPT_ENABLE
+//#define UP_DOWN_ENABLE
 #define DROP_ENABLE
 
 /*
  * Probability that we will drop a packet is 1 / DROP_FREQ
  */
-#define DROP_FREQ 50
+#define DROP_FREQ 25 // CHANGEME
 
 /*
  * Probability that we will corrupt a packet is 1 / CORRUPT_FREQ
@@ -146,7 +148,7 @@ ask_gremlin()
 #ifdef DROP_ENABLE
   if (up && flip (DROP_FREQ))
     {
-      msg (D_GREMLIN_VERBOSE, "GREMLIN: RANDOM PACKET DROP");
+      msg (D_GREMLIN_VERBOSE, "GREMLIN: Random packet drop");
       return false;
     }
 #endif
@@ -188,7 +190,7 @@ void corrupt_gremlin(struct buffer* buf) {
 		buf->len -= roll (0, buf->len - 1);
 		break;
 	      }
-	      msg (D_GREMLIN_VERBOSE, "GREMLIN: PACKET CORRUPTION, method=%d", method);
+	      msg (D_GREMLIN_VERBOSE, "GREMLIN: Packet Corruption, method=%d", method);
 	    }
 	  else
 	    break;

@@ -182,3 +182,5 @@ char *options_string (const struct options *o);
 void parse_argv (struct options* options, int argc, char *argv[]);
 
 bool string_defined_equal (const char *s1, const char *s2);
+
+int options_cmp_equal (const char *s1, const char *s2, size_t n);

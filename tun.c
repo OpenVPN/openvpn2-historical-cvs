@@ -1217,7 +1217,6 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   char device_path[256];
   const char *device_guid = NULL;
   DWORD len;
-  ULONG mymtu = mtu;
 
   //clear_tuntap (tt);
 
@@ -1273,24 +1272,13 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
     msg (M_ERR, "CreateFile failed on TAP device: %s", device_path);
 
 #if 0
-  /* it may be too late at this point to set the MTU */
-  if (!DeviceIoControl (tt->hand, TAP_IOCTL_SET_MTU,
-			&mymtu, sizeof (mymtu),
-			&mymtu, sizeof (mymtu), &len, 0))
-    msg (M_ERR, "DeviceIoControl TAP_IOCTL_SET_MTU failed");
-#endif
-
-#if 0
-  /* The CIPE service needs these, but we don't */
-  if (!DeviceIoControl (tt->hand, TAP_IOCTL_GET_MAC,
-			tt->mac, sizeof (tt->mac),
-			tt->mac, sizeof (tt->mac), &len, 0))
-    msg (M_ERR, "DeviceIoControl TAP_IOCTL_GET_MAC failed");
-
-  if (!DeviceIoControl (tt->hand, TAP_IOCTL_GET_LASTMAC,
-			tt->next_mac, sizeof (tt->next_mac),
-			tt->next_mac, sizeof (tt->next_mac), &len, 0))
-    msg (M_ERR, "DeviceIoControl TAP_IOCTL_GET_LASTMAC failed");
+  {
+    ULONG stats[4] = { 100, 200, 300, 400 };
+    if (!DeviceIoControl (tt->hand, TAP_IOCTL_SET_STATISTICS,
+			  &stats, sizeof (stats),
+			  &stats, sizeof (stats), &len, 0))
+      msg (M_ERR, "DeviceIoControl TAP_IOCTL_SET_STATISTICS");
+  }
 #endif
 
   msg (M_INFO, "TAP-WIN32 device [%s] opened: %s", dev_node, device_path);

@@ -1046,8 +1046,8 @@ AdapterTransmit (IN NDIS_HANDLE p_AdapterContext, IN PNDIS_PACKET p_Packet,
   while (QueueCount (&l_Extension->m_PacketQueue)
 	 && QueueCount (&l_Extension->m_IrpQueue))
     {
-      CompleteIRP (QueuePop (&l_Extension->m_IrpQueue), l_Extension,
-		   IO_NETWORK_INCREMENT);
+      CompleteIRP (l_Adapter, QueuePop (&l_Extension->m_IrpQueue),
+		   l_Extension, IO_NETWORK_INCREMENT);
     }
 
   KeLowerIrql (OldIrql);
@@ -1095,19 +1095,6 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
       {
 	switch (l_IrpSp->Parameters.DeviceIoControl.IoControlCode)
 	  {
-	  case TAP_IOCTL_GET_LASTMAC:
-	    {
-	      if (l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength >=
-		  sizeof (g_MAC))
-		{
-		  NdisMoveMemory (p_IRP->AssociatedIrp.SystemBuffer, g_MAC,
-				  sizeof (g_MAC));
-		  p_IRP->IoStatus.Information = sizeof (g_MAC);
-		}
-
-	      break;
-	    }
-
 	  case TAP_IOCTL_GET_MAC:
 	    {
 	      if (l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength >=
@@ -1121,6 +1108,22 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 	      break;
 	    }
 
+#ifdef NEED_TAP_IOCTL_GET_LASTMAC
+	  case TAP_IOCTL_GET_LASTMAC:
+	    {
+	      if (l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength >=
+		  sizeof (g_MAC))
+		{
+		  NdisMoveMemory (p_IRP->AssociatedIrp.SystemBuffer, g_MAC,
+				  sizeof (g_MAC));
+		  p_IRP->IoStatus.Information = sizeof (g_MAC);
+		}
+
+	      break;
+	    }
+#endif
+
+#ifdef NEED_TAP_IOCTL_SET_STATISTICS
 	  case TAP_IOCTL_SET_STATISTICS:
 	    {
 	      if (l_IrpSp->Parameters.DeviceIoControl.InputBufferLength >=
@@ -1139,6 +1142,7 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 
 	      break;
 	    }
+#endif
 
 	  default:
 	    {
@@ -1205,7 +1209,7 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		// Immediate service
 		TapPacketPointer l_PacketBuffer;
 		l_PacketBuffer = QueuePeek (&l_Extension->m_PacketQueue);
-		l_Status = CompleteIRP (p_IRP, l_Extension, IO_NO_INCREMENT);
+		l_Status = CompleteIRP (l_Adapter, p_IRP, l_Extension, IO_NO_INCREMENT);
 	      }
 	    else if (QueuePush (&l_Extension->m_IrpQueue, p_IRP) == p_IRP)
 	      {
@@ -1277,6 +1281,9 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		NdisMEthIndicateReceiveComplete (l_Adapter->
 						 m_MiniportAdapterHandle);
 		p_IRP->IoStatus.Status = l_Status = STATUS_SUCCESS;
+#ifndef NEED_TAP_IOCTL_SET_STATISTICS
+		++l_Adapter->m_Rx;
+#endif
 	      }
 	      __except (EXCEPTION_EXECUTE_HANDLER)
 	      {
@@ -1381,8 +1388,8 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 //                               IRP Management Routines
 //====================================================================
 NTSTATUS
-CompleteIRP (IN PIRP p_IRP, IN TapExtensionPointer p_Extension,
-	     IN CCHAR PriorityBoost)
+CompleteIRP (TapAdapterPointer p_Adapter, IN PIRP p_IRP,
+	     IN TapExtensionPointer p_Extension, IN CCHAR PriorityBoost)
 {
   NTSTATUS l_Status = STATUS_UNSUCCESSFUL;
   TapPacketPointer l_PacketBuffer;
@@ -1429,7 +1436,12 @@ CompleteIRP (IN PIRP p_IRP, IN TapExtensionPointer p_Extension,
 	}
 
       if (l_Status == STATUS_SUCCESS)
-	IoCompleteRequest (p_IRP, PriorityBoost);
+	{
+	  IoCompleteRequest (p_IRP, PriorityBoost);
+#ifndef NEED_TAP_IOCTL_SET_STATISTICS
+	  ++p_Adapter->m_Tx;
+#endif
+	}
       else
 	IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
     }

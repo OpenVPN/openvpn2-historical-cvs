@@ -225,7 +225,7 @@ VOID ServiceStart (DWORD dwArgc, LPTSTR *lpszArgv)
 
     /* get path to log directory */
     QUERY_REG_STRING ("log_dir", log_dir);
-y
+
     /* get priority for spawned OpenVPN subprocesses */
     QUERY_REG_STRING ("priority", priority_string);
 

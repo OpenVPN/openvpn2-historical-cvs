@@ -31,7 +31,7 @@ SUPPORTED PLATFORMS:
   (1) Linux 2.2+
   (2) Solaris
   (3) OpenBSD 3.0+ (Comes with OpenSSL and TUN devices by default)
-  (4) Mac OS X Darwin (Experimental)
+  (4) Mac OS X Darwin
   (5) FreeBSD
   (6) NetBSD
   (7) Windows (Win 2K + XP only so far

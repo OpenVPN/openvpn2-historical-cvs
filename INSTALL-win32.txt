@@ -801,7 +801,10 @@ significant changes:
     1500 and can be changed through the adapter advanced
     properties dialog.
 
-(6) Ran the driver through the windows driver verifier
+(6) Set up the driver to keep track of its Rx/Tx stats
+    rather than depending on userspace to set them.
+
+(7) Ran the driver through the windows driver verifier
     with all testing modes enabled, including low-resource
     simulation mode.  Based on the resulting bug checks,
     I was able to fix a number
@@ -811,11 +814,11 @@ significant changes:
     NdisAllocateMemory is not checked, and making the flags
     match between NdisAllocateMemory and NdisFreeMemory calls.
 
-(7) Renamed the driver so that it shows up as a "TAP-Win32" adapter
+(8) Renamed the driver so that it shows up as a "TAP-Win32" adapter
     in the network control panel, and does not conflict with the
     CIPE driver.
 
-(8) To a certain extent, backwards compatibility with NT 4 has
+(9) To a certain extent, backwards compatibility with NT 4 has
     been sacrificed in the interest of better usability and
     stability on Win2K/XP.
 

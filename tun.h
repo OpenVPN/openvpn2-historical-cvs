@@ -53,10 +53,8 @@ struct tuntap
   struct overlapped_io reads;
   struct overlapped_io writes;
 
-#if 0
-  MACADDR mac, next_mac;
-#endif
 #else
+
   /* these macros are called in the context of the openvpn() function */
 # define TUNTAP_SET_READ(tt)   { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.reads);    }
 # define TUNTAP_SET_WRITE(tt)  { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.writes);    }

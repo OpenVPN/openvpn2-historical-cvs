@@ -26,14 +26,34 @@
 #include "buffer.h"
 #include "error.h"
 #include "mtu.h"
+#include "openvpn-win32.h"
 
 /*
  * Define a TUN/TAP dev.
  */
 
+
 struct tuntap
 {
-  int fd;
+#ifdef WIN32
+  /* these macros are called in the context of the openvpn() function */
+# define TUNTAP_SET(tt, set) { if (tt->hand != NULL)   wait_add     (&event_wait, tt->set.overlapped.hEvent); }
+# define TUNTAP_ISSET(tt, set)    (tt->hand != NULL && wait_trigger (&event_wait, tt->set.overlapped.hEvent))
+# define TUNTAP_SETMAXFD(tt)
+# define TUNTAP_READ_STAT(tt)  (tt->hand != NULL ? overlapped_io_state_ascii (&tt->reads,  "tr") : "trX")
+# define TUNTAP_WRITE_STAT(tt) (tt->hand != NULL ? overlapped_io_state_ascii (&tt->writes, "tw") : "twX")
+  HANDLE hand;
+  struct overlapped_io reads;
+  struct overlapped_io writes;
+#else
+  /* these macros are called in the context of the openvpn() function */
+# define TUNTAP_SET(tt, set)   { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.set);    }
+# define TUNTAP_ISSET(tt, set)      (tt->fd >= 0 && FD_ISSET (tt->fd, &event_wait.set))
+# define TUNTAP_SETMAXFD(tt)   { if (tt->fd >= 0)   wait_update_maxfd (&event_wait, tt->fd); }
+# define TUNTAP_READ_STAT(tt)  (TUNTAP_ISSET (tt, reads) ?  "TR" : "tr")
+# define TUNTAP_WRITE_STAT(tt) (TUNTAP_ISSET (tt, writes) ? "TW" : "tw")
+  int fd;   /* file descriptor for TUN/TAP dev */
+#endif
 #ifdef TARGET_SOLARIS
   int ip_fd;
 #endif
@@ -69,7 +89,11 @@ const char *dev_type_string (const char *dev, const char *dev_type);
 static inline bool
 tuntap_defined (const struct tuntap* tt)
 {
+#ifdef WIN32
+  return tt->hand != NULL;
+#else
   return tt->fd >= 0;
+#endif
 }
 
 static inline void

@@ -23,31 +23,52 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#ifdef WIN32
+#ifndef OPENVPN_WIN32_H
+#define OPENVPN_WIN32_H
+
+#include "basic.h"
+#include "mtu.h"
+#include "buffer.h"
+
 /*
  * Win32-specific OpenVPN code, targetted at the mingw
  * development environment.
  */
 
-#include <windows.h>
-#include <winsock.h>
-
-#define sleep(x) Sleep((x)*1000)
-
-#define SIGHUP 1
-#define SIGUSR1 10
-
-#define random rand
-#define srandom srand
-
-typedef unsigned int in_addr_t;
-typedef unsigned int ssize_t;
-
 void init_win32 (void);
 void uninit_win32 (void);
-int inet_aton (const char *name, struct in_addr *addr);
-const char *strerror_win32 (int errnum);
 
-#define openvpn_close_socket(s) closesocket(s)
-#define openvpn_errno()         GetLastError()
-#define openvpn_errno_socket()  WSAGetLastError()
-#define openvpn_strerror(e)     strerror_win32(e)
+struct overlapped_io {
+# define IOSTATE_INITIAL          0
+# define IOSTATE_QUEUED           1
+# define IOSTATE_IMMEDIATE_RETURN 2
+  int iostate;
+  OVERLAPPED overlapped;
+  DWORD size;
+  DWORD flags;
+  int status;
+  bool addr_defined;
+  struct sockaddr_in addr;
+  int addrlen;
+  struct buffer buf_init;
+  struct buffer buf;
+};
+
+void overlapped_io_init (struct overlapped_io *o,
+			 const struct frame *frame,
+			 BOOL event_state);
+
+void overlapped_io_close (struct overlapped_io *o);
+
+static inline bool
+overlapped_io_active (struct overlapped_io *o)
+{
+  return o->iostate == IOSTATE_QUEUED || o->iostate == IOSTATE_IMMEDIATE_RETURN;
+}
+
+const char *
+overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix);
+
+#endif
+#endif

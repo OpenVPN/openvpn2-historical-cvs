@@ -88,13 +88,15 @@ x_check_status (int status, const char *description, struct link_socket *sock)
       if (my_errno != EAGAIN)
 	{
 	  if (extended_msg)
-	    msg (x_cs_info_level, "%s [%s]: %s",
+	    msg (x_cs_info_level, "%s %s [%s]: %s",
 		 description,
+		 sock ? proto2ascii (sock->proto, true) : "",
 		 extended_msg,
 		 strerror_ts (my_errno));
 	  else
-	    msg (x_cs_info_level, "%s: %s",
+	    msg (x_cs_info_level, "%s %s: %s",
 		 description,
+		 sock ? proto2ascii (sock->proto, true) : "",
 		 strerror_ts (my_errno));
 	}
     }
@@ -366,6 +368,11 @@ socket_adjust_frame_parameters (struct frame *frame, struct link_socket *sock)
 void
 socket_frame_init (struct frame *frame, struct link_socket *sock)
 {
+#ifdef WIN32
+  overlapped_io_init (&sock->reads, frame, FALSE);
+  overlapped_io_init (&sock->writes, frame, TRUE);
+#endif
+
   if (link_socket_connection_oriented (sock))
     {
       sock->stream_buf_init = alloc_buf (BUF_SIZE (frame));
@@ -378,134 +385,272 @@ socket_frame_init (struct frame *frame, struct link_socket *sock)
     }
 }
 
-/* read a TCP or UDP packet from link */
-bool
-link_socket_read (struct link_socket *sock,
-		  struct buffer *buf,
-		  int maxsize,
-		  struct sockaddr_in *from)
+#ifdef WIN32
+
+int
+socket_recv_queue (struct link_socket *sock, int maxsize)
 {
-  if (sock->proto == PROTO_UDPv4)
+  if (sock->reads.iostate == IOSTATE_INITIAL)
     {
-      socklen_t fromlen = sizeof (*from);
-      ASSERT (buf_safe (buf, maxsize));
-      buf->len = recvfrom (sock->sd, BPTR (buf), maxsize, 0,
-			   (struct sockaddr *) from, &fromlen);
-      ASSERT (fromlen == sizeof (*from));
-    }
-  else if (sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT)
-    {
-      ASSERT (sock->stream_len_size >= 0
-	      && sock->stream_len_size <= (int) sizeof (packet_size_type));
+      WSABUF wsabuf[1];
+      int status;
 
-      /* from address was returned by accept */
-      *from = sock->addr->actual;
+      /* reset buf to its initial state */
+      sock->reads.buf = sock->reads.buf_init;
 
-      /* packet length not yet read? */
-      if (sock->stream_len_size < (int) sizeof (packet_size_type))
+      /* Win32 docs say it's okay to allocate the wsabuf on the stack */
+      wsabuf[0].buf = BPTR (&sock->reads.buf);
+      wsabuf[0].len = maxsize ? maxsize : BLEN (&sock->reads.buf);
+      ASSERT (wsabuf[0].len <= BLEN (&sock->reads.buf));
+
+      /* the overlapped read will signal this event on I/O completion */
+      ASSERT (ResetEvent (sock->reads.overlapped.hEvent));
+      sock->reads.flags = 0;
+
+      if (sock->proto == PROTO_UDPv4)
 	{
-	  /* read packet length prefix */
-	  int len = recv (sock->sd,
-			  ((uint8_t*)&sock->stream_len) + sock->stream_len_size,
-			  sizeof (packet_size_type) - sock->stream_len_size,
-			  MSG_NOSIGNAL);
-	  if (len <= 0)
-	    {
-	      buf->len = len;
-	      return len != 0;
-	    }
-	  sock->stream_len_size += len;
-	  ASSERT (sock->stream_len_size <= (int) sizeof (packet_size_type));
-
-	  /* whole packet_size_type received */
-	  if (sock->stream_len_size == sizeof (packet_size_type))
-	    {
-	      sock->stream_len = ntohps (sock->stream_len);
-
-	      msg (D_CO_DEBUG, "CO: READ LEN %d", (int)sock->stream_len);
-
-	      /* we must stay in sync with packets encapsulated in the
-		 stream, otherwise there is no way to recover */
-	      if (sock->stream_len > sock->stream_len_max)
-		msg (M_FATAL, "Peer wants to send us a %d byte packet which exceeds MTU size of %d -- please ensure that --link-mtu is equal on both peers",
-		     sock->stream_len,
-		     sock->stream_len_max);
-	    }
+	  sock->reads.addr_defined = true;
+	  sock->reads.addrlen = sizeof (sock->reads.addr);
+	  status = WSARecvFrom(
+			       sock->sd,
+			       wsabuf,
+			       1,
+			       &sock->reads.size,
+			       &sock->reads.flags,
+			       (struct sockaddr *) &sock->reads.addr,
+			       &sock->reads.addrlen,
+			       &sock->reads.overlapped,
+			       NULL);
+	}
+      else if (sock->proto == PROTO_TCPv4_CLIENT || sock->proto == PROTO_TCPv4_SERVER)
+	{
+	  sock->reads.addr_defined = false;
+	  status = WSARecv(
+			   sock->sd,
+			   wsabuf,
+			   1,
+			   &sock->reads.size,
+			   &sock->reads.flags,
+			   &sock->reads.overlapped,
+			   NULL);
+	}
+      else
+	{
+	  status = 0;
+	  ASSERT (0);
 	}
 
-      /* packet length known? */
-      if (sock->stream_len_size == sizeof (packet_size_type))
+      if (!status) /* operation completed immediately? */
 	{
-	  const int need = sock->stream_len - BLEN (&sock->stream_buf);
-	  int len;
+	  ASSERT (!sock->reads.addr_defined || sock->reads.addrlen == sizeof (sock->reads.addr));
+	  sock->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 
-	  ASSERT (need <= buf_forward_capacity (&sock->stream_buf));
-
-	  /* read packet payload */
-	  len = recv (
-		      sock->sd,
-		      BEND (&sock->stream_buf),
-		      need,
-		      MSG_NOSIGNAL
-		      );
-
-	  msg (D_CO_DEBUG, "CO: READ PAYLOAD need=%d got=%d", need, len);
-	      
-	  if (len <= 0)
+	  /* since we got an immediate return, we must signal the event object ourselves */
+	  ASSERT (SetEvent (sock->reads.overlapped.hEvent));
+	  sock->reads.status = 0;
+	}
+      else
+	{
+	  status = WSAGetLastError (); 
+	  if (status == WSA_IO_PENDING) /* operation queued? */
 	    {
-	      buf->len = len;
-	      return len != 0;
+	      sock->reads.iostate = IOSTATE_QUEUED;
+	      sock->reads.status = status;
 	    }
-	  
-	  sock->stream_buf.len += len;
-
-	  ASSERT (BLEN (&sock->stream_buf) <= sock->stream_len);
-
-	  /* full packet received ? */
-	  if (BLEN (&sock->stream_buf) == sock->stream_len)
+	  else /* error occurred */
 	    {
-	      *buf = sock->stream_buf;
-	      sock->stream_buf = sock->stream_buf_init;
-	      sock->stream_len = 0;
-	      sock->stream_len_size = 0;
-	      return true;
+	      sock->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
+	      ASSERT (SetEvent (sock->reads.overlapped.hEvent));
+	      sock->reads.status = status;
 	    }
 	}
-      buf->len = 0;
     }
-  else
-    {
-      ASSERT (0);
-    }
-  return true;
+  return sock->reads.iostate;
 }
 
-/* read a TCP or UDP packet from link */
 int
-link_socket_write (struct link_socket *sock,
-		   struct buffer *buf,
-		   struct sockaddr_in *to)
+socket_send_queue (struct link_socket *sock, struct buffer *buf, const struct sockaddr_in *to)
 {
-  if (sock->proto == PROTO_UDPv4)
+  if (sock->writes.iostate == IOSTATE_INITIAL)
     {
-      return sendto (sock->sd, BPTR (buf), BLEN (buf), 0,
-		     (struct sockaddr *) to,
-		     (socklen_t) sizeof (*to));
+      WSABUF wsabuf[1];
+      int status;
+ 
+      /* make a private copy of buf */
+      sock->writes.buf = sock->writes.buf_init;
+      sock->writes.buf.len = 0;
+      ASSERT (buf_copy (&sock->writes.buf, buf));
+
+      /* Win32 docs say it's okay to allocate the wsabuf on the stack */
+      wsabuf[0].buf = BPTR (buf);
+      wsabuf[0].len = BLEN (buf);
+
+      /* the overlapped write will signal this event on I/O completion */
+      ASSERT (ResetEvent (sock->writes.overlapped.hEvent));
+      sock->writes.flags = 0;
+
+      if (sock->proto == PROTO_UDPv4)
+	{
+	  /* set destination address for UDP writes */
+	  sock->writes.addr_defined = true;
+	  sock->writes.addr = *to;
+	  sock->writes.addrlen = sizeof (sock->writes.addr);
+
+	  status = WSASendTo(
+			       sock->sd,
+			       wsabuf,
+			       1,
+			       &sock->writes.size,
+			       sock->writes.flags,
+			       (struct sockaddr *) &sock->writes.addr,
+			       sock->writes.addrlen,
+			       &sock->writes.overlapped,
+			       NULL);
+	}
+      else if (sock->proto == PROTO_TCPv4_CLIENT || sock->proto == PROTO_TCPv4_SERVER)
+	{
+	  /* destination address for TCP writes was established on connection initiation */
+	  sock->writes.addr_defined = false;
+
+	  status = WSASend(
+			   sock->sd,
+			   wsabuf,
+			   1,
+			   &sock->writes.size,
+			   sock->writes.flags,
+			   &sock->writes.overlapped,
+			   NULL);
+	}
+      else 
+	{
+	  status = 0;
+	  ASSERT (0);
+	}
+
+      if (!status) /* operation completed immediately? */
+	{
+	  sock->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
+
+	  /* since we got an immediate return, we must signal the event object ourselves */
+	  ASSERT (SetEvent (sock->writes.overlapped.hEvent));
+
+	  sock->writes.status = 0;
+	}
+      else
+	{
+	  status = WSAGetLastError (); 
+	  if (status == WSA_IO_PENDING) /* operation queued? */
+	    {
+	      sock->writes.iostate = IOSTATE_QUEUED;
+	      sock->writes.status = status;
+	    }
+	  else /* error occurred */
+	    {
+	      sock->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
+	      ASSERT (SetEvent (sock->writes.overlapped.hEvent));
+	      sock->writes.status = status;
+	    }
+	}
     }
-  else if (sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT)
+  return sock->writes.iostate;
+}
+
+int
+socket_finalize (
+		 SOCKET s,
+		 struct overlapped_io *io,
+		 struct buffer *buf,
+		 struct sockaddr_in *from)
+{
+  int ret = -1;
+  BOOL status;
+
+  switch (io->iostate)
     {
-      packet_size_type len = BLEN (buf);
-      msg (D_CO_DEBUG, "CO: WRITE %d", (int)len);
-      ASSERT (len <= sock->stream_len_max);
-      len = htonps (len);
-      ASSERT (buf_write_prepend (buf, &len, sizeof (len)));
-      return send (sock->sd, BPTR (buf), BLEN (buf), MSG_NOSIGNAL);
-    }
-  else
-    {
+    case IOSTATE_QUEUED:
+      status = WSAGetOverlappedResult(
+				      s,
+				      &io->overlapped,
+				      &io->size,
+				      FALSE,
+				      &io->flags
+				      );
+      if (status)
+	{
+	  /* successful return for a queued operation */
+	  if (buf)
+	    *buf = io->buf;
+	  ret = io->size;
+	  io->iostate = IOSTATE_INITIAL;
+	  ASSERT (ResetEvent (io->overlapped.hEvent));
+	}
+      else
+	{
+	  /* error during a queued operation */
+	  ret = -1;
+	  if (WSAGetLastError() != WSA_IO_INCOMPLETE)
+	    {
+	      /* if no error (i.e. just not finished yet), then DON'T execute this code */
+	      io->iostate = IOSTATE_INITIAL;
+	      ASSERT (ResetEvent (io->overlapped.hEvent));
+	    }
+	}
+      break;
+
+    case IOSTATE_IMMEDIATE_RETURN:
+      ASSERT (ResetEvent (io->overlapped.hEvent));
+      if (io->status)
+	{
+	  /* error return for a non-queued operation */
+	  WSASetLastError (io->status);
+	  ret = -1;
+	}
+      else
+	{
+	  /* successful return for a non-queued operation */
+	  if (buf)
+	    *buf = io->buf;
+	  ret = io->size;
+	  io->iostate = IOSTATE_INITIAL;
+	}
+      break;
+
+    case IOSTATE_INITIAL: /* were we called without proper queueing? */
+      WSASetLastError (WSAEINVAL);
+      ret = -1;
+      break;
+
+    default:
       ASSERT (0);
     }
-  return 0;
+  
+  /* return from address if requested */
+  if (from)
+    {
+      if (ret >= 0 && io->addr_defined)
+	{
+	  ASSERT (io->addrlen == sizeof (io->addr));
+	  *from = io->addr;
+	}
+      else
+	CLEAR (*from);
+    }
+  
+  if (buf)
+    buf->len = ret;
+  return ret;
+}
+
+#endif /* WIN32 */
+
+int
+link_socket_read_tcp (struct link_socket *sock,
+		      struct buffer *buf,
+		      int maxsize,
+		      struct sockaddr_in *from)
+{
+  ASSERT (0);
+  return -1;
 }
 
 void
@@ -617,6 +762,10 @@ link_socket_close (struct link_socket *sock)
   if (sock->sd >= 0 && sock->sd != INETD_SOCKET_DESCRIPTOR)
     {
       openvpn_close_socket (sock->sd);
+#ifdef WIN32
+      overlapped_io_close (&sock->reads);
+      overlapped_io_close (&sock->writes);
+#endif
       sock->sd = -1;
     }
   free_buf (&sock->stream_buf_init);
@@ -635,7 +784,7 @@ print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* sep
   const int port = ntohs (addr->sin_port);
 
   mutex_lock (L_INET_NTOA);
-  buf_printf (&out, "%s", (addr_defined (addr) ? inet_ntoa (addr->sin_addr) : "[undef]"));
+  buf_printf (&out, "%s", (addr_defined (addr) ? inet_ntoa (addr->sin_addr) : "[local]"));
   mutex_unlock (L_INET_NTOA);
 
   if (do_port && port)
@@ -655,7 +804,7 @@ struct proto_names {
 
 /* Indexed by PROTO_x */
 static const struct proto_names proto_names[] = {
-  {"udp", "UDPv4"},
+  {"udp",        "UDPv4"},
   {"tcp-server", "TCPv4_SERVER"},
   {"tcp-client", "TCPv4_CLIENT"}
 };

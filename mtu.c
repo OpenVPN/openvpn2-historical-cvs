@@ -106,14 +106,16 @@ frame_dynamic_finalize (struct frame *frame)
     frame->dynamic.mtu_max = upper_bound;
   else
     frame->dynamic.mtu_max = max_int (frame->dynamic.mtu_min,
-				      constrain_int (frame->dynamic.mtu_max_initial, lower_bound, upper_bound));
+				      constrain_int (frame->dynamic.mtu_max_initial,
+						     lower_bound, upper_bound));
 
   if (frame->dynamic.mtu_initial == MTU_SET_TO_MIN)
     frame->dynamic.mtu = frame->dynamic.mtu_min;
   else if (frame->dynamic.mtu_initial == MTU_SET_TO_MAX)
     frame->dynamic.mtu = frame->dynamic.mtu_max;
   else
-    frame->dynamic.mtu = constrain_int (frame->dynamic.mtu_initial, frame->dynamic.mtu_min, frame->dynamic.mtu_max);
+    frame->dynamic.mtu = constrain_int (frame->dynamic.mtu_initial,
+					frame->dynamic.mtu_min, frame->dynamic.mtu_max);
 
   msg (D_MTU_DEBUG, "MTU dynamic=%d", frame->dynamic.mtu);
 }
@@ -253,6 +255,7 @@ translate_mtu_discover_type_name (const char *name)
 /*
  *
  * The following code is adapted from tracepath
+ * under the terms of the GPL.
  * Copyright (C) Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>.
  */
 

@@ -1,9 +1,30 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86 2003/07/06 22:38:00 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.1 2003/07/16 04:15:28 jimyonan Exp $
 
-Upcoming Version 1.4.2
+Upcoming version 1.5.0
+
+* Added TCP support via the new --proto
+  option.
+* Renamed udp-centric options such as
+  --udp-mtu to --link-mtu (old option
+  names preserved for compatibility).
+* Ported to Windows (still experimental).
+* Reworked the SSL/TLS packet acknowledge
+  code to better handle certain corner
+  cases.
+* Turned off the default enabling of
+  IP forwarding in the
+  sample-scripts/openvpn.init script
+  for Red Hat.
+  Forwarding can be enabled by users
+  in their --up scripts or firewall
+  config.
+* Protocol compatibility with previous
+  versions is maintained.
+
+2003.07.xx -- Version 1.4.2
 
 * Removed adaptive bandwidth from
   --mtu-dynamic -- its absence appears

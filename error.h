@@ -30,6 +30,17 @@
 
 #include "basic.h"
 
+#ifdef WIN32
+# define openvpn_errno()         GetLastError()
+# define openvpn_errno_socket()  WSAGetLastError()
+# define openvpn_strerror(e)     strerror_win32(e)
+  const char *strerror_win32 (int errnum);
+#else
+# define openvpn_errno()         errno
+# define openvpn_errno_socket()  errno
+# define openvpn_strerror(x)     strerror(x)
+#endif
+
 /*
  * These globals should not be accessed directly,
  * but rather through macros or inline functions defined below.

@@ -62,7 +62,7 @@
 
 /*
  * At exactly --verb 5 (not less or greater), print 'R' and 'W' chars
- * to stdout for each packet read/write on UDP port.
+ * to stdout for each packet read/write on TCP/UDP port.
  */
 #define LOG_RW
 

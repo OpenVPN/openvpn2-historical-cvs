@@ -26,10 +26,6 @@
 #ifndef SYSHEAD_H
 #define SYSHEAD_H
 
-#ifdef WIN32
-#include "openvpn-win32.h"
-#endif
-
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
@@ -275,40 +271,6 @@
  */
 #ifndef O_BINARY
 #define O_BINARY 0
-#endif
-
-/*
- * Some OSes define this as a recv/sendv flag
- */
-#ifndef MSG_NOSIGNAL
-#define MSG_NOSIGNAL 0
-#endif
-
-/*
- * Does this OS provide a different function for closing regular files
- * vs. sockets?
- */
-#ifndef openvpn_close_socket
-#define openvpn_close_socket(s) close(s)
-#endif
-
-/*
- * Get error code for most recently called
- * system function.
- */
-
-#ifndef openvpn_errno
-#define openvpn_errno()         errno
-#endif
-
-#ifndef openvpn_errno_socket
-#define openvpn_errno_socket()  errno
-#endif
-
-#ifdef HAVE_STRERROR
-#ifndef openvpn_strerror
-#define openvpn_strerror(x)     strerror(x)
-#endif
 #endif
 
 #endif

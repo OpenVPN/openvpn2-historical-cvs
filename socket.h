@@ -30,6 +30,7 @@
 #include "common.h"
 #include "error.h"
 #include "mtu.h"
+#include "openvpn-win32.h"
 
 /* packet_size_type is used communicate packet size
    over the wire when stream oriented protocols are
@@ -52,7 +53,29 @@ struct link_socket_addr
 
 struct link_socket
 {
+#ifdef WIN32
+  /* these macros are called in the context of the openvpn() function */
+# define SOCKET_SET_READ(sock) { wait_add (&event_wait, sock.reads.overlapped.hEvent); \
+                                 socket_recv_queue (&sock, 0); }
+# define SOCKET_SET_WRITE(sock)      { wait_add (&event_wait, sock.writes.overlapped.hEvent); }
+# define SOCKET_ISSET(sock, set) ( wait_trigger (&event_wait, sock.set.overlapped.hEvent))
+# define SOCKET_SETMAXFD(sock)
+# define SOCKET_READ_STAT(sock)  (overlapped_io_state_ascii (&sock.reads,  "sr"))
+# define SOCKET_WRITE_STAT(sock) (overlapped_io_state_ascii (&sock.writes, "sw"))
+  SOCKET sd;
+  struct overlapped_io reads;
+  struct overlapped_io writes;
+#else
+  /* these macros are called in the context of the openvpn() function */
+# define SOCKET_SET_READ(sock) {  FD_SET (sock.sd, &event_wait.reads); }
+# define SOCKET_SET_WRITE(sock) { FD_SET (sock.sd, &event_wait.writes); }
+# define SOCKET_ISSET(sock, set) (FD_ISSET (sock.sd, &event_wait.set))
+# define SOCKET_SETMAXFD(sock) { wait_update_maxfd (&event_wait, sock.sd); }
+# define SOCKET_READ_STAT(sock)  (SOCKET_ISSET (sock, reads) ?  "SR" : "sr")
+# define SOCKET_WRITE_STAT(sock) (SOCKET_ISSET (sock, writes) ? "SW" : "sw")
   int sd;			/* file descriptor for socket */
+#endif
+
   int proto;                    /* Protocol (PROTO_x defined below) */
   struct link_socket_addr *addr;
 
@@ -69,6 +92,27 @@ struct link_socket
   struct buffer stream_buf_init;
   struct buffer stream_buf;
 };
+
+#ifdef WIN32
+#define ECONNRESET WSAECONNRESET
+#define openvpn_close_socket(s) closesocket(s)
+#define MSG_NOSIGNAL 0
+int inet_aton (const char *name, struct in_addr *addr);
+
+int socket_recv_queue (struct link_socket *sock, int maxsize);
+
+int socket_send_queue (struct link_socket *sock,
+		       struct buffer *buf,
+		       const struct sockaddr_in *to);
+
+int socket_finalize (
+		     SOCKET s,
+		     struct overlapped_io *io,
+		     struct buffer *buf,
+		     struct sockaddr_in *from);
+#else
+#define openvpn_close_socket(s) close(s)
+#endif
 
 void
 link_socket_init (struct link_socket *sock,
@@ -91,32 +135,26 @@ socket_adjust_frame_parameters (struct frame *frame, struct link_socket *sock);
 void
 socket_frame_init (struct frame *frame, struct link_socket *sock);
 
-bool
-link_socket_read (struct link_socket *sock,
-		  struct buffer *buf,
-		  int maxsize,
-		  struct sockaddr_in *from);
-
 int
-link_socket_write (struct link_socket *sock,
-		   struct buffer *buf,
-		   struct sockaddr_in *to);
+link_socket_read_tcp (struct link_socket *sock,
+		      struct buffer *buf,
+		      int maxsize,
+		      struct sockaddr_in *from);
 
 void
 link_socket_set_outgoing_addr (const struct buffer *buf,
-			      struct link_socket *sock,
-			      const struct sockaddr_in *addr);
+			       struct link_socket *sock,
+			       const struct sockaddr_in *addr);
 
 void
 link_socket_incoming_addr (struct buffer *buf,
-			  const struct link_socket *sock,
-			  const struct sockaddr_in *from_addr);
-
+			   const struct link_socket *sock,
+			   const struct sockaddr_in *from_addr);
 
 void
 link_socket_get_outgoing_addr (struct buffer *buf,
-			      const struct link_socket *sock,
-			      struct sockaddr_in *addr);
+			       const struct link_socket *sock,
+			       struct sockaddr_in *addr);
 
 void link_socket_close (struct link_socket *sock);
 
@@ -198,17 +236,186 @@ addr_port_match (const struct sockaddr_in *a1, const struct sockaddr_in *a2)
 }
 
 static inline bool
-socket_connection_reset()
-{
-  const int err = openvpn_errno_socket ();
-  return err == ECONNRESET;
-}
-
-static inline bool
 link_socket_connection_oriented (const struct link_socket *sock)
 {
   return sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT;
 }
+
+static inline bool
+socket_connection_reset (const struct link_socket *sock, int status)
+{
+  if (link_socket_connection_oriented (sock))
+    {
+      if (status == 0)
+	return true;
+      else if (status < 0)
+	{
+	  const int err = openvpn_errno_socket ();
+	  return err == ECONNRESET;
+	}
+    }
+  else
+    return false;
+}
+
+/******** READ ROUTINES ************/
+
+#ifdef WIN32
+
+static inline int
+link_socket_read_udp_win32 (struct link_socket *sock,
+			    struct buffer *buf,
+			    int maxsize,
+			    struct sockaddr_in *from)
+{
+  return socket_finalize (sock->sd, &sock->reads, buf, from);
+}
+
+#else
+
+static inline int
+link_socket_read_udp_posix (struct link_socket *sock,
+			    struct buffer *buf,
+			    int maxsize,
+			    struct sockaddr_in *from)
+{
+  CLEAR (*from);
+  socklen_t fromlen = sizeof (*from);
+  ASSERT (buf_safe (buf, maxsize));
+  buf->len = recvfrom (sock->sd, BPTR (buf), maxsize, 0,
+		       (struct sockaddr *) from, &fromlen);
+  ASSERT (fromlen == sizeof (*from));
+  return buf->len;
+}
+
+#endif
+
+/* read a TCP or UDP packet from link */
+static inline int
+link_socket_read (struct link_socket *sock,
+		  struct buffer *buf,
+		  int maxsize,
+		  struct sockaddr_in *from)
+{
+  if (sock->proto == PROTO_UDPv4)
+    {
+#ifdef WIN32
+      return link_socket_read_udp_win32 (sock, buf, maxsize, from);
+#else
+      return link_socket_read_udp_posix (sock, buf, maxsize, from);
+#endif
+    }
+  else if (sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT)
+    {
+      return link_socket_read_tcp (sock, buf, maxsize, from);
+    }
+  else
+    {
+      ASSERT (0);
+      return -1; /* NOTREACHED */
+    }
+}
+
+/******** WRITE ROUTINES ************/
+
+#ifdef WIN32
+
+static inline int
+link_socket_write_win32 (struct link_socket *sock,
+			 struct buffer *buf,
+			 struct sockaddr_in *to)
+{
+  int err = 0;
+  int status = 0;
+  if (overlapped_io_active (&sock->writes))
+    {
+      status = socket_finalize (sock->sd, &sock->writes, NULL, NULL);
+      if (status < 0)
+	err = WSAGetLastError ();
+    }
+  socket_send_queue (sock, buf, to);
+  if (status < 0)
+    {
+      WSASetLastError (err);
+      return status;
+    }
+  else
+    return BLEN (buf);
+}
+
+#else
+
+static inline int
+link_socket_write_udp_posix (struct link_socket *sock,
+			     struct buffer *buf,
+			     struct sockaddr_in *to)
+{
+  return sendto (sock->sd, BPTR (buf), BLEN (buf), 0,
+		 (struct sockaddr *) to,
+		 (socklen_t) sizeof (*to));
+}
+
+static inline int
+link_socket_write_tcp_posix (struct link_socket *sock,
+			     struct buffer *buf,
+			     struct sockaddr_in *to)
+{
+  return send (sock->sd, BPTR (buf), BLEN (buf), MSG_NOSIGNAL);
+}
+
+#endif
+
+static inline int
+link_socket_write_udp (struct link_socket *sock,
+		       struct buffer *buf,
+		       struct sockaddr_in *to)
+{
+#ifdef WIN32
+  return link_socket_write_win32 (sock, buf, to);
+#else
+  return link_socket_write_udp_posix (sock, buf, to);
+#endif
+}
+
+static inline int
+link_socket_write_tcp (struct link_socket *sock,
+		       struct buffer *buf,
+		       struct sockaddr_in *to)
+{
+  packet_size_type len = BLEN (buf);
+  msg (D_CO_DEBUG, "CO: WRITE %d", (int)len);
+  ASSERT (len <= sock->stream_len_max);
+  len = htonps (len);
+  ASSERT (buf_write_prepend (buf, &len, sizeof (len)));
+#ifdef WIN32
+  return link_socket_write_win32 (sock, buf, to);
+#else
+  return link_socket_write_tcp_posix (sock, buf, to);  
+#endif
+}
+
+/* write a TCP or UDP packet to link */
+static inline int
+link_socket_write (struct link_socket *sock,
+		   struct buffer *buf,
+		   struct sockaddr_in *to)
+{
+  if (sock->proto == PROTO_UDPv4)
+    {
+      return link_socket_write_udp (sock, buf, to);
+    }
+  else if (sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT)
+    {
+      return link_socket_write_tcp (sock, buf, to);
+    }
+  else
+    {
+      ASSERT (0);
+      return -1; /* NOTREACHED */
+    }
+}
+
+/******** END OF READ/WRITE ROUTINES ************/
 
 /*
  * Check status, usually after a socket read or write

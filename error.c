@@ -278,3 +278,109 @@ close_syslog ()
     }
 #endif
 }
+
+#ifdef WIN32
+
+/*
+ * The following code was adapted from stunnel under
+ * the terms of the GPL.
+ * Copyright (c) 1998-2001 Michal Trojnara <Michal.Trojnara@mirt.net>
+ */
+
+const char *
+strerror_win32 (int errnum)
+{
+  switch (errnum) {
+  case WSA_IO_INCOMPLETE:
+    return "I/O Operation in progress (WSA_IO_INCOMPLETE)";
+  case WSAEINTR:
+    return "Interrupted system call (WSAEINTR)";
+  case WSAEBADF:
+    return "Bad file number (WSAEBADF)";
+  case WSAEACCES:
+    return "Permission denied (WSAEACCES)";
+  case WSAEFAULT:
+    return "Bad address (WSAEFAULT)";
+  case WSAEINVAL:
+    return "Invalid argument (WSAEINVAL)";
+  case WSAEMFILE:
+    return "Too many open files (WSAEMFILE)";
+  case WSAEWOULDBLOCK:
+    return "Operation would block (WSAEWOULDBLOCK)";
+  case WSAEINPROGRESS:
+    return "Operation now in progress (WSAEINPROGRESS)";
+  case WSAEALREADY:
+    return "Operation already in progress (WSAEALREADY)";
+  case WSAEDESTADDRREQ:
+    return "Destination address required (WSAEDESTADDRREQ)";
+  case WSAEMSGSIZE:
+    return "Message too long (WSAEMSGSIZE)";
+  case WSAEPROTOTYPE:
+    return "Protocol wrong type for socket (WSAEPROTOTYPE)";
+  case WSAENOPROTOOPT:
+    return "Bad protocol option (WSAENOPROTOOPT)";
+  case WSAEPROTONOSUPPORT:
+    return "Protocol not supported (WSAEPROTONOSUPPORT)";
+  case WSAESOCKTNOSUPPORT:
+    return "Socket type not supported (WSAESOCKTNOSUPPORT)";
+  case WSAEOPNOTSUPP:
+    return "Operation not supported on socket (WSAEOPNOTSUPP)";
+  case WSAEPFNOSUPPORT:
+    return "Protocol family not supported (WSAEPFNOSUPPORT)";
+  case WSAEAFNOSUPPORT:
+    return "Address family not supported by protocol family (WSAEAFNOSUPPORT)";
+  case WSAEADDRINUSE:
+    return "Address already in use (WSAEADDRINUSE)";
+  case WSAENETDOWN:
+    return "Network is down (WSAENETDOWN)";
+  case WSAENETUNREACH:
+    return "Network is unreachable (WSAENETUNREACH)";
+  case WSAENETRESET:
+    return "Net dropped connection or reset (WSAENETRESET)";
+  case WSAECONNABORTED:
+    return "Software caused connection abort (WSAECONNABORTED)";
+  case WSAECONNRESET:
+    return "Connection reset by peer (WSAECONNRESET)";
+  case WSAENOBUFS:
+    return "No buffer space available (WSAENOBUFS)";
+  case WSAEISCONN:
+    return "Socket is already connected (WSAEISCONN)";
+  case WSAENOTCONN:
+    return "Socket is not connected (WSAENOTCONN)";
+  case WSAETIMEDOUT:
+    return "Connection timed out (WSAETIMEDOUT)";
+  case WSAECONNREFUSED:
+    return "Connection refused (WSAECONNREFUSED)";
+  case WSAELOOP:
+    return "Too many levels of symbolic links (WSAELOOP)";
+  case WSAENAMETOOLONG:
+    return "File name too long (WSAENAMETOOLONG)";
+  case WSAEHOSTDOWN:
+    return "Host is down (WSAEHOSTDOWN)";
+  case WSAEHOSTUNREACH:
+    return "No Route to Host (WSAEHOSTUNREACH)";
+  case WSAENOTEMPTY:
+    return "Directory not empty (WSAENOTEMPTY)";
+  case WSAEPROCLIM:
+    return "Too many processes (WSAEPROCLIM)";
+  case WSAEUSERS:
+    return "Too many users (WSAEUSERS)";
+  case WSAEDQUOT:
+    return "Disc Quota Exceeded (WSAEDQUOT)";
+  case WSAESTALE:
+    return "Stale NFS file handle (WSAESTALE)";
+  case WSASYSNOTREADY:
+    return "Network SubSystem is unavailable (WSASYSNOTREADY)";
+  case WSAVERNOTSUPPORTED:
+    return "WINSOCK DLL Version out of range (WSAVERNOTSUPPORTED)";
+  case WSANOTINITIALISED:
+    return "Successful WSASTARTUP not yet performed (WSANOTINITIALISED)";
+  case WSAEREMOTE:
+    return "Too many levels of remote in path (WSAEREMOTE)";
+  case WSAHOST_NOT_FOUND:
+    return "Host not found (WSAHOST_NOT_FOUND)";
+  default:
+    return strerror (errnum);
+  }
+}
+#endif

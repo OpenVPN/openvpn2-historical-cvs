@@ -1,5 +1,5 @@
 .\"  OpenVPN -- An application to securely tunnel IP networks
-.\"             over a single UDP port, with support for SSL/TLS-based
+.\"             over a single TCP/UDP port, with support for SSL/TLS-based
 .\"             session authentication and key exchange,
 .\"             packet encryption, packet authentication, and
 .\"             packet compression.
@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "6 Julu 2003"
+.TH openvpn 8 "12 July 2003"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -96,6 +96,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-config\fR\ \fIfile\fR\ ]
 [\ \fB\-\-local\fR\ \fIhost\fR\ ]
 [\ \fB\-\-remote\fR\ \fIhost\fR\ ]
+[\ \fB\-\-proto\fR\ \fIp\fR\ ]
 [\ \fB\-\-resolv\-retry\fR\ \fIn\fR\ ]
 [\ \fB\-\-float\fR\ ]
 [\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
@@ -109,7 +110,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-dev\-node\fR\ \fInode\fR\ ]
 [\ \fB\-\-dev\-name\fR\ \fIname\fR\ ]
 [\ \fB\-\-ifconfig\fR\ \fIl\ r\fR\ ]
-[\ \fB\-\-udp\-mtu\fR\ \fIn\fR\ ]
+[\ \fB\-\-link\-mtu\fR\ \fIn\fR\ ]
 [\ \fB\-\-tun\-mtu\fR\ \fIn\fR\ ]
 [\ \fB\-\-tun\-mtu\-extra\fR\ \fIn\fR\ ]
 [\ \fB\-\-mtu\-disc\fR\ \fItype\fR\ ]
@@ -173,7 +174,7 @@ openvpn \- secure IP tunnel daemon.
 .SH DESCRIPTION
 .LP
 OpenVPN is a robust and highly configurable secure tunneling daemon which
-tunnels IP networks over UDP.  OpenVPN provides a comprehensive suite of
+tunnels IP networks over UDP or TCP.  OpenVPN provides a comprehensive suite of
 security features including conventional encryption, public key encryption,
 dynamic key exchange, perfect forward security,
 and the choice of any cipher, key size, or HMAC digest (for packet
@@ -190,7 +191,7 @@ public key encryption
 .B (TLS-mode)
 using client & server certificates.
 OpenVPN also
-supports non-encrypted UDP tunnels.  
+supports non-encrypted TCP/UDP tunnels.  
 
 When used in 
 public key
@@ -210,9 +211,9 @@ The control channel runs a TLS session which is used to exchange randomly
 generated cipher and HMAC keys.
 Those keys are then used to encrypt and authenticate the data channel.
 Both channels are multiplexed
-over a single UDP port.  A reliability layer is placed over the control channel
+over a single TCP/UDP port.  A reliability layer is placed over the control channel
 since TLS expects a reliable connection.  The data channel is passed unmediated
-over the UDP channel since the higher level protocols running over the tunnel
+over the TCP/UDP channel since the higher level protocols running over the tunnel
 (such as TCP)
 will expect such behaviour.  The control channel will trigger a new key
 exchange handshake periodically, according to user-specified parameters.
@@ -251,8 +252,8 @@ client/server modes such as the ability to designate a peer as
 either a TLS server or client, or the ability to instantiate an OpenVPN peer without
 an explicit remote peer address.
 
-OpenVPN never uses more than a single UDP port to communicate with its peer, though
-multiple sessions between different peers will each use a separate UDP port.  OpenVPN
+OpenVPN never uses more than a single TCP/UDP port to communicate with its peer, though
+multiple sessions between different peers will each use a separate TCP/UDP port.  OpenVPN
 doesn't use the
 .B GRE
 protocol which can be a benefit for users running on networks that
@@ -269,7 +270,7 @@ and
 .B autoconf
 and offers
 several build options.  It can be built standalone, in which
-case it will only offer non-encrypted UDP tunnels; it can be built
+case it will only offer non-encrypted TCP/UDP tunnels; it can be built
 with the
 .B LZO
 real-time compression library; it can be built with the
@@ -332,7 +333,10 @@ secret static.key
 .RE
 .fi
 .SS Tunnel Options:
-It should be noted that OpenVPN is a peer-to-peer application.  Each peer establishes
+Note that the following overview applies only to OpenVPN when run in UDP mode.
+
+When used in UDP mode,
+OpenVPN is essentially a peer-to-peer application.  Each peer establishes
 a symmetrical UDP link with its partner.  If an OpenVPN session is started without
 an explicitly specified remote peer, OpenVPN will
 wait until it receives an authenticated
@@ -357,7 +361,7 @@ option will disable the session-usurp feature in TLS mode.  The option
 does not apply in static-key mode, as it is a stateless protocol without
 any notion of a session.
 
-An OpenVPN peer will try to stay connected indefinitely, even under conditions of
+An OpenVPN peer operating in UDP mode will try to stay connected indefinitely, even under conditions of
 high network error frequency, until it receives a SIGINT or SIGTERM signal,
 or a time-out condition.
 A major design goal of OpenVPN is that it should be as responsive, in terms of both normal
@@ -400,6 +404,57 @@ they pass all authentication tests.  This requirement for authentication
 is binding on all potential peers, even those from known and supposedly
 trusted IP addresses (it is very easy to forge a source IP address on
 a UDP packet).
+
+When used in TCP mode, 
+.B --remote
+will act as a filter, rejecting connections from any host which do
+not match
+.B host.
+.TP
+.B --proto p
+Use protocol
+.B p
+for communicating with remote host.
+.B p
+can be
+.B udp,
+.B tcp-client,
+or
+.B tcp-server.
+
+The default protocol is
+.B udp
+when
+.B --proto
+is not specified.
+
+For UDP operation,
+.B --proto udp
+should be specified on both peers.
+
+For TCP operation, one peer must use
+.B --proto tcp-server
+and the other must use
+.B --proto tcp-client.
+A peer started with
+.B tcp-server
+will wait indefinitely for an incoming connection.  A peer
+started with
+.B tcp-client
+will attempt to connect, and if that fails, will sleep for 5
+seconds and try again.  Both TCP client and server will simulate
+a SIGUSR1 restart signal if either side resets the connection.
+
+OpenVPN is designed to operate optimally over UDP, but TCP capability is provided
+for situations where UDP cannot be used.
+In comparison with UDP, TCP will usually be
+somewhat less efficient and less robust when used over unreliable or congested
+networks.  TCP support is also a newer addition to OpenVPN, added in version
+1.5, and should still be considered experimental until 1.6 or 1.7.
+
+This article outlines some of problems with tunneling IP over TCP:
+
+.I http://sites.inka.de/sites/bigred/devel/tcp-tcp.html
 .TP
 .B --resolv-retry n
 If hostname resolve fails for
@@ -471,13 +526,13 @@ reestablish a connection with its most recently authenticated
 peer on its new IP address.
 .TP
 .B --port port
-UDP port number for both local and remote.
+TCP/UDP port number for both local and remote.
 .TP
 .B --lport port
-UDP port number for local (default=5000).
+TCP/UDP port number for local (default=5000).
 .TP
 .B --rport port
-UDP port number for remote (default=5000).
+TCP/UDP port number for remote (default=5000).
 .TP
 .B --nobind
 Do not bind to local address and port.  The IP stack will allocate
@@ -544,9 +599,9 @@ should be swapped on the other peer.
 must be private
 addresses outside of the subnets used by either peer.
 This option implies
-.B --udp-mtu 1300
+.B --link-mtu 1300
 if neither
-.B --udp-mtu
+.B --link-mtu
 or
 .B --tun-mtu
 is explicitly specified.
@@ -571,11 +626,11 @@ the script.
 
 In addition, the
 .B --ifconfig
-option will set the UDP MTU to 1300
+option will set the link MTU to 1300
 and derive the tunnel MTU automatically.  You can
-override the UDP MTU value of 1300 by using
+override the link MTU value of 1300 by using
 the
-.B --udp-mtu
+.B --link-mtu
 option to explicitly specify a different value.
 
 One of the nice features of the 
@@ -590,14 +645,19 @@ with formatting the appropriate
 .BR ifconfig (8)
 command for your platform.
 .TP
-.B --udp-mtu n
-Take the UDP device MTU to be n and derive the TUN MTU
+.B --link-mtu n
+Take the link device MTU to be n and derive the TUN MTU
 from it (default=1300 when the
 .B --ifconfig
 option is used).  This is a conservative value that was chosen
 because it has a higher probability of working correctly.
 However, for many
 cases, using a value of 1472 will maximize performance.
+
+Prior to OpenVPN 1.5, this option was named
+.B --udp-mtu
+-- while deprecated, this name will still be supported
+for compatibility.
 
 This option should only be used for TUN style tunnels.  TAP tunnels
 that are used for ethernet bridging should use the
@@ -609,36 +669,36 @@ the maximum datagram size in bytes that can be sent unfragmented
 over a particular network path.  OpenVPN requires that packets
 on the control or data channels be sent unfragmented.
 
-Typically, the UDP MTU should be set to a value between 1300 and 1500.
-The optimal size for UDP MTU is the largest
+Typically, the link MTU should be set to a value between 1300 and 1500.
+The optimal size for link MTU is the largest
 MTU that can be handled by every router on the link path.
-The UDP MTU value should be equal on both peers.
+The link MTU value should be equal on both peers.
 
 OpenVPN
 adds a small amount of overhead to each tunnel packet before
-it is forwarded from the TUN device over the secure UDP channel.
+it is forwarded from the TUN device over the secure link channel.
 This overhead consists of data fields such as the HMAC signature,
 packet ID, encryption block padding, etc.  Because of this overhead,
-the TUN device MTU should be slightly smaller than the UDP device
+the TUN device MTU should be slightly smaller than the link device
 MTU to make room for the extra bytes which OpenVPN adds to every
 data channel packet.  OpenVPN allows you to explicitly specify either
-the TUN MTU or the UDP MTU (but not both).  OpenVPN will then
+the TUN MTU or the link MTU (but not both).  OpenVPN will then
 compute the value you didn't specify based on the value you did.
 OpenVPN will compute exactly how much overhead it will need to add
 to each packet, based on the other options you specify.  If you
 specify an
 .B --up
-script, OpenVPN will pass the TUN MTU and UDP MTU values on the command line
+script, OpenVPN will pass the TUN MTU and link MTU values on the command line
 to the script.
 .TP
 .B --tun-mtu n
 Take the TUN device MTU to be
 .B n
-and derive the UDP MTU
+and derive the link MTU
 from it (default=1300).
 
 See
-.B --udp-mtu
+.B --link-mtu
 above more more information on MTU.
 
 Using the
@@ -663,7 +723,7 @@ TAP device usage.  This parameter only controls internal OpenVPN buffer sizing,
 so there is no transmission overhead associated with using a larger value.
 .TP
 .B --mtu-disc type
-Should we do Path MTU discovery on UDP channel?  Only supported on OSes such
+Should we do Path MTU discovery on TCP/UDP channel?  Only supported on OSes such
 as Linux that supports the necessary system call to set.
 
 .B 'no'
@@ -708,7 +768,7 @@ as tunneling a UDP multicast stream which requires fragmentation.
 .B --shaper n
 Limit bandwidth of outgoing tunnel data to
 .B n
-bytes per second on the UDP port.
+bytes per second on the TCP/UDP port.
 If you want to limit the bandwidth
 in both directions, use this option on both peers.
 
@@ -717,7 +777,7 @@ traffic shaping: Given a shaper rate of
 .I n
 bytes per second, after a datagram write of
 .I b
-bytes is queued on the UDP port, wait a minimum of
+bytes is queued on the TCP/UDP port, wait a minimum of
 .I (b / n)
 seconds before queuing the next write.
 
@@ -747,7 +807,7 @@ seconds of inactivity on the TUN/TAP device.  The time length
 of inactivity is measured since the last incoming tunnel packet.
 .TP
 .B --ping n
-Ping remote over the UDP control channel
+Ping remote over the TCP/UDP control channel
 if no packets have been sent for at least
 .B n
 seconds (specify
@@ -1098,7 +1158,7 @@ option.  The optional
 parameter is also handled exactly as in
 .B --daemon.
 
-Also note that each OpenVPN tunnel requires a separate UDP port and
+Also note that each OpenVPN tunnel requires a separate TCP/UDP port and
 a separate inetd or xinetd entry.  See the OpenVPN HOWTO for an example
 on using OpenVPN with xinetd:
 .I http://openvpn.sourceforge.net/howto.html
@@ -1160,7 +1220,14 @@ net outages + adaptive compression state changes (on or off)
 .B 4 --
 show all parameter settings
 .br
-.B 5 to 11 --
+.B 5 --
+Output
+.B R
+and
+.B W
+characters to the console for each packet read and write
+.br
+.B 6 to 11 --
 show debug info of increasing verbosity (see errlevel.h for additional
 information on debug levels)
 .TP
@@ -1426,7 +1493,7 @@ of network and tunnel issues.
 .SS TLS Mode Options:
 TLS mode is the most powerful mode of OpenVPN in both security and flexibility.
 TLS mode works by establishing control and
-data channels which are multiplexed over a single UDP port.  OpenVPN initiates
+data channels which are multiplexed over a single TCP/UDP port.  OpenVPN initiates
 a TLS session over the control channel and uses it to exchange cipher
 and HMAC keys to protect the data channel.  TLS mode uses a robust reliability
 layer over the UDP connection for all control channel communication, while
@@ -1815,7 +1882,7 @@ option above).
 
 One disadvantage of persistent tunnels is that it is harder to automatically
 configure their MTU value (see
-.B --udp-mtu
+.B --link-mtu
 and
 .B --tun-mtu
 above).

@@ -246,7 +246,11 @@ do_ifconfig (const char *dev, const char *dev_type,
 void
 clear_tuntap (struct tuntap *tuntap)
 {
+#ifdef WIN32
+  tuntap->hand = NULL;
+#else
   tuntap->fd = -1;
+#endif
 #ifdef TARGET_SOLARIS
   tuntap->ip_fd = -1;
 #endif
@@ -261,6 +265,7 @@ open_null (struct tuntap *tt)
   strncpynt (tt->actual, "null", sizeof (tt->actual));
 }
 
+#ifndef WIN32
 static void
 open_tun_generic (const char *dev, const char *dev_node,
 		  bool ipv6, bool ipv6_explicitly_supported, bool dynamic,
@@ -337,12 +342,18 @@ open_tun_generic (const char *dev, const char *dev_node,
       strncpynt (tt->actual, (dynamic_opened ? dynamic_name : dev), sizeof (tt->actual));
     }
 }
+#endif
 
 static void
 close_tun_generic (struct tuntap *tt)
 {
+#ifdef WIN32
+  if (tt->hand != NULL)
+    CloseHandle (tt->hand);
+#else
   if (tt->fd >= 0)
     close (tt->fd);
+#endif
   clear_tuntap (tt);
 }
 
@@ -779,6 +790,32 @@ int
 read_tun (struct tuntap* tt, uint8_t *buf, int len)
 {
   return read (tt->fd, buf, len);
+}
+
+#elif defined(WIN32)
+
+void
+open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
+{
+  open_null (tt); // JYFIXME
+}
+
+void
+close_tun (struct tuntap* tt)
+{
+  close_tun_generic (tt);
+}
+
+int
+write_tun (struct tuntap* tt, uint8_t *buf, int len)
+{
+  ASSERT (0);
+}
+
+int
+read_tun (struct tuntap* tt, uint8_t *buf, int len)
+{
+  ASSERT (0);
 }
 
 #else /* generic */

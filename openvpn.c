@@ -45,6 +45,7 @@
 #include "shaper.h"
 #include "thread.h"
 #include "interval.h"
+#include "event-wait.h"
 #include "fragment.h"
 #include "openvpn.h"
 
@@ -227,8 +228,8 @@ openvpn (const struct options *options,
    */
   const int gc_level = gc_new_level ();
 
-  /* used by select() */
-  int fm;
+  /* our global wait event */
+  struct event_wait event_wait;
 
 #if PASSTOS_CAPABILITY
   /* used to get/set TOS. */
@@ -246,9 +247,6 @@ openvpn (const struct options *options,
 
   /* tells us to free to_link buffer after it has been written to TCP/UDP port */
   bool free_to_link;
-
-  /* used by select() */
-  fd_set reads, writes;
 
   struct link_socket link_socket;   /* socket used for TCP/UDP connection to remote */
   struct sockaddr_in to_link_addr; /* IP address of remote */
@@ -393,6 +391,7 @@ openvpn (const struct options *options,
 
   msg (M_INFO, "%s", title_string);
 
+  wait_init (&event_wait);
   CLEAR (link_socket);
   CLEAR (frame);
 #ifdef FRAGMENT_ENABLE
@@ -838,10 +837,9 @@ openvpn (const struct options *options,
    *
    */
 
-  /* calculate max file handle + 1 for select */
-  fm = link_socket.sd;
-  if (tuntap->fd > fm)
-    fm = tuntap->fd;
+  /* select wants maximum fd + 1 (why doesn't it just figure it out for itself?) */
+  SOCKET_SETMAXFD(link_socket);
+  TUNTAP_SETMAXFD(tuntap);
 
   current = time (NULL);
 
@@ -862,17 +860,13 @@ openvpn (const struct options *options,
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 #ifdef USE_PTHREAD
-  if (tls_multi && TLS_THREAD_SOCKET (&thread_parms) > fm)
-    fm = TLS_THREAD_SOCKET (&thread_parms);
+  TLS_THREAD_SOCKET_SETMAXFD (thread_parms);
 #else
   /* initialize tmp_int optimization that limits the number of times we call
      tls_multi_process in the main event loop */
   interval_init (&tmp_int, TLS_MULTI_HORIZON, TLS_MULTI_REFRESH);
 #endif
 #endif
-
-  /* select() needs this */
-  ++fm;
 
   /* this flag is true for buffers coming from the TLS background thread */
   free_to_link = false;
@@ -1094,8 +1088,8 @@ openvpn (const struct options *options,
        *
        * Decide what kind of events we want to wait for.
        */
-      FD_ZERO (&reads);
-      FD_ZERO (&writes);
+
+      wait_reset (&event_wait);
 
       /*
        * If outgoing data (for TCP/UDP port) pending, wait for ready-to-send
@@ -1123,10 +1117,10 @@ openvpn (const struct options *options,
 	    }
 	  else
 	    {
-	      FD_SET (link_socket.sd, &writes);
+	      SOCKET_SET_WRITE (link_socket);
 	    }
 #else /* HAVE_GETTIMEOFDAY */
-	  FD_SET (link_socket.sd, &writes);
+	  SOCKET_SET_WRITE (link_socket);
 #endif /* HAVE_GETTIMEOFDAY */
 	}
 #ifdef FRAGMENT_ENABLE
@@ -1135,13 +1129,9 @@ openvpn (const struct options *options,
       else
 #endif
 	{
-	  if (tuntap->fd >= 0)
-	    {
-	      FD_SET (tuntap->fd, &reads);
-	    }
+	  TUNTAP_SET (tuntap, reads);
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-	  if (tls_multi)
-	    FD_SET (TLS_THREAD_SOCKET (&thread_parms), &reads);
+	  TLS_THREAD_SOCKET_SET (thread_parms, reads);
 #endif
 	}
 
@@ -1151,12 +1141,11 @@ openvpn (const struct options *options,
        */
       if (to_tun.len > 0)
 	{
-	  if (tuntap->fd >= 0)
-	    FD_SET (tuntap->fd, &writes);
+	  TUNTAP_SET (tuntap, writes);
 	}
       else
 	{
-	  FD_SET (link_socket.sd, &reads);
+	  SOCKET_SET_READ (link_socket);
 	}
 
       /*
@@ -1175,14 +1164,15 @@ openvpn (const struct options *options,
        */
       if (!signal_received) {
 	msg (D_SELECT, "SELECT %s|%s|%s|%s %d/%d",
-	     (tuntap_defined (tuntap) && FD_ISSET (tuntap->fd, &reads)) ?  "TR" : "tr", 
-	     (tuntap_defined (tuntap) && FD_ISSET (tuntap->fd, &writes)) ? "TW" : "tw", 
-	     FD_ISSET (link_socket.sd, &reads) ?                           "UR" : "ur",
-	     FD_ISSET (link_socket.sd, &writes) ?                          "UW" : "uw",
+	     TUNTAP_READ_STAT (tuntap), 
+	     TUNTAP_WRITE_STAT (tuntap), 
+	     SOCKET_READ_STAT (link_socket),
+	     SOCKET_WRITE_STAT (link_socket),
 	     tv ? (int)tv->tv_sec : -1,
 	     tv ? (int)tv->tv_usec : -1
 	     );
-	stat = select (fm, &reads, &writes, NULL, tv);
+
+	stat = SELECT ();
 	check_status (stat, "select", NULL);
       }
 
@@ -1240,14 +1230,14 @@ openvpn (const struct options *options,
       if (stat > 0)
 	{
 	  /* Incoming data on TCP/UDP port */
-	  if (FD_ISSET (link_socket.sd, &reads))
+	  if (SOCKET_ISSET (link_socket, reads))
 	    {
 	      /*
 	       * Set up for recvfrom call to read datagram
-	       * sent to our TCP/UDP port from any source address.
+	       * sent to our TCP/UDP port.
 	       */
 	      struct sockaddr_in from;
-	      bool status;
+	      int status;
 
 	      ASSERT (!to_tun.len);
 	      buf = read_link_buf;
@@ -1255,11 +1245,11 @@ openvpn (const struct options *options,
 
 	      status = link_socket_read (&link_socket, &buf, max_rw_size_link, &from);
 
-	      if (!status || (buf.len < 0 && socket_connection_reset()))
+	      if (socket_connection_reset (&link_socket, status))
 		{
 		  /* received a disconnect from a connection-oriented protocol */
 		  signal_received = SIGUSR1;
-		  msg (M_INFO|M_ERRNO_SOCK, "Connection reset, restarting [%d]", (int)status);
+		  msg (M_INFO|M_ERRNO_SOCK, "Connection reset, restarting [%d]", status);
 		  break;		  
 		}
 
@@ -1267,7 +1257,7 @@ openvpn (const struct options *options,
 		link_read_bytes += buf.len;
 
 	      /* check recvfrom status */
-	      check_status (buf.len, "read from TCP/UDP", &link_socket);
+	      check_status (status, "read", &link_socket);
 
 	      /* take action to corrupt packet if we are in gremlin test mode */
 	      if (options->gremlin) {
@@ -1281,14 +1271,17 @@ openvpn (const struct options *options,
 	      if (check_debug_level (D_LOG_RW) && !check_debug_level (D_LOG_RW + 1))
 		fprintf (stderr, "R");
 #endif
-	      msg (D_LINK_RW, "TCP/UDP READ [%d] from %s: %s",
-		   BLEN (&buf), print_sockaddr (&from), PROTO_DUMP (&buf));
+	      msg (D_LINK_RW, "%s READ [%d] from %s: %s",
+		   proto2ascii (link_socket.proto, true),
+		   BLEN (&buf),
+		   print_sockaddr (&from),
+		   PROTO_DUMP (&buf));
 
 	      /*
 	       * Good, non-zero length packet received.
 	       * Commence multi-stage processing of packet,
 	       * such as authenticate, decrypt, decompress.
-	       * If any stage fails, it sets buf.len to 0,
+	       * If any stage fails, it sets buf.len to 0 or -1,
 	       * telling downstream stages to ignore the packet.
 	       */
 	      if (buf.len > 0)
@@ -1377,7 +1370,7 @@ openvpn (const struct options *options,
 
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
 	  /* Incoming data from TLS background thread */
-	  else if (tls_multi && FD_ISSET (TLS_THREAD_SOCKET (&thread_parms), &reads))
+	  else if (TLS_THREAD_SOCKET_ISSET (thread_parms, reads))
 	    {
 	      int s;
 	      ASSERT (!to_link.len);
@@ -1407,7 +1400,7 @@ openvpn (const struct options *options,
 #endif
 
 	  /* Incoming data on TUN device */
-	  else if (tuntap->fd >= 0 && FD_ISSET (tuntap->fd, &reads))
+	  else if (TUNTAP_ISSET (tuntap, reads))
 	    {
 	      /*
 	       * Setup for read() call on TUN/TAP device.
@@ -1507,7 +1500,7 @@ openvpn (const struct options *options,
 	    }
 
 	  /* TUN device ready to accept write */
-	  else if (tuntap->fd >= 0 && FD_ISSET (tuntap->fd, &writes))
+	  else if (TUNTAP_ISSET (tuntap, writes))
 	    {
 	      /*
 	       * Set up for write() call to TUN/TAP
@@ -1567,7 +1560,7 @@ openvpn (const struct options *options,
 	    }
 
 	  /* TCP/UDP port ready to accept write */
-	  else if (FD_ISSET (link_socket.sd, &writes))
+	  else if (SOCKET_ISSET (link_socket, writes))
 	    {
 	      if (to_link.len > 0 && to_link.len <= max_rw_size_link)
 		{
@@ -1612,8 +1605,11 @@ openvpn (const struct options *options,
 		      if (check_debug_level (D_LOG_RW) && !check_debug_level (D_LOG_RW + 1))
 			fprintf (stderr, "W");
 #endif
-		      msg (D_LINK_RW, "TCP/UDP WRITE [%d] to %s: %s",
-			   BLEN (&to_link), print_sockaddr (&to_link_addr), PROTO_DUMP (&to_link));
+		      msg (D_LINK_RW, "%s WRITE [%d] to %s: %s",
+			   proto2ascii (link_socket.proto, true),
+			   BLEN (&to_link),
+			   print_sockaddr (&to_link_addr),
+			   PROTO_DUMP (&to_link));
 
 		      /* Send packet */
 		      size = link_socket_write (&link_socket, &to_link, &to_link_addr);
@@ -1625,7 +1621,7 @@ openvpn (const struct options *options,
 		    size = 0;
 
 		  /* Check return status */
-		  check_status (size, "write to TCP/UDP", &link_socket);
+		  check_status (size, "write", &link_socket);
 
 		  if (size > 0)
 		    {

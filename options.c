@@ -80,7 +80,7 @@ static const char usage_message[] =
   "--local host    : Local host name or ip address.\n"
   "--remote host   : Remote host name or ip address.\n"
   "--proto p       : Use protocol p for communicating with peer.\n"
-  "                  p = udp, tcp-server, or tcp-client\n"
+  "                  p = udp (default), tcp-server, or tcp-client\n"
   "--resolv-retry n: If hostname resolve fails for --local or --remote, retry\n"
   "                  resolve for n seconds before failing (disabled by default).\n"
   "--float         : Allow remote to change its IP address/port, such as through\n"

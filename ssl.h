@@ -42,6 +42,7 @@
  * Openvpn Protocol.
  *
  * TCP/UDP Packet:
+ *   packet length (16 bits, unsigned) -- TCP only, always sent as plaintext
  *   packet opcode (high 5 bits, see P_ constants below)
  *   key_id (low 3 bits, see key_id in struct tls_session below for comment)
  *   payload (n bytes)
@@ -401,9 +402,16 @@ struct tt_ret
 
 struct thread_parms
 {
-# define TLS_THREAD_MAIN   0 
-# define TLS_THREAD_WORKER 1 
+# define TLS_THREAD_MAIN   0
+# define TLS_THREAD_WORKER 1
 # define TLS_THREAD_SOCKET(x) ((x)->sd[TLS_THREAD_MAIN])
+
+  /* these macros are called in the context of the openvpn() function */
+# define TLS_THREAD_SOCKET_ISSET(tp, set) (tls_multi && FD_ISSET (TLS_THREAD_SOCKET (&tp), &event_wait.set))
+# define TLS_THREAD_SOCKET_SET(tp, set) { if (tls_multi) FD_SET (TLS_THREAD_SOCKET (&tp), &event_wait.set); }
+# define TLS_THREAD_SOCKET_SETMAXFD(tp) \
+  { if (tls_multi) wait_update_maxfd (&event_wait, TLS_THREAD_SOCKET (&tp)); }
+
   int sd[2];
 
   struct tls_multi *multi;

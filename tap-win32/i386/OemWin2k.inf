@@ -30,8 +30,10 @@
 ;     changed tapXXXX to.
 ; (4) Change TAP_COMPONENT_ID in common.h to match what
 ;     you changed tapXXXX to.
-; (5) Change DeviceDescription and Provider strings.
-; (6) Change PRODUCT_STRING in constants.h to what you
+; (5) Change SZDEPENDENCIES in service.h to match what
+;     you changed tapXXXX to.
+; (6) Change DeviceDescription and Provider strings.
+; (7) Change PRODUCT_STRING in constants.h to what you
 ;     set DeviceDescription to.
 ;
 ;*********************************************************

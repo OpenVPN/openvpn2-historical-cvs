@@ -50,7 +50,9 @@ status_open (const char *filename, int refresh_freq, int msglevel)
       so->fd = -1;
       if (filename)
 	{
-	  so->fd = open (filename, O_CREAT | O_TRUNC | O_WRONLY);
+	  so->fd = open (filename,
+			 O_CREAT | O_TRUNC | O_WRONLY,
+			 S_IRUSR | S_IWUSR);
 	  if (so->fd >= 0)
 	    so->filename = string_alloc (filename, NULL);
 	  else

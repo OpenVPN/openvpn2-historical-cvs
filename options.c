@@ -1073,10 +1073,8 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --tun-ipv6 cannot be used with --mode server");
       if (options->shaper)
 	msg (M_USAGE, "Options error: --shaper cannot be used with --mode server");
-#if 1
-      if (options->proto != PROTO_UDPv4)
-	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp");
-#endif
+      if (!(options->proto == PROTO_UDPv4 || options->proto == PROTO_TCPv4_SERVER))
+	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp or --proto tcp-server");
 
 #ifdef WIN32
       /*

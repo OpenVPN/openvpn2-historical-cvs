@@ -38,9 +38,6 @@
 
 #include "memdbg.h"
 
-#undef EPOLL    // JYFIXME
-#define EPOLL 0 // JYFIXME
-
 static inline int
 tv_to_ms_timeout (const struct timeval *tv)
 {
@@ -234,8 +231,6 @@ ep_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
     ev.events |= EPOLLIN;
   if (rwflags & EVENT_WRITE)
     ev.events |= EPOLLOUT;
-  if (eps->fast)
-    ev.events |= EPOLLONESHOT;
   msg (D_EVENT_WAIT, "EP_CTL fd=%d rwflags=0x%04x ev=0x%08x arg=0x%08x",
        (int)event, rwflags, ev.events, (unsigned int)ev.data.ptr);
   if (epoll_ctl (eps->epfd, EPOLL_CTL_MOD, event, &ev) < 0)

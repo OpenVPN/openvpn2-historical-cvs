@@ -1,7 +1,20 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.31 2004/06/06 01:19:52 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.32 2004/06/08 07:22:20 jimyonan Exp $
+
+2004.06.08 -- Version 2.0-beta4
+
+* Fixed issue with beta3 where Win32 service wrapper
+  was keying off of old TAP HWID as a dependency.  To
+  ensure that the new service wrapper is correctly
+  installed, the Windows install script will uninstall
+  the old wrapper before installing the new one,
+  causing a reset of service properties.
+* Fixed permissions issue on --status output file,
+  with default access permissions of owner read/write
+  only (default permissions can be changed of course with
+  chmod).
 
 2004.06.05 -- Version 2.0-beta3
 

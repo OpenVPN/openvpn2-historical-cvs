@@ -364,6 +364,9 @@ Section -post
     !insertmacro WriteRegStringIfUndef HKLM "SOFTWARE\OpenVPN" "log_append"  "${SERV_LOG_APPEND}"
 
     ; install openvpnserv as a service
+    DetailPrint "Previous Service REMOVE (if exists)"
+    nsExec::ExecToLog '"$INSTDIR\bin\openvpnserv.exe" -remove'
+    Pop $R0 # return value/error/timeout
     DetailPrint "Service INSTALL"
     nsExec::ExecToLog '"$INSTDIR\bin\openvpnserv.exe" -install'
     Pop $R0 # return value/error/timeout

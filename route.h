@@ -54,6 +54,7 @@ struct route_option {
 struct route_option_list {
   int n;
   bool redirect_default_gateway;
+  bool redirect_local;
   struct route_option routes[MAX_ROUTES];
 };
 
@@ -71,6 +72,7 @@ struct route_list {
   bool routes_added;
   struct route_special_addr spec;
   bool redirect_default_gateway;
+  bool redirect_local;
   bool did_redirect_default_gateway;
 
   int n;

@@ -52,8 +52,8 @@ typedef unsigned int ssize_t;
 //#define TAP_WIN32_DEBUG
 
 /* Minimum TAP-Win32 version number expected by userspace */
-#define TAP_WIN32_MIN_MAJOR 6
-#define TAP_WIN32_MIN_MINOR 11
+#define TAP_WIN32_MIN_MAJOR 7
+#define TAP_WIN32_MIN_MINOR 1
 
 /* Enable multiclient server capability */
 #define MULTICLIENT_SERVER_ENABLED 1

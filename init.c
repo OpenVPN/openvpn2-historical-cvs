@@ -1769,7 +1769,8 @@ inherit_context_thread (struct context *dest,
 void
 close_context (struct context *c, int sig)
 {
-  c->sig->signal_received = sig;
+  if (sig >= 0)
+    c->sig->signal_received = sig;
   close_instance (c);
   context_gc_free (c);
 }

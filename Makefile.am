@@ -39,6 +39,7 @@ openvpn_SOURCES = \
 	crypto.c crypto.h \
 	errlevel.h \
 	error.c error.h \
+	event.c event.h \
 	fdmisc.c fdmisc.h \
         forward.c forward.h forward-inline.h \
 	fragment.c fragment.h \

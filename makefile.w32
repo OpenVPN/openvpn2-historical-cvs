@@ -39,7 +39,7 @@ EXE = openvpn.exe
 
 HEADERS = basic.h buffer.h circ_list.h common.h \
 	  tap-win32/common.h \
-          config-win32.h crypto.h errlevel.h error.h \
+          config-win32.h crypto.h errlevel.h error.h event.h \
           fdmisc.h forward-inline.h forward.h fragment.h \
           gremlin.h init.h integer.h interval.h \
 	  io.h list.h lzo.h mbuf.h \
@@ -52,7 +52,7 @@ HEADERS = basic.h buffer.h circ_list.h common.h \
           shaper.h sig.h socket.h socks.h ssl.h syshead.h \
           thread.h tun.h win32.h
 
-OBJS =  buffer.o crypto.o error.o fdmisc.o forward.o \
+OBJS =  buffer.o crypto.o error.o event.o fdmisc.o forward.o \
         fragment.o gremlin.o inet_aton.o init.o io.o \
         list.o lzo.o mbuf.o \
 	misc.o mroute.o mss.o mtu.o multi.o occ.o \

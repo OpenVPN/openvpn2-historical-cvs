@@ -7,9 +7,9 @@
 ; ****************************************************************************
 
 ; SYNTAX CHECKER
-; cd \WINDDK\2600.1106\tools\chkinf
+; cd \WINDDK\3790\tools\chkinf
 ; chkinf c:\src\openvpn\tap-win32\i386\oemwin2k.inf
-; OUTPUT -> file:///c:/WINDDK/2600.1106/tools/chkinf/htm/c++src+openvpn+tap-win32+i386__OemWin2k.htm
+; OUTPUT -> file:///c:/WINDDK/3790/tools/chkinf/htm/c%23+src+openvpn+tap-win32+i386+__OemWin2k.htm
 
 [Version]
    Signature = "$Windows NT$"
@@ -17,7 +17,7 @@
    ClassGUID = {4d36e972-e325-11ce-bfc1-08002be10318}
    Provider = %l_Provider%
    Class = Net
-   DriverVer=03/13/2004,6.00.00.0002
+   DriverVer=05/13/2004,7.00.00.0001
 
 [Strings]
    l_DeviceDescription = "TAP-Win32 Adapter"
@@ -30,7 +30,7 @@
    %l_Provider% = TapWin32Project
 
 [TapWin32Project]
-   %l_DeviceDescription% = TAP.ndi, TAP
+   %l_DeviceDescription% = TAP.ndi, TAPDEV
 
 ;---------------------------------------------------------------
 ;                             Driver Section (Done)

@@ -1595,7 +1595,7 @@ multi_thread_init (struct multi_context *multi, const struct context *top)
 static void
 multi_thread_free (struct multi_thread *thread)
 {
-  close_context (&thread->top, SIGTERM);
+  close_context (&thread->top, -1);
   free_context_buffers (thread->context_buffers);
   free (thread);
 }

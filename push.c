@@ -51,23 +51,20 @@ send_push_reply (struct context *c)
   struct buffer buf = alloc_buf_gc (MAX_PUSH_LIST_LEN + 256, &gc);
   bool ret = false;
 
-  if (c->c2.push_ifconfig_defined)
-    {
-      buf_printf (&buf, "PUSH_REPLY");
+  buf_printf (&buf, "PUSH_REPLY");
 
-      if (c->options.push_list && strlen (c->options.push_list->options))
-	buf_printf (&buf, ",%s", c->options.push_list->options);
+  if (c->options.push_list && strlen (c->options.push_list->options))
+    buf_printf (&buf, ",%s", c->options.push_list->options);
 
-      if (c->c2.push_ifconfig_local && c->c2.push_ifconfig_remote_netmask)
-	buf_printf (&buf, ",ifconfig %s %s",
-		    print_in_addr_t (c->c2.push_ifconfig_local, true, &gc),
-		    print_in_addr_t (c->c2.push_ifconfig_remote_netmask, true, &gc));
+  if (c->c2.push_ifconfig_defined && c->c2.push_ifconfig_local && c->c2.push_ifconfig_remote_netmask)
+    buf_printf (&buf, ",ifconfig %s %s",
+		print_in_addr_t (c->c2.push_ifconfig_local, true, &gc),
+		print_in_addr_t (c->c2.push_ifconfig_remote_netmask, true, &gc));
 
-      if (strlen (BSTR (&buf)) >= MAX_PUSH_LIST_LEN)
-	msg (M_FATAL, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
+  if (strlen (BSTR (&buf)) >= MAX_PUSH_LIST_LEN)
+    msg (M_FATAL, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
 
-      ret = send_control_channel_string (c, BSTR (&buf));
-    }
+  ret = send_control_channel_string (c, BSTR (&buf));
 
   gc_free (&gc);
   return ret;
@@ -113,13 +110,21 @@ process_incoming_push_msg (struct context *c,
       if (send_push_reply (c))
 	ret = PUSH_MSG_REQUEST;
     }
-  else if (honor_received_options && buf_string_compare_advance (&buf, "PUSH_REPLY,"))
+  else if (honor_received_options && buf_string_compare_advance (&buf, "PUSH_REPLY"))
     {
-      if (apply_push_options (&c->options,
-			      &buf,
-			      permission_mask,
-			      option_types_found))
-	ret = PUSH_MSG_REPLY;
+      const uint8_t ch = buf_read_u8 (&buf);
+      if (ch == ',')
+	{
+	  if (apply_push_options (&c->options,
+				  &buf,
+				  permission_mask,
+				  option_types_found))
+	    ret = PUSH_MSG_REPLY;
+	}
+      else if (ch == '\0')
+	{
+	  ret = PUSH_MSG_REPLY;
+	}
       /* show_settings (&c->options); */
     }
   return ret;

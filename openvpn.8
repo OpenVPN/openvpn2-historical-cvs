@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "08 May 2004"
+.TH openvpn 8 "14 May 2004"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -180,7 +180,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-push\-reset\fR\ ]
 [\ \fB\-\-push\fR\ \fI"option"\fR\ ]
 [\ \fB\-\-rcvbuf\fR\ \fIsize\fR\ ]
-[\ \fB\-\-redirect\-gateway\fR\ ]
+[\ \fB\-\-redirect\-gateway\fR\ \fI['local']\fR\ ]
 [\ \fB\-\-remote\-random\fR\ ]
 [\ \fB\-\-remote\fR\ \fIhost\ [port]\fR\ ]
 [\ \fB\-\-reneg\-bytes\fR\ \fIn\fR\ ]
@@ -810,7 +810,7 @@ Don't add or remove routes automatically.  Instead pass routes to
 .B --route-up
 script using environmental variables.
 .TP
-.B --redirect-gateway
+.B --redirect-gateway ['local']
 (Experimental) Automatically execute routing commands to cause all outgoing IP traffic
 to be redirected over the VPN.  Currently implemented only on Linux and Windows.
 
@@ -835,6 +835,15 @@ or the second parameter to
 when
 .B --dev tun
 is specified).
+
+Add
+.B local
+flag if both OpenVPN servers are directly connected via a common subnet,
+such as with wireless.  The
+.B local
+flag will cause step
+.B 1
+above to be omitted.
 
 When the tunnel is torn down, all of the above steps are reversed so
 that the original default route is restored.

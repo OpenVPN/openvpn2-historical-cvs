@@ -126,6 +126,10 @@
 #include <netinet/in.h>
 #endif
 
+#ifdef HAVE_SYS_EPOLL_H
+#include <sys/epoll.h>
+#endif
+
 #ifdef TARGET_SOLARIS
 #ifdef HAVE_STRINGS_H
 #include <strings.h>
@@ -327,6 +331,15 @@ typedef int socket_descriptor_t;
 #endif
 
 /*
+ * Our event type
+ */
+#ifdef WIN32
+typedef HANDLE event_t;
+#else
+typedef int event_t;
+#endif
+
+/*
  * Do we have point-to-multipoint capability?
  */
 
@@ -334,6 +347,15 @@ typedef int socket_descriptor_t;
 #define P2MP 1
 #else
 #define P2MP 0
+#endif
+
+/*
+ * Is epoll available on this platform?
+ */
+#if defined(HAVE_EPOLL_CREATE) && defined(HAVE_SYS_EPOLL_H)
+#define EPOLL 1
+#else
+#define EPOLL 0
 #endif
 
 #endif

@@ -304,6 +304,7 @@ init_route_list (struct route_list *rl,
       setenv_route_addr ("net_gateway", rl->spec.net_gateway, -1);
     }
   rl->redirect_default_gateway = opt->redirect_default_gateway;
+  rl->redirect_local = opt->redirect_local;
 
   if (is_route_parm_defined (remote_endpoint))
     {
@@ -394,9 +395,10 @@ redirect_default_route_to_vpn (struct route_list *rl)
       else
 	{
 	  /* route remote host to original default gateway */
-	  add_route3 (rl->spec.remote_host,
-		      ~0,
-		      rl->spec.net_gateway);
+	  if (!rl->redirect_local)
+	    add_route3 (rl->spec.remote_host,
+			~0,
+			rl->spec.net_gateway);
 
 	  /* delete default route */
 	  del_route3 (0,
@@ -420,9 +422,10 @@ undo_redirect_default_route_to_vpn (struct route_list *rl)
   if (rl->did_redirect_default_gateway)
     {
       /* delete remote host route */
-      del_route3 (rl->spec.remote_host,
-		  ~0,
-		  rl->spec.net_gateway);
+      if (!rl->redirect_local)
+	del_route3 (rl->spec.remote_host,
+		    ~0,
+		    rl->spec.net_gateway);
 
       /* delete default route */
       del_route3 (0,
@@ -496,7 +499,8 @@ print_route_options (const struct route_option_list *rol,
 {
   int i;
   if (rol->redirect_default_gateway)
-    msg (level, "  [redirect_default_gateway]");
+    msg (level, "  [redirect_default_gateway local=%d]",
+	 rol->redirect_local);
   for (i = 0; i < rol->n; ++i)
     print_route_option (&rol->routes[i], level);
 }

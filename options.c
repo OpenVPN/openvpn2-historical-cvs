@@ -64,6 +64,9 @@ const char title_string[] =
 #ifdef USE_LZO
   " [LZO]"
 #endif
+#if EPOLL
+  " [EPOLL]"
+#endif
 #ifdef USE_PTHREAD
   " [PTHREAD]"
 #endif
@@ -135,8 +138,10 @@ static const char usage_message[] =
   "--route-up cmd  : Execute shell cmd after routes are added.\n"
   "--route-noexec  : Don't add routes automatically.  Instead pass routes to\n"
   "                  --route-up script using environmental variables.\n"
-  "--redirect-gateway : (Experimental) Automatically execute routing commands to\n"
-  "                     redirect all outgoing IP traffic through the VPN.\n"
+  "--redirect-gateway ['local']: (Experimental) Automatically execute routing\n"
+  "                  commands to redirect all outgoing IP traffic through the\n"
+  "                  VPN.  Add 'local' flag if both OpenVPN servers are directly\n"
+  "                  connected via a common subnet, such as with wireless.\n"
   "--setenv name value : Set a custom environmental variable to pass to script.\n"
   "--shaper n      : Restrict output to peer to n bytes per second.\n"
   "--inactive n    : Exit after n seconds of inactivity on tun/tap device.\n"
@@ -471,7 +476,7 @@ setenv_settings (const struct options *o)
   setenv_str ("proto", proto2ascii (o->proto, false));
   setenv_str ("local", o->local);
   setenv_int ("local_port", o->local_port);
-#if 0 // JYFIXME
+#if 0 // JYFIXME -- set remote and remote_port environmental variables
   setenv_str ("remote", o->remote);
   setenv_int ("remote_port", o->remote_port);
 #endif
@@ -2373,6 +2378,14 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_ROUTE);
       rol_check_alloc (options);
       options->routes->redirect_default_gateway = true;
+      if (p[1])
+	{
+	  ++i;
+	  if (streq (p[1], "local"))
+	    options->routes->redirect_local = true;
+	  else
+	    msg (msglevel, "--redirect-gateway currently supports only the 'local' flag");
+	}
     }
   else if (streq (p[0], "setenv") && p[1] && p[2])
     {

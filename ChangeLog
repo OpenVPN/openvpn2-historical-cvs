@@ -1,7 +1,30 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.29 2004/05/10 06:13:31 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.30 2004/05/15 04:56:36 jimyonan Exp $
+
+2004.05.14 -- Version 2.0-beta2
+
+* Fixed signal handling bug in --mode server, where
+  SIGHUP and SIGUSR1 were treated as SIGTERM.
+* Changed the TAP-Win32 HWID from "TAP" to "TAPDEV".
+  Apparently the larger string may work around
+  a problem where the TAP adapter is sometimes missing
+  from the network connections panel, especially under
+  XP SP2. Also note that installing this upgrade will
+  uninstall any pre-existing TAP-Win32 adapters, and then
+  install a single new adapter, meaning that old adapter
+  properties will be lost.  Thanks to Md5Chap for solving
+  this one.
+* For --mode server --dev tap, the options --ifconfig and
+  --ifconfig-pool are now optional.  This allows address
+  assignment via DHCP or use of a TAP VPN without
+  IP support, as has always been possible with 1.x.
+* Fixed bug where --ifconfig may not work correctly on
+  Linux 2.2.
+* Added 'local' flag to --redirect-gateway for use on
+  networks where both OpenVPN daemons are connected
+  to a shared subnet, such as wireless.
 
 2004.05.09 -- Version 2.0-beta1
 

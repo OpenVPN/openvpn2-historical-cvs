@@ -944,7 +944,11 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 
  linux_2_2_fallback:
   msg (M_INFO, "Note: Attempting fallback to kernel 2.2 TUN/TAP interface");
-  close_tun_generic (tt);
+  if (tt->fd >= 0)
+    {
+      close (tt->fd);
+      tt->fd = -1;
+    }
   open_tun_generic (dev, dev_type, dev_node, ipv6, false, true, tt);
 }
 
@@ -1719,7 +1723,7 @@ get_tap_reg (struct gc_arena *gc)
 
 	      if (status == ERROR_SUCCESS && data_type == REG_SZ)
 		{
-		  if (!strcmp (component_id, "tap"))
+		  if (!strcmp (component_id, "tapdev"))
 		    {
 		      struct tap_reg *reg;
 		      ALLOC_OBJ_CLEAR_GC (reg, struct tap_reg, gc);

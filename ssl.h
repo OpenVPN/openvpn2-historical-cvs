@@ -157,7 +157,7 @@
 /*
  * Measure success rate of TLS handshakes, for debugging only
  */
-#define MEASURE_TLS_HANDSHAKE_STATS /* CHANGEME */
+/* #define MEASURE_TLS_HANDSHAKE_STATS */
 
 /*
  * Represents a single instantiation of a TLS negotiation and

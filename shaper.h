@@ -27,14 +27,12 @@
 #define SHAPER_H
 
 #include "basic.h"
+#include "common.h"
 
 /*
  * A simple traffic shaper for
  * the output direction.
  */
-
-/* starting point (bytes per sec) for adaptive bandwidth */
-#define INITIAL_BANDWIDTH     10000
 
 #define SHAPER_MIN 100          /* bytes per second */
 #define SHAPER_MAX 100000000
@@ -47,9 +45,22 @@ struct shaper
   struct timeval wakeup;
 };
 
-void shaper_init (struct shaper *s, int bytes_per_second, bool print_message);
+void shaper_init (struct shaper *s, int bytes_per_second);
+void shaper_msg (struct shaper *s);
 int shaper_delay (struct shaper* s);
 void shaper_soonest_event (struct timeval *tv, int delay);
 void shaper_wrote_bytes (struct shaper* s, int nbytes);
+bool shaper_change_pct (struct shaper *s, int pct);
+void shaper_reset (struct shaper *s, int bytes_per_second);
+
+/*
+ * inline functions
+ */
+
+static inline int
+shaper_current_bandwidth (struct shaper *s)
+{
+  return s->bytes_per_second;
+}
 
 #endif

@@ -69,14 +69,17 @@
 #define D_PID_PERSIST_DEBUG  LOGLEV(8, 29, M_DEBUG)  /* show packet-id persist debugging info */
 #define D_UDP_RW_VERBOSE     LOGLEV(8, 30, M_DEBUG)  /* show UDP reads/writes with greater verbosity */
 
-#define D_SHAPER             LOGLEV(9, 40, M_DEBUG)  /* show traffic shaper info */
+#define D_SHAPER_DEBUG       LOGLEV(9, 40, M_DEBUG)  /* show traffic shaper info */
 
 #define D_OPENSSL_LOCK       LOGLEV(10, 41, M_DEBUG) /* show OpenSSL locks */
 
 // DEBUGGING CHANGEME
 #define D_GREMLIN_VERBOSE    LOGLEV(5, 50, M_DEBUG)  /* show verbose info from gremlin module */
 #define D_FRAG_DEBUG         LOGLEV(5, 51, M_DEBUG)  /* show fragment debugging info */
-#define D_REL_DEBUG          LOGLEV(5, 52, M_DEBUG)  /* show detailed info from reliable routines */
-#define D_UDP_RW             LOGLEV(6, 53, M_DEBUG)  /* show UDP reads/writes */
-#define D_INTERVAL           LOGLEV(7, 54, M_DEBUG)  /* show interval.h debugging info */
+#define D_MTU_DEBUG          LOGLEV(5, 52, M_DEBUG)  /* show dynamic MTU info */
+#define D_SHAPER             LOGLEV(5, 53, M_DEBUG)  /* show traffic shaper info */
+#define D_REL_DEBUG          LOGLEV(6, 60, M_DEBUG)  /* show detailed info from reliable routines */
+#define D_UDP_RW             LOGLEV(6, 61, M_DEBUG)  /* show UDP reads/writes */
+#define D_INTERVAL           LOGLEV(7, 70, M_DEBUG)  /* show interval.h debugging info */
+
 #endif

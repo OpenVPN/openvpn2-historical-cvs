@@ -41,6 +41,17 @@
 
 #include "memdbg.h"
 
+/* check if a particular packet_id is present in ack */
+static inline bool
+reliable_ack_packet_id_present (struct reliable_ack *ack, packet_id_type pid)
+{
+  int i;
+  for (i = 0; i < ack->len; ++i)
+    if (ack->packet_id[i] == pid)
+      return true;
+  return false;
+}
+
 /* get a packet_id from buf */
 bool
 reliable_ack_read_packet_id (struct buffer *buf, packet_id_type *pid)
@@ -63,7 +74,7 @@ reliable_ack_read_packet_id (struct buffer *buf, packet_id_type *pid)
 bool
 reliable_ack_acknowledge_packet_id (struct reliable_ack *ack, packet_id_type pid)
 {
-  if (ack->len < RELIABLE_ACK_SIZE)
+  if (!reliable_ack_packet_id_present (ack, pid) && ack->len < RELIABLE_ACK_SIZE)
     {
       ack->packet_id[ack->len++] = pid;
       msg (D_REL_DEBUG, "ACK acknowledge ID " packet_id_format " (ack->len=%d)",

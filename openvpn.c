@@ -687,7 +687,10 @@ openvpn (const struct options *options,
 
   /* initialize traffic shaper (i.e. transmit bandwidth limiter) */
   if (options->shaper)
-    shaper_init (&shaper, options->shaper, true);
+    {
+      shaper_init (&shaper, options->shaper);
+      shaper_msg (&shaper);
+    }
 
   /* drop privileges if requested */
   if (first_time)
@@ -864,15 +867,12 @@ openvpn (const struct options *options,
        */
       if (fragment)
 	{
+	  /* OS MTU Hint? */
 	  if (ipv4_tun && udp_socket.mtu_changed)
 	    {
 	      frame_adjust_path_mtu (&frame_fragment, udp_socket.mtu);
 	      udp_socket.mtu_changed = false;
-	    }
-	  /*fragment_housekeeping (fragment, current, &timeval); */
-	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame_fragment, current))
-	    {
-	      to_tun = buf;
+	      fragment_received_os_mtu_hint (fragment, &frame_fragment);
 	    }
 	  if (!to_udp.len && fragment_ready_to_send (fragment, &buf, &frame_fragment, current))
 	    {
@@ -914,6 +914,11 @@ openvpn (const struct options *options,
 	      to_udp = buf;
 	      free_to_udp = false;
 	    }
+	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame_fragment, current))
+	    {
+	      to_tun = buf;
+	    }
+	  fragment_housekeeping (fragment, &frame_fragment, current, &timeval);
 	}
 
       /*
@@ -1415,7 +1420,7 @@ openvpn (const struct options *options,
 		      if (options->shaper)
 			shaper_wrote_bytes (&shaper, BLEN (&to_udp));
 		      if (fragment)
-			shaper_wrote_bytes (&fragment->shaper, BLEN (&to_udp));
+			fragment_post_send (fragment, BLEN (&to_udp));
 
 		      /*
 		       * Let the pinger know that we sent a packet.
@@ -1870,7 +1875,7 @@ main (int argc, char *argv[])
  exit:
 
 #if defined(MEASURE_TLS_HANDSHAKE_STATS) && defined(USE_CRYPTO) && defined(USE_SSL)
-  show_tls_handshake_stats();
+  show_tls_performance_stats();
 #endif
 
   /* pop our garbage collection level */

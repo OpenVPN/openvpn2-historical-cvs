@@ -34,6 +34,7 @@
 
 #include "error.h"
 #include "common.h"
+#include "misc.h"
 #include "gremlin.h"
 
 #include "memdbg.h"
@@ -81,7 +82,7 @@
  * Return true with probability 1/n
  */
 static bool flip(int n) {
-  return (random() % n) == 0;
+  return (get_random() % n) == 0;
 }
 
 /*
@@ -91,7 +92,7 @@ static bool flip(int n) {
 static int roll(int low, int high) {
   int ret;
   ASSERT (low <= high);
-  ret = low + (random() % (high - low + 1));
+  ret = low + (get_random() % (high - low + 1));
   ASSERT (ret >= low && ret <= high);
   return ret;
 }
@@ -107,11 +108,9 @@ bool
 ask_gremlin()
 {
   struct timeval tv;
-  ASSERT (!gettimeofday (&tv, NULL));
 
   if (!initialized)
     {
-      srandom (tv.tv_usec);
       initialized = true;
 #ifdef UP_DOWN_ENABLE
       up = false;

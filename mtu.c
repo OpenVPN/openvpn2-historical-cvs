@@ -109,6 +109,8 @@ frame_dynamic_finalize (struct frame *frame)
     frame->dynamic.mtu = frame->dynamic.mtu_max;
   else
     frame->dynamic.mtu = constrain_int (frame->dynamic.mtu_initial, frame->dynamic.mtu_min, frame->dynamic.mtu_max);
+
+  msg (D_MTU_DEBUG, "MTU dynamic=%d", frame->dynamic.mtu);
 }
 
 /*
@@ -138,6 +140,21 @@ void
 frame_set_mtu_dynamic (struct frame *frame, int mtu_dynamic)
 {
   frame->dynamic.mtu_initial = mtu_dynamic;
+}
+
+/*
+ * Increase/Decrease udp_mtu by a percentage.
+ *
+ * Return true if mtu changed.
+ */
+bool
+frame_mtu_change_pct (struct frame *frame, int pct)
+{
+  const int orig_mtu = frame->udp_mtu;
+  const int new_mtu = orig_mtu + (orig_mtu * pct / 100);
+  frame_set_mtu_dynamic (frame, new_mtu);
+  frame_dynamic_finalize (frame);
+  return frame->udp_mtu != orig_mtu;
 }
 
 /*

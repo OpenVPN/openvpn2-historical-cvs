@@ -89,6 +89,15 @@ max_int (int x, int y)
 }
 
 static inline int
+min_int (int x, int y)
+{
+  if (x < y)
+    return x;
+  else
+    return y;
+}
+
+static inline int
 constrain_int (int x, int min, int max)
 {
   if (min > max)

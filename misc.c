@@ -309,6 +309,7 @@ system_check (const char* command, const char* error_message, bool fatal)
 void
 init_random_seed()
 {
+#ifndef USE_CRYPTO
   struct timeval tv;
 
   if (!gettimeofday (&tv, NULL))
@@ -316,6 +317,7 @@ init_random_seed()
       const unsigned int seed = (unsigned int) tv.tv_sec ^ tv.tv_usec;
       srandom (seed);
     }
+#endif
 }
 
 /* format a time_t as ascii, or use current time if 0 */

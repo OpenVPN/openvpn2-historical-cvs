@@ -50,16 +50,32 @@
 #include "memdbg.h"
 
 #ifdef MEASURE_TLS_HANDSHAKE_STATS
+
 static int tls_handshake_success;
 static int tls_handshake_error;
+static int tls_packets_generated;
+static int tls_packets_sent;
+
+#define INCR_SENT       ++tls_packets_sent
+#define INCR_GENERATED  ++tls_packets_generated
+#define INCR_SUCCESS    ++tls_handshake_success
+#define INCR_ERROR      ++tls_handshake_error
 
 void
-show_tls_handshake_stats()
+show_tls_performance_stats()
 {
-  msg (M_INFO, "TLS Handshakes, success=%f%% (good=%d, bad=%d)",
+  msg (D_TLS_DEBUG_LOW, "TLS Handshakes, success=%f%% (good=%d, bad=%d), retransmits=%f%%",
        (double) tls_handshake_success / (tls_handshake_success + tls_handshake_error) * 100.0,
-       tls_handshake_success, tls_handshake_error);
+       tls_handshake_success, tls_handshake_error,
+       (double) (tls_packets_sent - tls_packets_generated) / tls_packets_generated * 100.0);
 }
+#else
+
+#define INCR_SENT
+#define INCR_GENERATED
+#define INCR_SUCCESS
+#define INCR_ERROR
+
 #endif
 
 #ifdef BIO_DEBUG
@@ -1267,7 +1283,7 @@ tls_process (struct tls_multi *multi,
 	   && ks->n_packets >= session->opt->renegotiate_packets)
        || (packet_id_close_to_wrapping (&ks->packet_id.send))))
     {
-      msg (D_TLS_DEBUG_LOW, "tls_process: soft reset sec=%d bytes=%d/%d pkts=%d/%d",
+      msg (D_TLS_DEBUG_LOW, "TLS: soft reset sec=%d bytes=%d/%d pkts=%d/%d",
 	   (int) ks->established + session->opt->renegotiate_seconds - current,
 	   ks->n_bytes, session->opt->renegotiate_bytes,
 	   ks->n_packets, session->opt->renegotiate_packets);
@@ -1307,6 +1323,7 @@ tls_process (struct tls_multi *multi,
 	      
 		  /* null buffer */
 		  reliable_mark_active_outgoing (&ks->send_reliable, buf, ks->initial_opcode);
+		  INCR_GENERATED;
 	      
 		  ks->state = S_PRE_START;
 		  state_change = true;
@@ -1352,12 +1369,13 @@ tls_process (struct tls_multi *multi,
 		    print_details (ks->ssl, "Control Channel:");
 		  state_change = true;
 		  ks->state = S_ACTIVE;
+		  INCR_SUCCESS;
 
 		  /* Set outgoing address for data channel packets */
 		  udp_socket_set_outgoing_addr (NULL, to_udp_socket, &ks->remote_addr);
 
 #ifdef MEASURE_TLS_HANDSHAKE_STATS
-		  ++tls_handshake_success;
+		  show_tls_performance_stats();
 #endif
 		}
 	    }
@@ -1372,6 +1390,8 @@ tls_process (struct tls_multi *multi,
 	      buf = reliable_send (&ks->send_reliable, &opcode, current);
 	      ASSERT (buf);
 	      b = *buf;
+	      INCR_SENT;
+
 
 	      write_control_auth (session, ks, &b, to_udp_addr, opcode,
 				      CONTROL_SEND_ACK_MAX, true, current);
@@ -1553,6 +1573,7 @@ tls_process (struct tls_multi *multi,
 		  if (status == 1)
 		    {
 		      reliable_mark_active_outgoing (&ks->send_reliable, buf, P_CONTROL_V1);
+		      INCR_GENERATED;
 		      state_change = true;
 		      msg (D_TLS_DEBUG, "Outgoing Ciphertext -> Reliable");
 		    }
@@ -1602,9 +1623,7 @@ tls_process (struct tls_multi *multi,
 error:
   ks->state = S_ERROR;
   msg (D_TLS_ERRORS, "TLS Error: TLS handshake failed");
-#ifdef MEASURE_TLS_HANDSHAKE_STATS
-  ++tls_handshake_error;
-#endif
+  INCR_ERROR;
   return false;
 }
 

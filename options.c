@@ -1204,7 +1204,7 @@ parse_argv (struct options* options, int argc, char *argv[])
 	  if (!strncmp (p2, "--", 2))
 	    p2 = NULL;
 	}
-      if (i + 2 < argc)
+      if (i + 2 < argc && p2)
 	{
 	  p3 = argv[i + 2];
 	  if (!strncmp (p3, "--", 2))

@@ -616,6 +616,8 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node,
   set_nonblock (tt->fd);
   set_cloexec (tt->fd);
   set_cloexec (tt->ip_fd);
+
+  msg (M_INFO, "tun/tap device %s opened", tt->actual);
  
   if (dev_name)
     msg (M_WARN, "Cannot rename dev %s to %s", dev, dev_name);

@@ -1112,6 +1112,18 @@ void init_crypto_lib ()
 {
 }
 
+/* an analogue to the random() function, but use OpenSSL function */
+long int
+get_random()
+{
+  long int l;
+  ASSERT (RAND_pseudo_bytes ((unsigned char *)&l, sizeof(l)));
+  if (l < 0)
+    l = -l;
+  return l;
+}
+
+
 #ifndef USE_SSL
 
 void

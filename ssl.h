@@ -125,7 +125,7 @@
   || (op) == P_CONTROL_HARD_RESET_SERVER_V1)
 
 /* Should we aggregate TLS acknowledgements, and tack them onto control packets? */
-#define TLS_AGGREGATE_ACK
+/* #define TLS_AGGREGATE_ACK */
 
 /*
  * If TLS_AGGREGATE_ACK, set the
@@ -138,7 +138,7 @@
 /*
  * Define number of buffers for send and receive in the reliability layer.
  */
-#define TLS_RELIABLE_N_SEND_BUFFERS  8
+#define TLS_RELIABLE_N_SEND_BUFFERS  4
 #define TLS_RELIABLE_N_REC_BUFFERS   8
 
 /*
@@ -157,9 +157,7 @@
 /*
  * Measure success rate of TLS handshakes, for debugging only
  */
-#ifdef DMALLOC
 #define MEASURE_TLS_HANDSHAKE_STATS
-#endif
 
 /*
  * Represents a single instantiation of a TLS negotiation and
@@ -432,7 +430,7 @@ const char *protocol_dump (struct buffer *buffer, unsigned int flags);
  */
 
 #ifdef MEASURE_TLS_HANDSHAKE_STATS
-void show_tls_handshake_stats();
+void show_tls_performance_stats();
 #endif
 
 

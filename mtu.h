@@ -153,6 +153,7 @@ struct frame {
  * overhead is added.
  */
 #define EXPANDED_SIZE(f)         ((f)->udp_mtu)
+#define EXPANDED_SIZE_DYNAMIC(f) ((f)->dynamic.mtu)
 
 /*
  * Max size of a buffer used to build a packet for output to
@@ -189,6 +190,7 @@ void frame_finalize (struct frame *frame,
 void frame_finalize_derivative (struct frame *frame, const struct frame *src);
 void frame_dynamic_finalize (struct frame *frame);
 void frame_set_mtu_dynamic (struct frame *frame, int mtu_dynamic);
+bool frame_mtu_change_pct (struct frame *frame, int pct);
 void frame_subtract_extra (struct frame *frame, const struct frame *src);
 void frame_print (const struct frame *frame, int level, const char *prefix);
 
@@ -229,6 +231,12 @@ frame_adjust_path_mtu (struct frame *frame, int pmtu)
 {
   frame_set_mtu_dynamic (frame, pmtu - IPv4_UDP_HEADER_SIZE);
   frame_dynamic_finalize (frame);
+}
+
+static inline bool
+frame_defined (const struct frame *frame)
+{
+  return frame->udp_mtu > 0;
 }
 
 #endif

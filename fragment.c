@@ -25,10 +25,11 @@
 
 #include "config.h"
 #include "syshead.h"
+#include "misc.h"
 #include "fragment.h"
 #include "memdbg.h"
 
-#define FRAG_ERR(s) { msg = s; goto error; }
+#define FRAG_ERR(s) { errmsg = s; goto error; }
 
 static void
 fragment_list_buf_init (struct fragment_list *list, const struct frame *frame)
@@ -89,9 +90,11 @@ fragment_init (struct frame *frame)
    * when openvpn sessions are restarted.  This is not done out of any need for security, as all
    * fragmentation control information resides inside of the encrypted/authenticated envelope.
    */
-  ret->outgoing_seq_id = (int)random() & (N_SEQ_ID - 1);
+  ret->outgoing_seq_id = (int)get_random() & (N_SEQ_ID - 1);
 
-  shaper_init (&ret->shaper, INITIAL_BANDWIDTH, false);
+  event_timeout_init (&ret->wakeup, 0, FRAG_WAKEUP_INTERVAL);
+
+  shaper_init (&ret->shaper, FRAG_INITIAL_BANDWIDTH);
 
   return ret;
 }
@@ -111,11 +114,10 @@ fragment_frame_init (struct fragment_master *f, const struct frame *frame, bool 
   fragment_list_buf_init (&f->incoming, frame);
   f->outgoing = alloc_buf (BUF_SIZE (frame));
   f->outgoing_return = alloc_buf (BUF_SIZE (frame));
+
   if (generate_icmp)
     f->icmp_buf = alloc_buf (BUF_SIZE (frame));
 }
-
-#define FRAG_ERR(s) { errmsg = s; goto error; }
 
 /*
  * Accept an incoming datagram (which may be a fragment) from remote.
@@ -142,22 +144,43 @@ fragment_incoming (struct fragment_master *f, struct buffer *buf,
 	 packet count back to peer for receipt confirmation) */
       ++f->n_packets_received;
 
+      /* keep track of max packet size received (later, we will bounce this
+	 value back to peer for receipt confirmation) */
+      f->max_packet_size_received = max_int (f->max_packet_size_received, BLEN (buf));
+
       /* get fragment type from flags */
       frag_type = ((flags >> FRAG_TYPE_SHIFT) & FRAG_TYPE_MASK);
 
       /* update n_packets_sent_confirmed */
       if (frag_type == FRAG_WHOLE || frag_type == FRAG_YES_NOTLAST)
-	f->n_packets_sent_confirmed += ((flags >> FRAG_N_PACKETS_RECEIVED_SHIFT) & FRAG_N_PACKETS_RECEIVED_MASK);
+	{
+	  const int extra = ((flags >> FRAG_EXTRA_SHIFT) & FRAG_EXTRA_MASK);
+	  if (flags & FRAG_EXTRA_IS_MAX)
+	    {
+	      f->max_packet_size_sent_confirmed = max_int (f->max_packet_size_sent_confirmed, extra);
+	      f->max_packet_size_sent_sync = max_int (f->max_packet_size_sent_sync, f->max_packet_size_sent);
+	      f->max_packet_size_sent = 0;
+	    }
+	  else
+	    {
+	      f->n_packets_sent_confirmed += extra;
+	      f->n_packets_sent_sync += f->n_packets_sent;
+	      f->bytes_sent_sync += f->bytes_sent;
+	      f->n_packets_sent = f->bytes_sent = 0;
+	    }
+	}
 
       /* handle the fragment type */
       if (frag_type == FRAG_WHOLE)
 	{
 	  msg (D_FRAG_DEBUG,
-	       "FRAG_IN buf->len=%d type=FRAG_WHOLE sent=%d confirmed=%d flags="
+	       "FRAG_IN buf->len=%d type=FRAG_WHOLE n=[%d/%d] max=[%d/%d] flags="
 	       fragment_type_format,
 	       buf->len,
-	       f->n_packets_sent,
+	       f->n_packets_sent_sync,
 	       f->n_packets_sent_confirmed,
+	       f->max_packet_size_sent_sync,
+	       f->max_packet_size_sent_confirmed,
 	       flags);
 
 	  if (flags & (FRAG_SEQ_ID_MASK | FRAG_ID_MASK))
@@ -175,15 +198,17 @@ fragment_incoming (struct fragment_master *f, struct buffer *buf,
 	  struct fragment *frag = fragment_list_get_buf (&f->incoming, seq_id);
 
 	  msg (D_FRAG_DEBUG,
-	       "FRAG_IN len=%d type=%d seq_id=%d frag_id=%d size=%d sent=%d confirmed=%d flags="
+	       "FRAG_IN len=%d type=%d seq_id=%d frag_id=%d size=%d n=[%d/%d] max=[%d/%d] flags="
 	       fragment_type_format,
 	       buf->len,
 	       frag_type,
 	       seq_id,
 	       n,
 	       size,
-	       f->n_packets_sent,
+	       f->n_packets_sent_sync,
 	       f->n_packets_sent_confirmed,
+	       f->max_packet_size_sent_sync,
+	       f->max_packet_size_sent_confirmed,
 	       flags);
 
 	  /* make sure that size is an even multiple of 1<<FRAG_SIZE_ROUND_SHIFT */
@@ -214,8 +239,6 @@ fragment_incoming (struct fragment_master *f, struct buffer *buf,
 	    {
 	      frag->defined = false;
 	      *buf = frag->buf;
-
-	      /* printf ("IN[%d] %s\n", BLEN(buf), format_hex (BPTR(buf), BLEN(buf), 0)); */
 	    }
 	  else
 	    {
@@ -224,7 +247,7 @@ fragment_incoming (struct fragment_master *f, struct buffer *buf,
 	}
       else if (frag_type == FRAG_TEST)
 	{
-	  /* CODE ME */
+	  FRAG_ERR ("FRAG_TEST not implemented");
 	}
       else
 	{
@@ -236,37 +259,83 @@ fragment_incoming (struct fragment_master *f, struct buffer *buf,
 
  error:
   if (errmsg)
-    msg (D_FRAG_ERRORS, "Fragmentation input error flags=" fragment_type_format ": %s", flags, errmsg);
+    msg (D_FRAG_ERRORS, "FRAG_IN error flags=" fragment_type_format ": %s", flags, errmsg);
   buf->len = 0;
   return;
 }
 
-/* pack fragment parms into a uint32_t and prepend to buffer */
-static inline void
-fragment_prepend_flags (struct buffer *buf, int type, int seq_id, int frag_id, int frag_size, int *n_packets_received)
+/*
+ * return
+ *  true --  if sending max_packet_size_received
+ *  false -- if sending n_packets_received
+ */
+static inline bool
+fragment_which_stat_to_send (struct fragment_master *f)
 {
-  fragment_header_type flags;
-  int npr = *n_packets_received;
+  return f->which_stat_to_send ^= 1;
+}
 
-  if (npr > FRAG_N_PACKETS_RECEIVED_MASK)
-    npr = FRAG_N_PACKETS_RECEIVED_MASK;
+/*
+ * update outgoing statistics, will later be checked against confirmation
+ * by the peer.
+ */
+static inline void
+fragment_update_outgoing_stats (struct fragment_master *f, int size)
+{
+  ++f->n_packets_sent_pending;
+  f->max_packet_size_sent_pending = max_int (f->max_packet_size_sent_pending, size);
 
-  flags = ((type & FRAG_TYPE_MASK) << FRAG_TYPE_SHIFT)
+}
+
+/* pack fragment parms into a uint32_t and prepend to buffer */
+static void
+fragment_prepend_flags (struct buffer *buf,
+			int type,
+			int seq_id,
+			int frag_id,
+			int frag_size,
+			bool send_max_packet_size_received,
+			int *n_packets_received,
+			int *max_packet_size_received)
+{
+  fragment_header_type flags = ((type & FRAG_TYPE_MASK) << FRAG_TYPE_SHIFT)
     | ((seq_id & FRAG_SEQ_ID_MASK) << FRAG_SEQ_ID_SHIFT)
     | ((frag_id & FRAG_ID_MASK) << FRAG_ID_SHIFT);
 
   if (type == FRAG_WHOLE || type == FRAG_YES_NOTLAST)
     {
-      flags |= ((npr & FRAG_N_PACKETS_RECEIVED_MASK) << FRAG_N_PACKETS_RECEIVED_SHIFT);
-      *n_packets_received = 0;
+      if (send_max_packet_size_received)
+	{
+	  const int mps = *max_packet_size_received;
+	  flags |= (((mps & FRAG_EXTRA_MASK) << FRAG_EXTRA_SHIFT) | FRAG_EXTRA_IS_MAX);
+	  *max_packet_size_received = 0;
+
+	  msg (D_FRAG_DEBUG,
+	       "FRAG_OUT len=%d type=%d seq_id=%d frag_id=%d frag_size=%d max_packet_size=%d flags="
+	       fragment_type_format,
+	       buf->len, type, seq_id, frag_id, frag_size, mps, flags);
+	}
+      else
+	{
+	  const int npr = min_int (*n_packets_received, FRAG_EXTRA_MASK);
+	  flags |= (npr << FRAG_EXTRA_SHIFT);
+	  *n_packets_received -= npr;
+
+	  msg (D_FRAG_DEBUG,
+	       "FRAG_OUT len=%d type=%d seq_id=%d frag_id=%d frag_size=%d n_packets=%d flags="
+	       fragment_type_format,
+	       buf->len, type, seq_id, frag_id, frag_size, npr, flags);
+	}
     }
   else
-    flags |= (((frag_size >> FRAG_SIZE_ROUND_SHIFT) & FRAG_SIZE_MASK) << FRAG_SIZE_SHIFT);
+    {
+      flags |= (((frag_size >> FRAG_SIZE_ROUND_SHIFT) & FRAG_SIZE_MASK) << FRAG_SIZE_SHIFT);
 
-  msg (D_FRAG_DEBUG,
-       "FRAG_OUT len=%d type=%d seq_id=%d frag_id=%d frag_size=%d n_packets_received=%d flags="
-       fragment_type_format,
-       buf->len, type, seq_id, frag_id, frag_size, npr, flags);
+      msg (D_FRAG_DEBUG,
+	   "FRAG_OUT len=%d type=%d seq_id=%d frag_id=%d frag_size=%d flags="
+	   fragment_type_format,
+	   buf->len, type, seq_id, frag_id, frag_size, flags);
+    }
 
   flags = hton_fragment_header_type (flags);
   ASSERT (buf_write_prepend (buf, &flags, sizeof (flags)));
@@ -283,8 +352,6 @@ fragment_outgoing (struct fragment_master *f, struct buffer *buf,
       ASSERT (!f->outgoing.len);
       if (buf->len > PAYLOAD_SIZE_DYNAMIC(frame)) /* should we fragment? */
 	{
-	  /* printf ("OUT[%d] %s\n", BLEN(buf), format_hex (BPTR(buf), BLEN(buf), 0)); */
-
 	  /*
 	   * Send the datagram as a series of 2 or more fragments.
 	   */
@@ -304,15 +371,22 @@ fragment_outgoing (struct fragment_master *f, struct buffer *buf,
 	   * Send the datagram whole.  Also let the peer know the number of packets we've received
 	   * from them so far, to help them keep their path MTU and bandwidth throttle correct.
 	   */
-	  fragment_prepend_flags (buf, FRAG_WHOLE, 0, 0, 0, &f->n_packets_received);
-	  ++f->n_packets_sent;
+	  fragment_update_outgoing_stats (f, BLEN (buf));
+	  fragment_prepend_flags (buf,
+				  FRAG_WHOLE,
+				  0,
+				  0,
+				  0,
+				  fragment_which_stat_to_send (f),
+				  &f->n_packets_received,
+				  &f->max_packet_size_received);
 	}
     }
   return;
 
  error:
   if (errmsg)
-    msg (D_FRAG_ERRORS, "Fragmentation output error, len=%d frag_size=%d MAX_FRAGS=%d: %s",
+    msg (D_FRAG_ERRORS, "FRAG_OUT error, len=%d frag_size=%d MAX_FRAGS=%d: %s",
 	 buf->len, f->outgoing_frag_size, MAX_FRAGS, errmsg);
   buf->len = 0;
   return;
@@ -339,15 +413,20 @@ fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
       ASSERT (buf_init (buf, EXTRA_FRAME (frame)));
       ASSERT (buf_copy_n (buf, &f->outgoing, size));
 
+      fragment_update_outgoing_stats (f, BLEN (buf));
+
       /* fragment flags differ based on whether or not we are sending the last fragment */
       fragment_prepend_flags (buf,
 			      last ? FRAG_YES_LAST : FRAG_YES_NOTLAST,
 			      f->outgoing_seq_id,
 			      f->outgoing_frag_id++,
 			      f->outgoing_frag_size,
-			      &f->n_packets_received);
+			      fragment_which_stat_to_send (f),
+			      &f->n_packets_received,
+			      &f->max_packet_size_received);
+
       ASSERT (!last || !f->outgoing.len); /* outgoing buffer length should be zero after last fragment sent */
-      ++f->n_packets_sent;
+
       return true;
     }
   else
@@ -361,7 +440,155 @@ fragment_icmp (struct fragment_master *f, struct buffer *buf,
   return false;
 }
 
-void
-fragment_wakeup (struct fragment_master *f, time_t current)
+static void
+fragment_ttl_reap (struct fragment_master *f, time_t current)
 {
+  int i;
+  for (i = 0; i < N_FRAG_BUF; ++i)
+    {
+      struct fragment *frag = &f->incoming.fragments[i];
+      if (frag->defined && frag->timestamp + FRAG_TTL_SEC <= current)
+	{
+	  msg (D_FRAG_ERRORS, "FRAG TTL expired i=%d", i);
+	  frag->defined = false;
+	}
+    }
+}
+
+/* adjust MTU and bandwidth by looking at number of packets sent
+   vs. number of packets actually received by peer. */
+static void
+fragment_adjust_mtu_bandwidth (struct fragment_master *f, struct frame *frame, time_t current)
+{
+  msg (D_FRAG_DEBUG, "FRAG adjust max_packet_size=%d/%d n_packets=%d/%d",
+       f->max_packet_size_sent_confirmed,
+       f->max_packet_size_sent_sync,
+       f->n_packets_sent_confirmed,
+       f->n_packets_sent_sync);
+
+  /*
+   * Adjust MTU trend
+   */
+  if (f->max_packet_size_sent_sync)
+    {
+      if (f->max_packet_size_sent_confirmed) 
+	{
+	  if (f->max_packet_size_sent_confirmed < f->max_packet_size_sent_sync)
+	    f->mtu_trend -= 200;
+	  else if (frame_defined (&f->known_good_frame))
+	    {
+	      if (f->max_packet_size_sent_confirmed > PAYLOAD_SIZE_DYNAMIC (&f->known_good_frame))
+		CLEAR (f->known_good_frame);
+	    }
+	  else
+	    {
+	      f->mtu_trend += (f->mtu_trend >= 0) ? 10 : 100;
+	    }
+	}
+      else
+	f->mtu_trend -= 100;
+
+      /*
+       * If MTU trend reaches a low or high trigger point,
+       * adjust the MTU.
+       */
+      if (!f->received_os_mtu_hint)
+	{
+	  if (f->mtu_trend <= -1000)
+	    {
+	      if (frame_defined (&f->known_good_frame))
+		*frame = f->known_good_frame;
+	      else
+		frame_mtu_change_pct (frame, -50);
+	      CLEAR (f->known_good_frame);
+	      f->mtu_trend = 0;
+	    }
+	  else if (f->mtu_trend >= 1000)
+	    {
+	      if (frame_mtu_change_pct (frame, 10))
+		f->known_good_frame = *frame;
+	      f->mtu_trend = -500;
+	    }
+	}
+
+      f->max_packet_size_sent_sync = f->max_packet_size_sent_confirmed = 0;
+    }
+
+  /*
+   * Adjust bandwidth trend, based on the difference between the number
+   * of packets sent by us, and the number received by our peer.
+   */
+  if (f->n_packets_sent_sync)
+    {
+      if (f->n_packets_sent_confirmed)
+	{
+	  if (f->n_packets_sent_confirmed < f->n_packets_sent_sync)
+	    {
+	      if (f->n_packets_sent_sync >= 10)
+		{
+		  const int frac = f->n_packets_sent_sync / 20;
+		  if (f->n_packets_sent_sync - frac > f->n_packets_sent_confirmed)
+		    f->bandwidth_trend -= 250;
+		}
+	    }
+	  else
+	    {
+	      if (f->known_good_bandwidth && f->bytes_sent_sync > f->known_good_bandwidth * FRAG_WAKEUP_INTERVAL)
+		f->known_good_bandwidth = 0;
+	      if (!f->known_good_bandwidth)
+		f->bandwidth_trend += (f->bandwidth_trend >= 0) ? 100 : 200;
+	    }
+	}
+      else
+	f->bandwidth_trend -= 100;
+
+      /*
+       * Change bandwidth, if bandwidth_trend reaches a low or high
+       * trigger point.
+       */
+      if (f->bandwidth_trend <= -1000)
+	{
+	  if (f->known_good_bandwidth)
+	    shaper_reset (&f->shaper, f->known_good_bandwidth);
+	  else
+	    shaper_change_pct (&f->shaper, -50);
+	  f->known_good_bandwidth = 0;
+	  f->bandwidth_trend = 0;
+	}
+      else if (f->bandwidth_trend >= 1000)
+	{
+	  if (shaper_change_pct (&f->shaper, 10))
+	    f->known_good_bandwidth = shaper_current_bandwidth (&f->shaper);
+	  f->bandwidth_trend = -500;
+	}
+      
+      f->n_packets_sent_sync = f->n_packets_sent_confirmed = 0;
+    }
+
+  msg (D_FRAG_DEBUG, "FRAG adjust post mtu=%d mtu_trend=%d bw=%d bw_trend=%d",
+       EXPANDED_SIZE_DYNAMIC (frame),
+       f->mtu_trend,
+       shaper_current_bandwidth (&f->shaper),
+       f->bandwidth_trend);
+}
+
+/*
+ * Called when the OS is explicitly recommending an MTU value
+ */
+void
+fragment_received_os_mtu_hint (struct fragment_master *f, const struct frame* frame)
+{
+  f->received_os_mtu_hint = true;
+}
+
+/* called every FRAG_WAKEUP_INTERVAL seconds */
+void
+fragment_wakeup (struct fragment_master *f, struct frame *frame, time_t current)
+{
+  /* delete fragments with expired TTLs */
+  fragment_ttl_reap (f, current);
+
+  /* adjust MTU and bandwidth by looking at number of packets sent
+     vs. number of packets actually received by peer. */
+  fragment_adjust_mtu_bandwidth (f, frame, current);
 }

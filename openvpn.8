@@ -97,6 +97,7 @@ openvpn \- secure IP tunnel daemon.
 .ti -4
 .B openvpn
 [\ \fB\-\-askpass\fR\ \fI[file]\fR\ ]
+[\ \fB\-\-auth\-nocache\fR\ ]
 [\ \fB\-\-auth\-user\-pass\-verify\fR\ \fIscript\fR\ ]
 [\ \fB\-\-auth\-user\-pass\fR\ \fIup\fR\ ]
 [\ \fB\-\-auth\fR\ \fIalg\fR\ ]
@@ -133,6 +134,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-down\-pre\fR\ ]
 [\ \fB\-\-down\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-duplicate\-cn\fR\ ]
+[\ \fB\-\-echo\fR\ \fI[parms...]\fR\ ]
 [\ \fB\-\-engine\fR\ \fI[engine\-name]\fR\ ]
 [\ \fB\-\-fast\-io\fR\ ]
 [\ \fB\-\-float\fR\ ]
@@ -1853,6 +1855,15 @@ is specified, and when
 is NOT specified.
 .\"*********************************************************
 .TP
+.B --echo [parms...]
+Echo
+.B parms
+to log output.
+
+Designed to be used to send messages to a controlling application
+which is receiving the OpenVPN log output.
+.\"*********************************************************
+.TP
 .B --remap-usr1 signal
 Control whether internally or externally
 generated SIGUSR1 signals are remapped to
@@ -2072,7 +2083,7 @@ This is a partial list of options which can currently be pushed:
 .B --ip-win32, --dhcp-option,
 .B --inactive, --ping, --ping-exit, --ping-restart,
 .B --setenv,
-.B --persist-key, --persist-tun
+.B --persist-key, --persist-tun, --echo
 .\"*********************************************************
 .TP
 .B --push-reset
@@ -2152,15 +2163,44 @@ is incompatible with Windows clients.
 .\"*********************************************************
 .TP
 .B --ifconfig-push local remote-netmask
-Push a tunnel ifconfig command to remote client,
+Push virtual IP endpoints for client tunnel,
 overriding the --ifconfig-pool dynamic allocation.
-Must be associated with a specific client instance,
+
+The parameters
+.B local
+and
+.B remote-netmask
+are set according to the
+.B --ifconfig
+directive which you want to execute on the client machine to
+configure the remote end of the tunnel.
+
+This option must be associated with a specific client instance,
 which means that it must be specified either in a client
 instance config file using
 .B --client-config-dir
 or dynamically generated using a
 .B --client-connect
 script.
+
+There are three ways a set of client tunnel endpoints can
+be selected:
+
+.B 1
+-- Use
+.B --client-connect script
+generated file for static IP (first choice).
+.br
+.B 2
+-- Use 
+.B --client-config-dir
+file for static IP (next choice).
+.br
+.B 3
+-- Use
+.B --ifconfig-pool
+allocation for dynamic IP (last choice).
+.br
 .\"*********************************************************
 .TP
 .B --iroute network [netmask]
@@ -2240,65 +2280,12 @@ Run
 on client connection.  The script is passed the common name
 and IP address of the just-authenticated client
 as environmental variables.  The script is also passed
-a single argument which is the filename of a temporary file.
+a single argument which is the pathname of a temporary file.
 If the script wants to generate client-instance-specific
 options, it can write them to this file.  See the
 .B --client-config-dir
 option below for options which
 can be legally used in a client-specific context.
-
-If the
-.B --client-connect
-script generates a dynamic config file which 
-includes an
-.B --ifconfig-push
-directive, OpenVPN assumes that you have your 
-own address allocation scheme implemented in the script, and it releases 
-the
-.B ifconfig_pool_local_ip
-and
-.B ifconfig_pool_remote_ip
-(environmental variables) pool addresses which it 
-tentatively allocated before the script was run.
-
-If the
-.B client-connect
-script doesn't generate a dynamic config file, or if 
-it generates a dynamic config file which is missing an
-.B --ifconfig-push 
-directive, then OpenVPN will use the pool address allocation (assuming 
-that the server config file defines
-.B --ifconfig-pool
-or
-.B --server).
-
-Note that the
-.B ifconfig_pool_local_ip
-and
-.B ifconfig_pool_remote_ip
-environmental variables are set before the
-.B --client-connect
-script is run.
-
-When using the
-.B --client-connect
-and
-.B --client-config-dir
-directives together,
-if the
-.B --client-connect
-script actually generates a dynamic config file, 
-OpenVPN will use it and will not scan the
-.B --client-config-dir
-for a suitable config file.
-
-If the
-.B --client-connect
-script doesn't generate a dynamic config file, 
-OpenVPN will then scan the
-.B --client-config-dir
-for a config file named after 
-the common name of the connecting client's certificate.
 .\"*********************************************************
 .TP
 .B --client-disconnect
@@ -2316,6 +2303,12 @@ look in this directory for a file having the same name
 as the client's X509 common name.  If a matching file
 exists, it will be opened and processed for client-specific
 configuration options.
+
+This file can specify a fixed IP address for a given
+client using
+.B --ifconfig-push,
+as well as fixed subnets owned by the client using
+.B --iroute.
 
 One of the useful properties of this option is that it
 allows client configuration files to be conveniently
@@ -3350,6 +3343,24 @@ to a certain extent invalidates the extra security provided by
 using an encrypted key.
 .\"*********************************************************
 .TP
+.B --auth-nocache
+Don't cache
+.B --askpass
+or
+.B --auth-user-pass
+username/passwords in virtual memory.
+
+If specified, this directive will cause OpenVPN to immediately
+forget username/password inputs after they are used.  As a result,
+when OpenVPN needs a username/password, it will prompt for input
+from stdin, which may be multiple times during the duration of an
+OpenVPN session.
+
+This directive does not affect the
+.B --http-proxy
+username/password.  It is always cached.
+.\"*********************************************************
+.TP
 .B --tls-verify cmd
 Execute shell command
 .B cmd
@@ -3852,6 +3863,20 @@ scripts having access to stale, previously set variables
 which refer to different client instances.
 .\"*********************************************************
 .TP
+.B bytes_received
+Total number of bytes received from client during VPN session.
+Set prior to execution of the
+.B --client-disconnect
+script.
+.\"*********************************************************
+.TP
+.B bytes_sent
+Total number of bytes sent to client during VPN session.
+Set prior to execution of the
+.B --client-disconnect
+script.
+.\"*********************************************************
+.TP
 .B common_name
 The X509 common name of an authenticated client.
 Set prior to execution of
@@ -3954,10 +3979,14 @@ script execution.
 .\"*********************************************************
 .TP
 .B ifconfig_pool_local_ip
-The local virtual IP address for the TUN/TAP tunnel taken
-from the ifconfig pool and controlled by the
+The local
+virtual IP address for the TUN/TAP tunnel taken from an
+.B --ifconfig-push
+directive if specified, or otherwise from
+the ifconfig pool (controlled by the
 .B --ifconfig-pool
-config file directive.  Only set for
+config file directive).
+Only set for
 .B --dev tun
 tunnels.
 This option is set on the server prior to execution
@@ -3968,11 +3997,33 @@ and
 scripts.
 .\"*********************************************************
 .TP
-.B ifconfig_pool_remote_ip
-The remote virtual IP address for the TUN/TAP tunnel taken
-from the ifconfig pool and controlled by the
+.B ifconfig_pool_netmask
+The
+virtual IP netmask for the TUN/TAP tunnel taken from an
+.B --ifconfig-push
+directive if specified, or otherwise from
+the ifconfig pool (controlled by the
 .B --ifconfig-pool
-config file directive.
+config file directive).
+Only set for
+.B --dev tap
+tunnels.
+This option is set on the server prior to execution
+of the
+.B --client-connect
+and
+.B --client-disconnect
+scripts.
+.\"*********************************************************
+.TP
+.B ifconfig_pool_remote_ip
+The remote
+virtual IP address for the TUN/TAP tunnel taken from an
+.B --ifconfig-push
+directive if specified, or otherwise from
+the ifconfig pool (controlled by the
+.B --ifconfig-pool
+config file directive).
 This option is set on the server prior to execution
 of the
 .B --client-connect
@@ -4010,8 +4061,10 @@ Set on program initiation and reset on SIGHUP.
 The password provided by a connecting client.
 Set prior to
 .B --auth-user-pass-verify
-script execution, and deleted from the environment
-after this script returns.
+script execution only when the
+.B via-env
+modifier is specified, and deleted from the environment
+after the script returns.
 .\"*********************************************************
 .TP
 .B proto
@@ -4190,7 +4243,9 @@ scripts.
 The username provided by a connecting client.
 Set prior to
 .B --auth-user-pass-verify
-script execution.
+script execution only when the
+.B via-env
+modifier is specified.
 .\"*********************************************************
 .SH SIGNALS
 .TP

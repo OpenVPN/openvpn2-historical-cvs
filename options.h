@@ -41,7 +41,7 @@
  * Maximum number of parameters associated with an option,
  * including the option name itself.
  */
-#define MAX_PARMS 5
+#define MAX_PARMS 16
 
 extern const char title_string[];
 
@@ -350,6 +350,7 @@ struct options
   bool single_session;
 
   bool tls_exit;
+
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
 
@@ -389,6 +390,7 @@ struct options
 #define OPT_P_INSTANCE        (1<<17)
 #define OPT_P_CONFIG          (1<<18)
 #define OPT_P_EXPLICIT_NOTIFY (1<<19)
+#define OPT_P_ECHO            (1<<20)
 
 #define OPT_P_DEFAULT   (~OPT_P_INSTANCE)
 

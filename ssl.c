@@ -246,7 +246,7 @@ free_ssl_lib ()
  * private key is protected by a password.
  */
 
-static struct user_pass passbuf;
+static struct user_pass passbuf; /* GLOBAL */
 
 void
 pem_password_setup (const char *auth_file)
@@ -262,8 +262,9 @@ pem_password_callback (char *buf, int size, int rwflag, void *u)
     {
       /* prompt for password even if --askpass wasn't specified */
       pem_password_setup (NULL);
-
       strncpynt (buf, passbuf.password, size);
+      purge_user_pass (&passbuf);
+
       return strlen (buf);
     }
   return 0;
@@ -272,12 +273,26 @@ pem_password_callback (char *buf, int size, int rwflag, void *u)
 /*
  * Auth username/password handling
  */
-const struct user_pass *
-get_auth_user_pass (const char *auth_file)
+
+static bool auth_user_pass_enabled;     /* GLOBAL */
+static struct user_pass auth_user_pass; /* GLOBAL */
+
+void
+auth_user_pass_setup (const char *auth_file)
 {
-  static struct user_pass auth_user_pass;
-  get_user_pass (&auth_user_pass, auth_file, false, "Auth");
-  return &auth_user_pass;
+  auth_user_pass_enabled = true;
+  if (!auth_user_pass.defined)
+    get_user_pass (&auth_user_pass, auth_file, false, "Auth");
+}
+
+/*
+ * Disable password caching
+ */
+void
+ssl_set_auth_nocache (void)
+{
+  passbuf.nocache = true;
+  auth_user_pass.nocache = true;
 }
 
 /*
@@ -333,7 +348,7 @@ extract_x509_field (const char *x509, const char *field_name, char *out, int siz
 static void
 setenv_untrusted (struct tls_session *session)
 {
-  setenv_sockaddr (session->opt->es, "untrusted", &session->untrusted_sockaddr);
+  setenv_sockaddr (session->opt->es, "untrusted", &session->untrusted_sockaddr, SA_IP_PORT);
 }
 
 static void
@@ -1753,6 +1768,10 @@ key_source_print (const struct key_source *k,
 {
   struct gc_arena gc = gc_new ();
 
+  VALGRIND_MAKE_READABLE ((void *)k->pre_master, sizeof (k->pre_master));
+  VALGRIND_MAKE_READABLE ((void *)k->random1, sizeof (k->random1));
+  VALGRIND_MAKE_READABLE ((void *)k->random2, sizeof (k->random2));
+
   msg (D_SHOW_KEY_SOURCE,
        "%s pre_master: %s",
        prefix,
@@ -2280,12 +2299,14 @@ key_method_2_write (struct buffer *buf, struct tls_session *session)
     goto error;
 
   /* write username/password if specified */
-  if (session->opt->auth_user_pass)
+  if (auth_user_pass_enabled)
     {
-      if (!write_string (buf, session->opt->auth_user_pass->username, -1))
+      auth_user_pass_setup (NULL);
+      if (!write_string (buf, auth_user_pass.username, -1))
 	goto error;
-      if (!write_string (buf, session->opt->auth_user_pass->password, -1))
+      if (!write_string (buf, auth_user_pass.password, -1))
 	goto error;
+      purge_user_pass (&auth_user_pass);
     }
 
   /*

@@ -320,11 +320,14 @@ check_fragment_dowork (struct context *c)
 
 /*
  * Compress, fragment, encrypt and HMAC-sign an outgoing packet.
+ * Input: c->c2.buf
+ * Output: c->c2.to_link
  */
 void
 encrypt_sign (struct context *c, bool comp_frag)
 {
   struct context_buffers *b = c->c2.buffers;
+  const uint8_t *orig_buf = c->c2.buf.data;
 
   if (comp_frag)
     {
@@ -377,7 +380,17 @@ encrypt_sign (struct context *c, bool comp_frag)
     }
 #endif
 #endif
-  c->c2.to_link = c->c2.buf;
+
+  /* if null encryption, copy result to read_tun_buf */
+  if (orig_buf == c->c2.buf.data && c->c2.buf.data != b->read_tun_buf.data)
+    {
+      buf_assign (&b->read_tun_buf, &c->c2.buf);
+      c->c2.to_link = b->read_tun_buf;
+    }
+  else
+    {
+      c->c2.to_link = c->c2.buf;
+    }
 }
 
 /*

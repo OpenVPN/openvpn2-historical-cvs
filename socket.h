@@ -280,13 +280,17 @@ const char *print_sockaddr (const struct sockaddr_in *addr,
 #define IA_NET_ORDER      (1<<1)
 const char *print_in_addr_t (in_addr_t addr, unsigned int flags, struct gc_arena *gc);
 
+#define SA_IP_PORT        (1<<0)
+#define SA_SET_IF_NONZERO (1<<1)
 void setenv_sockaddr (struct env_set *es,
 		      const char *name_prefix,
-		      const struct sockaddr_in *addr);
+		      const struct sockaddr_in *addr,
+		      const bool flags);
 
 void setenv_in_addr_t (struct env_set *es,
 		       const char *name_prefix,
-		       in_addr_t addr);
+		       in_addr_t addr,
+		       const bool flags);
 
 void bad_address_length (int actual, int expected);
 

@@ -44,7 +44,6 @@
 #include "misc.h"
 #include "mbuf.h"
 #include "pool.h"
-#include "work.h"
 
 /*
  * Our global key schedules, packaged thusly

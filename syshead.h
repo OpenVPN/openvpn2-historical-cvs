@@ -360,6 +360,13 @@ typedef int socket_descriptor_t;
 #endif
 
 /*
+ * Pthread support is currently experimental (and quite unfinished).
+ */
+#if 1 // JYFIXME -- if defined, disable pthread
+#undef USE_PTHREAD
+#endif
+
+/*
  * Should we include NTLM proxy functionality
  */
 #if defined(USE_CRYPTO)

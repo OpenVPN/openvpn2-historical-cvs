@@ -72,19 +72,19 @@ static const struct mtu_load_test mtu_load_test_sequence[] = {
   {OCC_MTU_LOAD_REQUEST, -1000},
   {OCC_MTU_LOAD, -1000},
 
-  {OCC_MTU_LOAD_REQUEST, -500},
-  {OCC_MTU_LOAD, -500},
-  {OCC_MTU_LOAD_REQUEST, -500},
-  {OCC_MTU_LOAD, -500},
-  {OCC_MTU_LOAD_REQUEST, -500},
-  {OCC_MTU_LOAD, -500},
+  {OCC_MTU_LOAD_REQUEST, -750},
+  {OCC_MTU_LOAD, -750},
+  {OCC_MTU_LOAD_REQUEST, -750},
+  {OCC_MTU_LOAD, -750},
+  {OCC_MTU_LOAD_REQUEST, -750},
+  {OCC_MTU_LOAD, -750},
 
-  {OCC_MTU_LOAD_REQUEST, -750},
-  {OCC_MTU_LOAD, -750},
-  {OCC_MTU_LOAD_REQUEST, -750},
-  {OCC_MTU_LOAD, -750},
-  {OCC_MTU_LOAD_REQUEST, -750},
-  {OCC_MTU_LOAD, -750},
+  {OCC_MTU_LOAD_REQUEST, -500},
+  {OCC_MTU_LOAD, -500},
+  {OCC_MTU_LOAD_REQUEST, -500},
+  {OCC_MTU_LOAD, -500},
+  {OCC_MTU_LOAD_REQUEST, -500},
+  {OCC_MTU_LOAD, -500},
 
   {OCC_MTU_LOAD_REQUEST, -400},
   {OCC_MTU_LOAD, -400},
@@ -273,11 +273,11 @@ check_send_occ_msg_dowork (struct context *c)
 
 	if (!buf_write_u8 (&c->c2.buf, OCC_MTU_LOAD))
 	  break;
-	need_to_add = min_int (c->c2.occ_mtu_load_size
+	need_to_add = min_int (c->c2.occ_mtu_load_size, EXPANDED_SIZE (&c->c2.frame))
 			       - OCC_STRING_SIZE
 			       - sizeof (uint8_t)
-			       - EXTRA_FRAME (&c->c2.frame), 
-			       EXPANDED_SIZE (&c->c2.frame));
+	                       - EXTRA_FRAME (&c->c2.frame);
+
 	while (need_to_add > 0)
 	  {
 	    /*
@@ -287,8 +287,13 @@ check_send_occ_msg_dowork (struct context *c)
 	      break;
 	    --need_to_add;
 	  }
-	msg (D_PACKET_CONTENT, "SENT OCC_MTU_LOAD %d",
-	     c->c2.occ_mtu_load_size);
+	msg (D_PACKET_CONTENT, "SENT OCC_MTU_LOAD min_int(%d-%d-%d-%d,%d) size=%d",
+	     c->c2.occ_mtu_load_size,
+	     OCC_STRING_SIZE,
+	     sizeof (uint8_t),
+	     EXTRA_FRAME (&c->c2.frame),
+	     MAX_RW_SIZE_TUN (&c->c2.frame),
+	     BLEN (&c->c2.buf));
 	doit = true;
       }
       break;

@@ -119,11 +119,10 @@ guess_tuntap_dev (const char *dev,
 {
 #ifdef WIN32
   const int dt = dev_type_enum (dev, dev_type);
-  if (dev_node && (dt == DEV_TYPE_TUN || dt == DEV_TYPE_TAP))
+  if (dt == DEV_TYPE_TUN || dt == DEV_TYPE_TAP)
     {
-      struct buffer out = alloc_buf_gc (256, gc);
-      get_device_guid (dev_node, BPTR (&out), buf_forward_capacity (&out), gc);
-      return BSTR (&out);
+      static const char *get_netsh_id (const char *dev_node, struct gc_arena *gc);
+      return get_netsh_id (dev_node, gc);
     }
 #endif
 
@@ -697,7 +696,14 @@ do_ifconfig (struct tuntap *tt,
 			  tun_mtu
 			  );
       else
-	no_tap_ifconfig ();
+	openvpn_snprintf (command_line, sizeof (command_line),
+			  IFCONFIG_PATH " %s %s netmask %s mtu %d up",
+			  actual,
+			  ifconfig_local,
+			  ifconfig_remote_netmask,
+			  tun_mtu
+			  );
+
       msg (M_INFO, "%s", command_line);
       system_check (command_line, es, S_FATAL, "Mac OS X ifconfig failed");
       tt->did_ifconfig = true;
@@ -762,6 +768,8 @@ do_ifconfig (struct tuntap *tt,
 		 netmask);
 	    break;
 	  case IPW32_SET_NETSH:
+	    if (!strcmp (actual, "NULL"))
+	      msg (M_FATAL, "Error: When using --ip-win32 netsh, if you have more than one TAP-Win32 adapter, you must also specify --dev-node");
 	    netcmd_semaphore_lock ();
 	    msg (M_INFO, "%s", command_line);
 	    system_check (command_line, es, S_FATAL, "ERROR: netsh command failed");
@@ -2127,16 +2135,17 @@ name_to_guid (const char *name, const struct tap_reg *tap_reg, const struct pane
 }
 
 static void
-no_tap_win32 (void)
+at_least_one_tap_win32 (const struct tap_reg *tap_reg)
 {
-  msg (M_FATAL, "There are no TAP-Win32 adapters on this system.  You should be able to create a TAP-Win32 adapter by going to Start -> All Programs -> " PACKAGE_NAME " -> Add a new TAP-Win32 virtual ethernet adapter.");
+  if (!tap_reg)
+    msg (M_FATAL, "There are no TAP-Win32 adapters on this system.  You should be able to create a TAP-Win32 adapter by going to Start -> All Programs -> " PACKAGE_NAME " -> Add a new TAP-Win32 virtual ethernet adapter.");
 }
 
 /*
- * Get a adapted GUID and optional actual_name from the 
+ * Get an adapter GUID and optional actual_name from the 
  * registry for the TAP device # = device_number.
  */
-const char *
+static const char *
 get_unspecified_device_guid (const int device_number,
 		             char *actual_name,
 		             int actual_name_size,
@@ -2144,38 +2153,45 @@ get_unspecified_device_guid (const int device_number,
 			     const struct panel_reg *panel_reg_src,
 		             struct gc_arena *gc)
 {
-  struct buffer ret = alloc_buf_gc (256, gc);
   const struct tap_reg *tap_reg = tap_reg_src;
-  struct buffer actual;
-  const char *act;
+  struct buffer ret = clear_buf ();
+  struct buffer actual = clear_buf ();
   int i;
 
-  ASSERT (actual_name && actual_name_size > 0);
   ASSERT (device_number >= 0);
-
-  buf_set_write (&actual, actual_name, actual_name_size);
 
   /* Make sure we have at least one TAP adapter */
   if (!tap_reg)
-    no_tap_win32 ();
+    return NULL;
+
+  /* The actual_name output buffer may be NULL */
+  if (actual_name)
+    {
+      ASSERT (actual_name_size > 0);
+      buf_set_write (&actual, actual_name, actual_name_size);
+    }
 
   /* Move on to specified device number */
   for (i = 0; i < device_number; i++)
     {
       tap_reg = tap_reg->next;
       if (!tap_reg)
-        msg (M_FATAL, "All TAP-Win32 adapters on this system are currently in use.");
+	return NULL;
+    }
+
+  /* Save Network Panel name (if exists) in actual_name */
+  if (actual_name)
+    {
+      const char *act = guid_to_name (tap_reg->guid, panel_reg_src);
+      if (act)
+	buf_printf (&actual, "%s", act);
+      else
+	buf_printf (&actual, "NULL");
     }
 
   /* Save GUID for return value */
+  ret = alloc_buf_gc (256, gc);
   buf_printf (&ret, "%s", tap_reg->guid);
-
-  /* Save Network Panel name (if exists) in actual_name */
-  act = guid_to_name (tap_reg->guid, panel_reg_src);
-  if (act)
-    buf_printf (&actual, "%s", act);
-  else
-    buf_printf (&actual, "NULL");
   return BSTR (&ret);
 }
 
@@ -2183,28 +2199,27 @@ get_unspecified_device_guid (const int device_number,
  * Lookup a --dev-node adapter name in the registry
  * returning the GUID and optional actual_name.
  */
-const char *
+static const char *
 get_device_guid (const char *name,
 		 char *actual_name,
 		 int actual_name_size,
+		 const struct tap_reg *tap_reg,
+		 const struct panel_reg *panel_reg,
 		 struct gc_arena *gc)
 {
-  const struct tap_reg *tr;
-  const struct panel_reg *pr;
-
-  const struct tap_reg *tap_reg = get_tap_reg (gc);
-  const struct panel_reg *panel_reg = get_panel_reg (gc);
-
   struct buffer ret = alloc_buf_gc (256, gc);
-  struct buffer actual;
-
-  ASSERT (actual_name && actual_name_size > 0);
-
-  buf_set_write (&actual, actual_name, actual_name_size);
+  struct buffer actual = clear_buf ();
 
   /* Make sure we have at least one TAP adapter */
   if (!tap_reg)
-    no_tap_win32 ();
+    return NULL;
+
+  /* The actual_name output buffer may be NULL */
+  if (actual_name)
+    {
+      ASSERT (actual_name_size > 0);
+      buf_set_write (&actual, actual_name, actual_name_size);
+    }
 
   /* Check if GUID was explicitly specified as --dev-node parameter */
   if (is_tap_win32 (name, tap_reg))
@@ -2229,8 +2244,40 @@ get_device_guid (const char *name,
       }
   }
 
-  msg (M_FATAL, "TAP-Win32 adapter '%s' not found.  Use " PACKAGE " --show-adapters to show a list of TAP-WIN32 adapters on this system.  Remember that if you are specifying a TAP-Win32 adapter by GUID for the --dev-node option, enclose the GUID in braces, for example: {4E22992D-0780-4B8F-AC18-5F1DDBE13E09}", name);
   return NULL;
+}
+
+/*
+ * Return a TAP name for netsh commands.
+ */
+static const char *
+get_netsh_id (const char *dev_node, struct gc_arena *gc)
+{
+  const struct tap_reg *tap_reg = get_tap_reg (gc);
+  const struct panel_reg *panel_reg = get_panel_reg (gc);
+  struct buffer actual = alloc_buf_gc (256, gc);
+  const char *guid;
+
+  at_least_one_tap_win32 (tap_reg);
+
+  if (dev_node)
+    {
+      guid = get_device_guid (dev_node, BPTR (&actual), BCAP (&actual), tap_reg, panel_reg, gc);
+    }
+  else
+    {
+      guid = get_unspecified_device_guid (0, BPTR (&actual), BCAP (&actual), tap_reg, panel_reg, gc);
+
+      if (get_unspecified_device_guid (1, NULL, 0, tap_reg, panel_reg, gc)) /* ambiguous if more than one TAP-Win32 adapter */
+	guid = NULL;
+    }
+
+  if (!guid)
+    return "NULL";         /* not found */
+  else if (strcmp (BPTR (&actual), "NULL"))
+    return BPTR (&actual); /* control panel name */
+  else
+    return guid;           /* no control panel name, return GUID instead */
 }
 
 /*
@@ -2827,12 +2874,19 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
    * Lookup the device name in the registry, using the --dev-node high level name.
    */
   {
+    const struct tap_reg *tap_reg = get_tap_reg (&gc);
+    const struct panel_reg *panel_reg = get_panel_reg (&gc);
     char guid_buffer[256];
+
+    at_least_one_tap_win32 (tap_reg);
 
     if (dev_node)
       {
         /* Get the device GUID for the device specified with --dev-node. */
-        device_guid = get_device_guid (dev_node, guid_buffer, sizeof (guid_buffer), &gc);
+        device_guid = get_device_guid (dev_node, guid_buffer, sizeof (guid_buffer), tap_reg, panel_reg, &gc);
+
+	if (!device_guid)
+	    msg (M_FATAL, "TAP-Win32 adapter '%s' not found", dev_node);
 
         /* Open Windows TAP-Win32 adapter */
         openvpn_snprintf (device_path, sizeof(device_path), "%s%s%s",
@@ -2855,9 +2909,6 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
       }
     else 
       {
-	const struct tap_reg *tap_reg = get_tap_reg (&gc);
-	const struct panel_reg *panel_reg = get_panel_reg (&gc);
-
         int device_number = 0;
 
         /* Try opening all TAP devices until we find one available */
@@ -2869,6 +2920,9 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 						       tap_reg,
 						       panel_reg,
 						       &gc);
+
+	    if (!device_guid)
+	      msg (M_FATAL, "All TAP-Win32 adapters on this system are currently in use.");
 
             /* Open Windows TAP-Win32 adapter */
             openvpn_snprintf (device_path, sizeof(device_path), "%s%s%s",

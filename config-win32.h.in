@@ -66,6 +66,9 @@ typedef unsigned long in_addr_t;
 /* Enable multiclient server capability */
 #define MULTICLIENT_SERVER_ENABLED 1
 
+/* Dimension size to use for empty array declaration */
+#define EMPTY_ARRAY_SIZE 0
+
 /* Define to 1 if you have the <openssl/engine.h> header file. */
 #define HAVE_OPENSSL_ENGINE_H 1
 

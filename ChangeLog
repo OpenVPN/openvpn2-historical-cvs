@@ -1,7 +1,44 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.43 2004/10/28 07:58:07 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.44 2004/11/07 10:27:22 jimyonan Exp $
+
+2004.11.07 -- Version 2.0-beta16
+
+* Modified sample-scripts/auth-pam.pl to get username
+  and password from OpenVPN via a file rather than
+  via environmental variables.
+* Added bytes_sent and bytes_received environmental
+  variables to be set prior to client-disconnect script.
+* Changed client virtual IP derivation precedence:
+  (1) use --ifconfig-push directive from --client-connect
+  script, (2) use --ifconfig-push directive from
+  --client-config-dir, and (3) use --ifconfig-pool
+  address.
+* If a --client-config-dir file specifies --ifconfig-push,
+  it will be visible to the --client-connect-script in
+  the ifconfig_pool_remote_ip environmental variable.
+* For tun-style tunnels, the ifconfig_pool_local_ip
+  environmental variable will be set, while for
+  tap-style tunnels, the ifconfig_pool_netmask variable
+  will be set.
+* Added intelligence to autoconf script to test
+  compiler for the accepted form of zero-length arrays.
+* Fixed a bug introduced in beta12 where --ip-win32
+  netsh would fail if --dev-node was not explicitly
+  specified.
+* --ip-win32 netsh will now work on hidden adapters.
+* Fix attempt of "Assertion failed at crypto.c:149".
+  This assertion has also been reported on 1.x with a
+  slightly different line number.  The fix is twofold:
+  (1) In previous releases, --mtu-test may trigger this
+  assertion -- this bug has been fixed.  (2) If something
+  else causes the assertion to be thrown, don't panic,
+  just output a nonfatal warning to the log and drop
+  the packet which generated the error.
+* Support TAP interfaces on Mac OS X (Waldemar Brodkorb).
+* Added --echo directive.
+* Added --auth-nocache directive.
 
 2004.10.28 -- Version 2.0-beta15
 

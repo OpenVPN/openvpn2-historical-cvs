@@ -145,8 +145,19 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	  /* cipher_ctx was already initialized with key & keylen */
 	  ASSERT (EVP_CipherInit_ov (ctx->cipher, NULL, NULL, iv_buf, DO_ENCRYPT));
 
-	  /* Buffer overflow check (should never happen) */
-	  ASSERT (buf_safe (&work, buf->len + EVP_CIPHER_CTX_block_size (ctx->cipher)));
+	  /* Buffer overflow check */
+	  if (!buf_safe (&work, buf->len + EVP_CIPHER_CTX_block_size (ctx->cipher)))
+	    {
+	      msg (D_CRYPT_ERRORS, "ENCRYPT: buffer size error, bc=%d bo=%d bl=%d wc=%d wo=%d wl=%d cbs=%d",
+		   buf->capacity,
+		   buf->offset,
+		   buf->len,
+		   work.capacity,
+		   work.offset,
+		   work.len,
+		   EVP_CIPHER_CTX_block_size (ctx->cipher));
+	      goto err;
+	    }
 
 	  /* Encrypt packet ID, payload */
 	  ASSERT (EVP_CipherUpdate_ov (ctx->cipher, BPTR (&work), &outlen, BPTR (buf), BLEN (buf)));
@@ -195,6 +206,12 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 
       *buf = work;
     }
+
+  gc_free (&gc);
+  return;
+
+ err:
+  buf->len = 0;
   gc_free (&gc);
   return;
 }

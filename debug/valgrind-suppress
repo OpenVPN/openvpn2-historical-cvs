@@ -250,3 +250,9 @@
    Memcheck:Cond
    fun:ssl3_read_internal
 }
+
+{
+   test43
+   Memcheck:Cond
+   fun:ssl3_get_cert_verify
+}

@@ -182,7 +182,7 @@ reap_buckets_per_pass (int n_buckets)
  * Main initialization function, init multi_context object.
  */
 void
-multi_init (struct multi_context *m, struct context *t, bool tcp_mode)
+multi_init (struct multi_context *m, struct context *t, bool tcp_mode, int thread_mode)
 {
   int dev = DEV_TYPE_UNDEF;
 
@@ -199,6 +199,8 @@ multi_init (struct multi_context *m, struct context *t, bool tcp_mode)
    * Init our multi_context object.
    */
   CLEAR (*m);
+  
+  m->thread_mode = thread_mode;
 
   /*
    * Real address hash table (source port number is
@@ -367,6 +369,29 @@ multi_del_iroutes (struct multi_context *m,
     mroute_helper_del_iroute (m->route_helper, ir);
 }
 
+static void
+multi_client_disconnect_script (struct multi_context *m,
+				struct multi_instance *mi)
+{
+  struct gc_arena gc = gc_new ();
+  struct buffer cmd = alloc_buf_gc (256, &gc);
+
+  setenv_str (mi->context.c2.es, "script_type", "client-disconnect");
+
+  /* setenv client real IP address */
+  setenv_trusted (mi->context.c2.es, get_link_socket_info (&mi->context));
+
+  /* setenv stats */
+  setenv_int (mi->context.c2.es, "bytes_received", mi->context.c2.link_read_bytes);
+  setenv_int (mi->context.c2.es, "bytes_sent", mi->context.c2.link_write_bytes);
+
+  buf_printf (&cmd, "%s", mi->context.options.client_disconnect_script);
+
+  system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "client-disconnect command failed");
+
+  gc_free (&gc);
+}
+
 void
 multi_close_instance (struct multi_context *m,
 		      struct multi_instance *mi,
@@ -381,7 +406,7 @@ multi_close_instance (struct multi_context *m,
 
   /* prevent dangling pointers */
   if (m->pending == mi)
-    m->pending = NULL;
+    multi_set_pending (m, NULL);
   if (m->earliest_wakeup == mi)
     m->earliest_wakeup = NULL;
 
@@ -409,37 +434,7 @@ multi_close_instance (struct multi_context *m,
     }
 
   if (mi->context.options.client_disconnect_script)
-    {
-      struct gc_arena gc = gc_new ();
-      struct buffer cmd = alloc_buf_gc (256, &gc);
-
-      setenv_str (mi->context.c2.es, "script_type", "client-disconnect");
-
-      /* setenv incoming cert common name for script */
-      setenv_str (mi->context.c2.es, "common_name", tls_common_name (mi->context.c2.tls_multi, true));
-
-      /* setenv client real IP address */
-      setenv_trusted (mi->context.c2.es, get_link_socket_info (&mi->context));
-
-      /* setenv tunnel endpoints */
-      {
-	in_addr_t local=0, remote=0;
-	if (mi->context.c2.push_ifconfig_defined)
-	  {
-	    remote = mi->context.c2.push_ifconfig_local;
-	    if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
-	      local = mi->context.c2.push_ifconfig_remote_netmask;
-	  }
-	setenv_in_addr_t (mi->context.c2.es, "ifconfig_pool_local", local);
-	setenv_in_addr_t (mi->context.c2.es, "ifconfig_pool_remote", remote);
-      }
-
-      buf_printf (&cmd, "%s", mi->context.options.client_disconnect_script);
-
-      system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "client-disconnect command failed");
-
-      gc_free (&gc);
-    }
+    multi_client_disconnect_script (m, mi);
 
   if (mi->did_open_context)
     close_context (&mi->context, SIGTERM, CC_GC_FREE);
@@ -464,34 +459,43 @@ multi_close_instance (struct multi_context *m,
 void
 multi_uninit (struct multi_context *m)
 {
-  if (m->hash)
+  if (m->thread_mode & MC_WORK_THREAD)
     {
-      struct hash_iterator hi;
-      struct hash_element *he;
-
-      hash_iterator_init (m->iter, &hi, true);
-      while ((he = hash_iterator_next (&hi)))
+      multi_top_free (m);
+      m->thread_mode = MC_UNDEF;
+    }
+  else if (m->thread_mode)
+    {
+      if (m->hash)
 	{
-	  struct multi_instance *mi = (struct multi_instance *) he->value;
-	  mi->did_iter = false;
-	  multi_close_instance (m, mi, true);
+	  struct hash_iterator hi;
+	  struct hash_element *he;
+
+	  hash_iterator_init (m->iter, &hi, true);
+	  while ((he = hash_iterator_next (&hi)))
+	    {
+	      struct multi_instance *mi = (struct multi_instance *) he->value;
+	      mi->did_iter = false;
+	      multi_close_instance (m, mi, true);
+	    }
+	  hash_iterator_free (&hi);
+
+	  multi_reap_all (m);
+
+	  hash_free (m->hash);
+	  hash_free (m->vhash);
+	  hash_free (m->iter);
+	  m->hash = NULL;
+
+	  schedule_free (m->schedule);
+	  mbuf_free (m->mbuf);
+	  ifconfig_pool_free (m->ifconfig_pool);
+	  frequency_limit_free (m->new_connection_limiter);
+	  multi_reap_free (m->reaper);
+	  mroute_helper_free (m->route_helper);
+	  multi_tcp_free (m->mtcp);
+	  m->thread_mode = MC_UNDEF;
 	}
-      hash_iterator_free (&hi);
-
-      multi_reap_all (m);
-
-      hash_free (m->hash);
-      hash_free (m->vhash);
-      hash_free (m->iter);
-      m->hash = NULL;
-
-      schedule_free (m->schedule);
-      mbuf_free (m->mbuf);
-      ifconfig_pool_free (m->ifconfig_pool);
-      frequency_limit_free (m->new_connection_limiter);
-      multi_reap_free (m->reaper);
-      mroute_helper_free (m->route_helper);
-      multi_tcp_free (m->mtcp);
     }
 }
 
@@ -510,6 +514,7 @@ multi_create_instance (struct multi_context *m, const struct mroute_addr *real)
 
   ALLOC_OBJ_CLEAR (mi, struct multi_instance);
 
+  mutex_init (&mi->mutex);
   mi->gc = gc_new ();
   multi_instance_inc_refcount (mi);
   mi->vaddr_handle = -1;
@@ -956,7 +961,116 @@ multi_delete_dup (struct multi_context *m, struct multi_instance *new_mi)
 }
 
 /*
+ * Select a virtual address for a new client instance.
+ * Use an --ifconfig-push directive, if given (static IP).
+ * Otherwise use an --ifconfig-pool address (dynamic IP). 
+ */
+static void
+multi_select_virtual_addr (struct multi_context *m, struct multi_instance *mi)
+{
+  struct gc_arena gc = gc_new ();
+
+  /*
+   * If ifconfig addresses were set by dynamic config file,
+   * release pool addresses, otherwise keep them.
+   */
+  if (mi->context.options.push_ifconfig_defined)
+    {
+      /* ifconfig addresses were set statically,
+	 release dynamic allocation */
+      if (mi->vaddr_handle >= 0)
+	{
+	  ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle, true);
+	  mi->vaddr_handle = -1;
+	}
+
+      mi->context.c2.push_ifconfig_defined = true;
+      mi->context.c2.push_ifconfig_local = mi->context.options.push_ifconfig_local;
+      mi->context.c2.push_ifconfig_remote_netmask = mi->context.options.push_ifconfig_remote_netmask;
+    }
+  else if (m->ifconfig_pool && mi->vaddr_handle < 0) /* otherwise, choose a pool address */
+    {
+      in_addr_t local=0, remote=0;
+      const char *cn = NULL;
+
+      if (!mi->context.options.duplicate_cn)
+	cn = tls_common_name (mi->context.c2.tls_multi, true);
+
+      mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote, cn);
+      if (mi->vaddr_handle >= 0)
+	{
+	  /* use pool ifconfig address(es) */
+	  mi->context.c2.push_ifconfig_local = remote;
+	  if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
+	    {
+	      if (mi->context.options.ifconfig_pool_linear)		    
+		mi->context.c2.push_ifconfig_remote_netmask = mi->context.c1.tuntap->local;
+	      else
+		mi->context.c2.push_ifconfig_remote_netmask = local;
+	      mi->context.c2.push_ifconfig_defined = true;
+	    }
+	  else if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TAP)
+	    {
+	      mi->context.c2.push_ifconfig_remote_netmask = mi->context.options.ifconfig_pool_netmask;
+	      if (!mi->context.c2.push_ifconfig_remote_netmask)
+		mi->context.c2.push_ifconfig_remote_netmask = mi->context.c1.tuntap->remote_netmask;
+	      if (mi->context.c2.push_ifconfig_remote_netmask)
+		mi->context.c2.push_ifconfig_defined = true;
+	      else
+		msg (D_MULTI_ERRORS, "MULTI: no --ifconfig-pool netmask parameter is available to push to %s",
+		     multi_instance_string (mi, false, &gc));
+	    }
+	}
+      else
+	{
+	  msg (D_MULTI_ERRORS, "MULTI: no free --ifconfig-pool addresses are available");
+	}
+    }
+  gc_free (&gc);
+}
+
+/*
+ * Set virtual address environmental variables.
+ */
+static void
+multi_set_virtual_addr_env (struct multi_context *m, struct multi_instance *mi)
+{
+  setenv_del (mi->context.c2.es, "ifconfig_pool_local_ip");
+  setenv_del (mi->context.c2.es, "ifconfig_pool_remote_ip");
+  setenv_del (mi->context.c2.es, "ifconfig_pool_netmask");
+
+  if (mi->context.c2.push_ifconfig_defined)
+    {
+      setenv_in_addr_t (mi->context.c2.es,
+			"ifconfig_pool_remote_ip",
+			mi->context.c2.push_ifconfig_local,
+			SA_SET_IF_NONZERO);
+
+      if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
+	{
+	  setenv_in_addr_t (mi->context.c2.es,
+			    "ifconfig_pool_local_ip",
+			    mi->context.c2.push_ifconfig_remote_netmask,
+			    SA_SET_IF_NONZERO);
+	}
+      else if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TAP)
+	{
+	  setenv_in_addr_t (mi->context.c2.es,
+			    "ifconfig_pool_netmask",
+			    mi->context.c2.push_ifconfig_remote_netmask,
+			    SA_SET_IF_NONZERO);
+	}
+    }
+}
+
+/*
  * Called as soon as the SSL/TLS connection authenticates.
+ *
+ * Instance-specific directives to be processed:
+ *
+ *   iroute start-ip end-ip
+ *   ifconfig-push local remote-netmask
+ *   push
  */
 static void
 multi_connection_established (struct multi_context *m, struct multi_instance *mi)
@@ -964,9 +1078,8 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
   if (tls_authenticated (mi->context.c2.tls_multi))
     {
       struct gc_arena gc = gc_new ();
-      in_addr_t local=0, remote=0;
-      const char *dynamic_config_file = NULL;
-      bool dynamic_config_file_mark_for_delete = false;
+      unsigned int option_types_found = 0;
+      const unsigned int option_permissions_mask = OPT_P_PUSH|OPT_P_INSTANCE|OPT_P_TIMER|OPT_P_CONFIG|OPT_P_ECHO;
 
       ASSERT (mi->context.c1.tuntap);
 
@@ -980,27 +1093,33 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
       if (!mi->context.options.duplicate_cn)
 	multi_delete_dup (m, mi);
 
-      /*
-       * Get a pool address, which may be released before the end
-       * of this function if it's not needed.
-       */
-      if (m->ifconfig_pool)
-	{
-	  const char *cn = NULL;
-	  if (!mi->context.options.duplicate_cn)
-	    cn = tls_common_name (mi->context.c2.tls_multi, true);
+      /* reset pool handle to null */
+      mi->vaddr_handle = -1;
 
-	  mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote, cn);
-	  if (mi->vaddr_handle >= 0)
-	    {
-	      setenv_in_addr_t (mi->context.c2.es, "ifconfig_pool_local", local);
-	      setenv_in_addr_t (mi->context.c2.es, "ifconfig_pool_remote", remote);
-	    }
-	  else
-	    {
-	      msg (D_MULTI_ERRORS, "MULTI: no free --ifconfig-pool addresses are available");
-	    }
-	}
+      /*
+       * Try to source a dynamic config file from the
+       * --client-config-dir directory.
+       */
+      {
+	const char *ccd_file = gen_path (mi->context.options.client_config_dir,
+					 tls_common_name (mi->context.c2.tls_multi, false),
+					 &gc);
+	if (test_file (ccd_file))
+	  {
+	    options_server_import (&mi->context.options,
+				   ccd_file,
+				   D_IMPORT_ERRORS,
+				   option_permissions_mask,
+				   &option_types_found,
+				   mi->context.c2.es);
+	  }
+      }
+
+      /*
+       * Select a virtual address from either --ifconfig-push in --client-config-dir file
+       * or --ifconfig-pool.
+       */
+      multi_select_virtual_addr (m, mi);
 
       /* setenv incoming cert common name for script */
       setenv_str (mi->context.c2.es, "common_name", tls_common_name (mi->context.c2.tls_multi, true));
@@ -1008,13 +1127,8 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
       /* setenv client real IP address */
       setenv_trusted (mi->context.c2.es, get_link_socket_info (&mi->context));
 
-      /*
-       * instance-specific directives to be processed:
-       *
-       *   iroute start-ip end-ip
-       *   ifconfig-push local remote-netmask
-       *   push
-       */
+      /* setenv client virtual IP address */
+      multi_set_virtual_addr_env (m, mi);
 
       /*
        * Run --client-connect script.
@@ -1022,111 +1136,49 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
       if (mi->context.options.client_connect_script)
 	{
 	  struct buffer cmd = alloc_buf_gc (256, &gc);
+	  const char *dc_file = NULL;
+
 	  setenv_str (mi->context.c2.es, "script_type", "client-connect");
 
-	  dynamic_config_file = create_temp_filename (mi->context.options.tmp_dir, &gc);
+	  dc_file = create_temp_filename (mi->context.options.tmp_dir, &gc);
 
-	  delete_file (dynamic_config_file);
+	  delete_file (dc_file);
 
 	  buf_printf (&cmd, "%s %s",
 		      mi->context.options.client_connect_script,
-		      dynamic_config_file);
+		      dc_file);
 
 	  system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "client-connect command failed");
 
-	  if (test_file (dynamic_config_file))
+	  /* Did script generate a dynamic config file? */
+	  if (test_file (dc_file))
 	    {
-	      dynamic_config_file_mark_for_delete = true;
-	    }
-	  else
-	    {
-	      dynamic_config_file = NULL;
-	    }
-	}
+	      options_server_import (&mi->context.options,
+				     dc_file,
+				     D_IMPORT_ERRORS,
+				     option_permissions_mask,
+				     &option_types_found,
+				     mi->context.c2.es);
 
-      /*
-       * If client connect script was not run, or if it
-       * was run but did not create a dynamic config file,
-       * try to get a dynamic config file from the
-       * --client-config-dir directory.
-       */
-      if (!dynamic_config_file)
-	{
-	  dynamic_config_file = gen_path (mi->context.options.client_config_dir,
-					  tls_common_name (mi->context.c2.tls_multi, false),
-					  &gc);
+	      if (!delete_file (dc_file))
+		msg (D_MULTI_ERRORS, "MULTI: problem deleting temporary file: %s",
+		     dc_file);
 
-	  if (!test_file (dynamic_config_file))
-	    dynamic_config_file = NULL;
-	}
-
-      /*
-       * Load the dynamic options.
-       */
-      if (dynamic_config_file)
-	{
-	  unsigned int option_types_found = 0;
-	  options_server_import (&mi->context.options,
-				 dynamic_config_file,
-				 D_IMPORT_ERRORS,
-				 OPT_P_PUSH|OPT_P_INSTANCE|OPT_P_TIMER|OPT_P_CONFIG,
-				 &option_types_found,
-				 mi->context.c2.es);
-	  do_deferred_options (&mi->context, option_types_found);
-	}
-
-      /*
-       * Delete script-generated dynamic config file.
-       */
-      if (dynamic_config_file && dynamic_config_file_mark_for_delete)
-	{
-	  if (!delete_file (dynamic_config_file))
-	    msg (D_MULTI_ERRORS, "MULTI: problem deleting temporary file: %s",
-		 dynamic_config_file);
-	}
-
-      /*
-       * If ifconfig addresses were set by dynamic config file,
-       * release pool addresses, otherwise keep them.
-       */
-      if (mi->context.options.push_ifconfig_defined)
-	{
-	  /* ifconfig addresses were set statically,
-	     release dynamic allocation */
-	  ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle, true);
-	  mi->vaddr_handle = -1;
-
-	  mi->context.c2.push_ifconfig_defined = true;
-	  mi->context.c2.push_ifconfig_local = mi->context.options.push_ifconfig_local;
-	  mi->context.c2.push_ifconfig_remote_netmask = mi->context.options.push_ifconfig_remote_netmask;
-	}
-      else
-	{
-	  if (mi->vaddr_handle >= 0)
-	    {
-	      /* use pool ifconfig address(es) */
-	      mi->context.c2.push_ifconfig_local = remote;
-	      if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
-		{
-		  if (mi->context.options.ifconfig_pool_linear)		    
-		    mi->context.c2.push_ifconfig_remote_netmask = mi->context.c1.tuntap->local;
-		  else
-		    mi->context.c2.push_ifconfig_remote_netmask = local;
-		  mi->context.c2.push_ifconfig_defined = true;
-		}
-	      else if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TAP)
-		{
-		  mi->context.c2.push_ifconfig_remote_netmask = mi->context.options.ifconfig_pool_netmask;
-		  if (!mi->context.c2.push_ifconfig_remote_netmask)
-		    mi->context.c2.push_ifconfig_remote_netmask = mi->context.c1.tuntap->remote_netmask;
-		  if (mi->context.c2.push_ifconfig_remote_netmask)
-		    mi->context.c2.push_ifconfig_defined = true;
-		  else
-		    msg (D_MULTI_ERRORS, "MULTI: no --ifconfig-pool netmask parameter is available to push to %s",
-			 multi_instance_string (mi, false, &gc));
-		}
+	      /*
+	       * If the --client-connect script generates a config file
+	       * with an --ifconfig-push directive, it will override any
+	       * --ifconfig-push directive from the --client-config-dir
+	       * directory or any --ifconfig-pool dynamic address.
+	       */
+	      multi_select_virtual_addr (m, mi);
+	      multi_set_virtual_addr_env (m, mi);
 	    }
 	}
+
+      /*
+       * Process sourced options.
+       */
+      do_deferred_options (&mi->context, option_types_found);
 
       /*
        * make sure we got ifconfig settings from somewhere
@@ -1336,7 +1388,8 @@ multi_process_post (struct multi_context *m, struct multi_instance *mi, const un
   else
     {
       /* continue to pend on output? */
-      m->pending = ANY_OUT (&mi->context) ? mi : NULL;
+      multi_set_pending (m, ANY_OUT (&mi->context) ? mi : NULL);
+
 #ifdef MULTI_DEBUG_EVENT_LOOP
       printf ("POST %s[%d] to=%d lo=%d/%d w=%d/%d\n",
 	      id(mi),
@@ -1377,10 +1430,10 @@ multi_process_incoming_link (struct multi_context *m, struct multi_instance *ins
 #ifdef MULTI_DEBUG_EVENT_LOOP
       printf ("TCP/UDP -> TUN [%d]\n", BLEN (&m->top.c2.buf));
 #endif
-      m->pending = multi_get_create_instance_udp (m);
+      multi_set_pending (m, multi_get_create_instance_udp (m));
     }
   else
-    m->pending = instance;
+    multi_set_pending (m, instance);
 
   if (m->pending)
     {
@@ -1542,7 +1595,8 @@ multi_process_incoming_tun (struct multi_context *m, const unsigned int mpp_flag
 	    }
 	  else
 	    {
-	      m->pending = multi_get_instance_by_virtual_addr (m, &dest, dev_type == DEV_TYPE_TUN);
+	      multi_set_pending (m, multi_get_instance_by_virtual_addr (m, &dest, dev_type == DEV_TYPE_TUN));
+
 	      if (m->pending)
 		{
 		  /* get instance context */
@@ -1586,7 +1640,7 @@ multi_get_queue (struct mbuf_set *ms)
 {
   struct mbuf_item item;
 
-  if (mbuf_extract_item (ms, &item)) /* cleartext IP packet */
+  if (mbuf_extract_item (ms, &item, true)) /* cleartext IP packet */
     {
       unsigned int pipv4_flags = PIPV4_PASSTOS;
 
@@ -1688,10 +1742,12 @@ multi_process_per_second_timers_dowork (struct multi_context *m)
 }
 
 void
-multi_top_init (struct multi_context *m, const struct context *top)
+multi_top_init (struct multi_context *m, const struct context *top, const bool alloc_buffers)
 {
   inherit_context_top (&m->top, top);
-  m->top.c2.buffers = init_context_buffers (&top->c2.frame);
+  m->top.c2.buffers = NULL;
+  if (alloc_buffers)
+    m->top.c2.buffers = init_context_buffers (&top->c2.frame);
 }
 
 void
@@ -1752,6 +1808,126 @@ tunnel_server (struct context *top)
     ASSERT (0);
   }
 }
+
+#ifdef USE_PTHREAD
+
+/*
+ * Multithreading support
+ */
+void
+inherit_multi_context (struct multi_context *dest, const struct multi_context *src, const unsigned int thread_mode)
+{
+  ASSERT (thread_mode & MC_WORK_THREAD);
+
+  *dest = *src;
+  dest->thread_mode = thread_mode;
+  dest->pending = NULL;
+  dest->earliest_wakeup = NULL;
+  dest->mpp_touched = NULL;
+  dest->per_second_trigger = 0;
+  multi_top_init (dest, &src->top, true);
+}
+
+void
+multi_acquire_io_lock (struct multi_context *m, const unsigned int iow_flags)
+{
+  msg (D_THREAD_DEBUG, "THREAD: acquire I/O lock ENTRY, flags=0x%08x", iow_flags);
+  if ((iow_flags & IOW_READ) && !m->thread_local.read_owned)
+    {
+      mutex_lock (&m->thread_shared->read.mutex);
+      m->thread_local.read_owned = true;
+    }
+  else
+    {
+      if ((iow_flags & (IOW_TO_LINK | IOW_MBUF)) && !m->thread_local.write_link_owned)
+	{
+	  mutex_lock (&m->thread_shared->write_link.mutex);
+	  m->thread_local.write_link_owned = true;
+	}
+      if ((iow_flags & IOW_TO_TUN) && !m->thread_local.write_tun_owned)
+	{
+	  mutex_lock (&m->thread_shared->write_tun.mutex);
+	  m->thread_local.write_tun_owned = true;
+	}
+    }
+  msg (D_THREAD_DEBUG, "THREAD: acquire I/O lock EXIT, flags=0x%08x", iow_flags);
+}
+
+void
+multi_release_io_lock (struct multi_context *m)
+{
+  msg (D_THREAD_DEBUG, "THREAD: release I/O lock");
+  if (m->thread_local.read_owned)
+    {
+      mutex_unlock (&m->thread_shared->read.mutex);
+      m->thread_local.read_owned = false;
+    }
+  if (m->thread_local.write_link_owned)
+    {
+      mutex_unlock (&m->thread_shared->write_link.mutex);
+      m->thread_local.write_link_owned = false;
+    }
+  if (m->thread_local.write_tun_owned)
+    {
+      mutex_unlock (&m->thread_shared->write_tun.mutex);
+      m->thread_local.write_tun_owned = false;
+    }
+}
+
+void
+thread_shared_init (struct multi_context_thread_shared *ts)
+{
+  CLEAR (*ts);
+  mutex_init (&ts->read.mutex);
+  mutex_init (&ts->write_link.mutex);
+  mutex_init (&ts->write_tun.mutex);
+}
+
+void
+thread_shared_uninit (struct multi_context_thread_shared *ts)
+{
+  mutex_destroy (&ts->read.mutex);
+  mutex_destroy (&ts->write_link.mutex);
+  mutex_destroy (&ts->write_tun.mutex);
+}
+
+void
+multi_set_pending (struct multi_context *m, struct multi_instance *mi)
+{
+  if (mi)
+    {
+      if (mi != m->thread_local.held)
+	{
+	  if (m->thread_local.held)
+	    {
+	      mutex_unlock (&m->thread_local.held->mutex);
+	      m->thread_local.held = NULL;
+	    }
+	  if (mutex_trylock (&mi->mutex))
+	    {
+	      m->thread_local.held = mi;
+	      m->pending = mi;
+	      msg (D_THREAD_DEBUG, "THREAD: instance lock SUCCEEDED");
+	    }
+	  else
+	    {
+	      m->pending = NULL;
+	      msg (D_THREAD_DEBUG, "THREAD: instance lock FAILED");
+	    }
+	}
+    }
+  else
+    {
+      if (m->thread_local.held)
+	{
+	  mutex_unlock (&m->thread_local.held->mutex);
+	  m->thread_local.held = NULL;
+	}
+      m->pending = NULL;
+    }
+}
+
+#endif /* USE_PTHREAD */
 
 #else
 static void dummy(void) {}

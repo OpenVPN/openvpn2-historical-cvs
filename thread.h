@@ -39,14 +39,15 @@
 #define L_STRERR       4
 #define L_PUTENV       5
 #define L_PRNG         6
-#define L_GC_MALLOC    7
-#define L_GETTIMEOFDAY 8
-#define L_ENV_SET      9
-#define L_SYSTEM       10
-#define L_CREATE_TEMP  11
-#define N_MUTEXES      12
+#define L_GETTIMEOFDAY 7
+#define L_ENV_SET      8
+#define L_SYSTEM       9
+#define L_CREATE_TEMP  10
+#define N_MUTEXES      11
 
 #ifdef USE_PTHREAD
+
+#define MAX_THREADS     50
 
 #define CACHE_LINE_SIZE 128
 
@@ -100,6 +101,15 @@ mutex_lock (pthread_mutex_t *mutex)
 {
   if (pthread_initialized && mutex)
     pthread_mutex_lock (mutex);
+}
+
+static inline bool
+mutex_trylock (pthread_mutex_t *mutex)
+{
+  if (pthread_initialized && mutex)
+    return pthread_mutex_trylock (mutex) == 0;
+  else
+    return true;
 }
 
 static inline void
@@ -159,6 +169,7 @@ typedef int openvpn_thread_t;
 #define mutex_init(m)
 #define mutex_destroy(m)
 #define mutex_lock(m)
+#define mutex_trylock(m) (true)
 #define mutex_unlock(m)
 #define mutex_cycle(m)
 

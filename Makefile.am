@@ -84,8 +84,7 @@ openvpn_SOURCES = \
 	status.c status.h \
 	syshead.h \
 	thread.c thread.h \
-	tun.c tun.h \
-	work.c work.h
+	tun.c tun.h
 
 LDADD = @LIBOBJS@
 

@@ -218,11 +218,14 @@ static const char usage_message[] =
   "--suppress-timestamps : Don't log timestamps to stdout/stderr.\n"
   "--writepid file : Write main process ID to file.\n"
   "--nice n        : Change process priority (>0 = lower, <0 = higher).\n"
+#if 0
 #ifdef USE_PTHREAD
   "--nice-work n   : Change thread priority of work thread.  The work\n"
   "                  thread is used for background processing such as\n"
   "                  RSA key number crunching.\n"
 #endif
+#endif
+  "--echo [parms ...] : Echo parameters to log output.\n"
   "--verb n        : Set output verbosity to n (default=%d):\n"
   "                  (Level 3 is recommended if you want a good summary\n"
   "                  of what's happening without being swamped by output).\n"
@@ -376,6 +379,7 @@ static const char usage_message[] =
   "                  The optional d parameter controls key directionality,\n"
   "                  see --secret option for more info.\n"
   "--askpass [file]: Get PEM password from controlling tty before we daemonize.\n"
+  "--auth-nocache  : Don't cache --askpass or --auth-user-pass passwords.\n"
   "--crl-verify crl: Check peer certificate against a CRL.\n"
   "--tls-verify cmd: Execute shell command cmd to verify the X509 name of a\n"
   "                  pending TLS connection that has otherwise passed all other\n"
@@ -2211,7 +2215,6 @@ add_option (struct options *options,
   else if (streq (p[0], "config") && p[1])
     {
       ++i;
-
       VERIFY_PERMISSION (OPT_P_CONFIG);
 
       /* save first config file only in options */
@@ -2219,6 +2222,21 @@ add_option (struct options *options,
 	options->config = p[1];
 
       read_config_file (options, p[1], level, file, line, msglevel, permission_mask, option_types_found, es);
+    }
+  else if (streq (p[0], "echo"))
+    {
+      struct buffer string = alloc_buf_gc (256, &gc);
+      int j;
+      VERIFY_PERMISSION (OPT_P_ECHO);
+
+      for (j = 1; j < MAX_PARMS; ++j)
+	{
+	  if (!p[j])
+	    break;
+	  ++i;
+	  buf_printf (&string, " %s", p[j]);
+	}
+      msg (M_INFO, "ECHO:%s", BSTR (&string));
     }
   else if (streq (p[0], "mode") && p[1])
     {
@@ -3634,6 +3652,11 @@ add_option (struct options *options,
 	}
       else
 	options->key_pass_file = "stdin";	
+    }
+  else if (streq (p[0], "auth-nocache"))
+    {
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      ssl_set_auth_nocache ();
     }
   else if (streq (p[0], "single-session"))
     {

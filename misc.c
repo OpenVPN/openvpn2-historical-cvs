@@ -942,6 +942,19 @@ sleep_milliseconds (unsigned int n)
 #endif
 }
 
+/*
+ * Go to sleep indefinitely.
+ */
+void
+sleep_until_signal (void)
+{
+#ifdef WIN32
+  ASSERT (0);
+#else
+  select (0, NULL, NULL, NULL, NULL);
+#endif
+}
+
 /* return true if filename can be opened for read */
 bool
 test_file (const char *filename)
@@ -1098,8 +1111,6 @@ get_user_pass (struct user_pass *up,
 
   if (!up->defined)
     {
-      CLEAR (*up);
-
       /*
        * Get username/password from standard input?
        */
@@ -1171,6 +1182,16 @@ get_user_pass (struct user_pass *up,
 #endif
 
   gc_free (&gc);
+}
+
+void
+purge_user_pass (struct user_pass *up)
+{
+  if (up->nocache)
+    {
+      CLEAR (*up);
+      up->nocache = true;
+    }
 }
 
 /*

@@ -178,6 +178,9 @@ unsigned int count_bits(unsigned int );
 /* go to sleep for n milliseconds */
 void sleep_milliseconds (unsigned int n);
 
+/* go to sleep indefinitely */
+void sleep_until_signal (void);
+
 /* an analogue to the random() function, but use OpenSSL functions if available */
 #ifdef USE_CRYPTO
 long int get_random(void);
@@ -207,6 +210,7 @@ unsigned int adjust_power_of_2 (unsigned int u);
 struct user_pass
 {
   bool defined;
+  bool nocache;
 
 /* max length of username/password */
 # define USER_PASS_LEN 128
@@ -221,6 +225,7 @@ void get_user_pass (struct user_pass *up,
 		    const bool password_only,
 		    const char *prefix);
 
+void purge_user_pass (struct user_pass *up);
 
 /*
  * Process string received by untrusted peer before

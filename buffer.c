@@ -102,6 +102,14 @@ buf_clear (struct buffer *buf)
   buf->offset = 0;
 }
 
+bool
+buf_assign (struct buffer *dest, const struct buffer *src)
+{
+  if (!buf_init (dest, src->offset))
+    return false;
+  return buf_write (dest, BPTR (src), BLEN (src));
+}
+
 struct buffer
 clear_buf ()
 {
@@ -143,18 +151,20 @@ buf_sub (struct buffer *buf, int size, bool prepend)
 void
 buf_printf (struct buffer *buf, const char *format, ...)
 {
-  va_list arglist;
-
-  uint8_t *ptr = BEND (buf);
-  int cap = buf_forward_capacity (buf);
-
-  if (cap > 0)
+  if (buf_defined (buf))
     {
-      va_start (arglist, format);
-      vsnprintf ((char *)ptr, cap, format, arglist);
-      va_end (arglist);
-      *(buf->data + buf->capacity - 1) = 0; /* windows vsnprintf needs this */
-      buf->len += (int) strlen ((char *)ptr);
+      va_list arglist;
+      uint8_t *ptr = BEND (buf);
+      int cap = buf_forward_capacity (buf);
+
+      if (cap > 0)
+	{
+	  va_start (arglist, format);
+	  vsnprintf ((char *)ptr, cap, format, arglist);
+	  va_end (arglist);
+	  *(buf->data + buf->capacity - 1) = 0; /* windows vsnprintf needs this */
+	  buf->len += (int) strlen ((char *)ptr);
+	}
     }
 }
 
@@ -242,10 +252,10 @@ gc_malloc (size_t size, bool clear, struct gc_arena *a)
 #endif
       check_malloc_return (e);
       ret = (char *) e + sizeof (struct gc_entry);
-      mutex_lock_static (L_GC_MALLOC);
+      //mutex_lock_static (L_GC_MALLOC);
       e->next = a->list;
       a->list = e;
-      mutex_unlock_static (L_GC_MALLOC);
+      //mutex_unlock_static (L_GC_MALLOC);
     }
   else
     {
@@ -267,10 +277,10 @@ void
 x_gc_free (struct gc_arena *a)
 {
   struct gc_entry *e;
-  mutex_lock_static (L_GC_MALLOC);
+  //mutex_lock_static (L_GC_MALLOC);
   e = a->list;
   a->list = NULL;
-  mutex_unlock_static (L_GC_MALLOC);
+  //mutex_unlock_static (L_GC_MALLOC);
   
   while (e != NULL)
     {

@@ -136,7 +136,6 @@
 #define D_READ_WRITE         LOGLEV(9, 70, M_DEBUG)  /* show all tun/tcp/udp reads/writes/opens */
 #define D_PACKET_CONTENT     LOGLEV(9, 70, M_DEBUG)  /* show before/after encryption packet content */
 #define D_TLS_NO_SEND_KEY    LOGLEV(9, 70, M_DEBUG)  /* show when no data channel send-key exists */
-#define D_THREAD_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show pthread debug information */
 #define D_PID_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show packet-id debugging info */
 #define D_PID_PERSIST_DEBUG  LOGLEV(9, 70, M_DEBUG)  /* show packet-id persist debugging info */
 #define D_LINK_RW_VERBOSE    LOGLEV(9, 70, M_DEBUG)  /* show link reads/writes with greater verbosity */
@@ -147,6 +146,8 @@
 
 #define D_REGISTRY           LOGLEV(11, 70, M_DEBUG) /* win32 registry debugging info */
 #define D_OPENSSL_LOCK       LOGLEV(11, 70, M_DEBUG) /* show OpenSSL locks */
+
+#define D_THREAD_DEBUG       LOGLEV(4, 70, M_DEBUG)  /* JYFIXME -- show pthread debug information */
 
 
 #endif

@@ -122,8 +122,7 @@ context_init_1 (struct context *c)
   /* Auth user/pass input */
   if (c->options.auth_user_pass_file)
     {
-      ALLOC_OBJ_CLEAR_GC (c->c1.auth_user_pass, struct user_pass, &c->gc);
-      *c->c1.auth_user_pass = *get_auth_user_pass (c->options.auth_user_pass_file);
+      auth_user_pass_setup (c->options.auth_user_pass_file);
     }
 #endif
 
@@ -909,7 +908,8 @@ pull_permission_mask (void)
 	  | OPT_P_TIMER
 	  | OPT_P_PERSIST
 	  | OPT_P_MESSAGES
-	  | OPT_P_EXPLICIT_NOTIFY);
+	  | OPT_P_EXPLICIT_NOTIFY
+	  | OPT_P_ECHO);
 }
 
 /*
@@ -1213,7 +1213,6 @@ do_init_crypto_tls (struct context *c, const unsigned int flags)
   to.auth_user_pass_verify_script = options->auth_user_pass_verify_script;
   to.auth_user_pass_verify_script_via_file = options->auth_user_pass_verify_script_via_file;
   to.tmp_dir = options->tmp_dir;
-  to.auth_user_pass = c->c1.auth_user_pass;
   to.username_as_common_name = options->username_as_common_name;
   if (options->ccd_exclusive)
     to.client_config_dir_exclusive = options->client_config_dir;
@@ -1842,31 +1841,6 @@ do_inherit_env (struct context *c, const struct env_set *src)
 }
 
 /*
- * Initialize/Uninitialize work thread
- */
-
-static void
-do_init_pthread (struct context *c)
-{
-#ifdef USE_PTHREAD
-  if (!c->c1.work_thread && c->options.n_threads >= 2)
-    c->c1.work_thread = work_thread_init (c->options.n_threads, c->options.nice_work);
-#endif
-}
-
-static void
-do_close_pthread (struct context *c)
-{
-#ifdef USE_PTHREAD
-  if (c->sig->signal_received != SIGUSR1 && c->c1.work_thread)
-    {
-      work_thread_close (c->c1.work_thread);
-      c->c1.work_thread = NULL;
-    }
-#endif
-}
-
-/*
  * Fast I/O setup.  Fast I/O is an optimization which only works
  * if all of the following are true:
  *
@@ -2059,10 +2033,6 @@ init_instance (struct context *c, const struct env_set *env, unsigned int flags)
   if (c->first_time)
     post_init_signal_catch ();
 
-  /* start work thread here */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
-    do_init_pthread (c);
-
   /*
    * Actually do UID/GID downgrade, and chroot, if requested.
    * May be delayed by --client, --pull, or --up-delay.
@@ -2121,9 +2091,6 @@ close_instance (struct context *c)
 
 	/* close TUN/TAP device */
 	do_close_tun (c, false);
-
-	/* close work thread */
-	do_close_pthread (c);
 
 	/* close packet-id persistance file */
 	do_close_packet_id (c);

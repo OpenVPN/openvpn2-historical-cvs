@@ -1167,7 +1167,7 @@ socket_adjust_frame_parameters (struct frame *frame, int proto)
 void
 setenv_trusted (struct env_set *es, const struct link_socket_info *info)
 {
-  setenv_sockaddr (es, "trusted", &info->lsa->actual);
+  setenv_sockaddr (es, "trusted", &info->lsa->actual, SA_IP_PORT);
 }
 
 void
@@ -1481,16 +1481,20 @@ print_in_addr_t (in_addr_t addr, unsigned int flags, struct gc_arena *gc)
 
 /* set environmental variables for ip/port in *addr */
 void
-setenv_sockaddr (struct env_set *es, const char *name_prefix, const struct sockaddr_in *addr)
+setenv_sockaddr (struct env_set *es, const char *name_prefix, const struct sockaddr_in *addr, const bool flags)
 {
   char name_buf[256];
 
-  openvpn_snprintf (name_buf, sizeof (name_buf), "%s_ip", name_prefix);
+  if (flags & SA_IP_PORT)
+    openvpn_snprintf (name_buf, sizeof (name_buf), "%s_ip", name_prefix);
+  else
+    openvpn_snprintf (name_buf, sizeof (name_buf), "%s", name_prefix);
+
   mutex_lock_static (L_INET_NTOA);
   setenv_str (es, name_buf, inet_ntoa (addr->sin_addr));
   mutex_unlock_static (L_INET_NTOA);
 
-  if (addr->sin_port)
+  if ((flags & SA_IP_PORT) && addr->sin_port)
     {
       openvpn_snprintf (name_buf, sizeof (name_buf), "%s_port", name_prefix);
       setenv_int (es, name_buf, ntohs (addr->sin_port));
@@ -1498,12 +1502,15 @@ setenv_sockaddr (struct env_set *es, const char *name_prefix, const struct socka
 }
 
 void
-setenv_in_addr_t (struct env_set *es, const char *name_prefix, in_addr_t addr)
+setenv_in_addr_t (struct env_set *es, const char *name_prefix, in_addr_t addr, const bool flags)
 {
-  struct sockaddr_in si;
-  CLEAR (si);
-  si.sin_addr.s_addr = htonl (addr);
-  setenv_sockaddr (es, name_prefix, &si);
+  if (addr || !(flags & SA_SET_IF_NONZERO))
+    {
+      struct sockaddr_in si;
+      CLEAR (si);
+      si.sin_addr.s_addr = htonl (addr);
+      setenv_sockaddr (es, name_prefix, &si, flags);
+    }
 }
 
 /*

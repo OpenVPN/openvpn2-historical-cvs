@@ -64,6 +64,8 @@ void buf_clear (struct buffer *buf);
 struct buffer clear_buf (void);
 void free_buf (struct buffer *buf);
 
+bool buf_assign (struct buffer *dest, const struct buffer *src);
+
 /* for dmalloc debugging */
 
 #ifdef DMALLOC

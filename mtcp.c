@@ -249,7 +249,7 @@ multi_tcp_process_outgoing_link_ready (struct multi_context *m, struct multi_ins
   ASSERT (mi);
 
   /* extract from queue */
-  if (mbuf_extract_item (mi->tcp_link_out_deferred, &item)) /* ciphertext IP packet */
+  if (mbuf_extract_item (mi->tcp_link_out_deferred, &item, true)) /* ciphertext IP packet */
     {
       msg (D_MULTI_TCP, "MULTI TCP: transmitting previously deferred packet");
 
@@ -630,10 +630,10 @@ tunnel_server_tcp (struct context *top)
     return;
   
   /* initialize global multi_context object */
-  multi_init (&multi, top, true);
+  multi_init (&multi, top, true, MC_SINGLE_THREADED);
 
-  /* initialize a single multi_thread object */
-  multi_top_init (&multi, top);
+  /* initialize our cloned top object */
+  multi_top_init (&multi, top, true);
 
   /* finished with initialization */
   initialization_sequence_completed (top, false);
@@ -646,7 +646,7 @@ tunnel_server_tcp (struct context *top)
       /* wait on tun/socket list */
       multi_get_timeout (&multi, &multi.top.c2.timeval);
       status = multi_tcp_wait (&multi.top, multi.mtcp);
-      MULTI_CHECK_SIG ();
+      MULTI_CHECK_SIG (&multi);
 
       /* check on status of coarse timers */
       multi_process_per_second_timers (&multi);
@@ -656,7 +656,7 @@ tunnel_server_tcp (struct context *top)
 	{
 	  /* process the I/O which triggered select */
 	  multi_tcp_process_io (&multi);
-	  MULTI_CHECK_SIG ();
+	  MULTI_CHECK_SIG (&multi);
 	}
       else if (status == 0)
 	{

@@ -329,7 +329,6 @@ struct tls_options
   const char *auth_user_pass_verify_script;
   bool auth_user_pass_verify_script_via_file;
   const char *tmp_dir;
-  const struct user_pass *auth_user_pass;
   bool username_as_common_name;
 
   /* use the client-config-dir as a positive authenticator */
@@ -510,7 +509,8 @@ void get_highest_preference_tls_cipher (char *buf, int size);
 
 void pem_password_setup (const char *auth_file);
 int pem_password_callback (char *buf, int size, int rwflag, void *u);
-const struct user_pass *get_auth_user_pass (const char *auth_file);
+void auth_user_pass_setup (const char *auth_file);
+void ssl_set_auth_nocache (void);
 
 void tls_set_verify_command (const char *cmd);
 void tls_set_crl_verify (const char *crl);

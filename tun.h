@@ -286,18 +286,6 @@ int ascii2ipset (const char* name);
 const char *ipset2ascii (int index);
 const char *ipset2ascii_all (struct gc_arena *gc);
 
-const char *get_device_guid (const char *name,
-			     char *actual_name,
-			     int actual_name_size,
-			     struct gc_arena *gc);
-
-const char *get_unspecified_device_guid (const int device_number,
-					 char *actual_name,
-					 int actual_name_size,
-					 const struct tap_reg *tap_reg_src,
-					 const struct panel_reg *panel_reg_src,
-					 struct gc_arena *gc);
-
 void verify_255_255_255_252 (in_addr_t local, in_addr_t remote);
 
 const IP_ADAPTER_INFO *get_adapter_info_list (struct gc_arena *gc);

@@ -33,6 +33,7 @@
 
 #include "common.h"
 #include "error.h"
+#include "integer.h"
 #include "options.h"
 #include "socket.h"
 #include "buffer.h"
@@ -713,7 +714,7 @@ openvpn (const struct options *options,
    * Initialize advanced MTU negotiation and datagram fragmentation
    */
 #ifdef FRAGMENT_ENABLE
-  if (options->mtu_dynamic)
+  if (options->fragment)
     fragment = fragment_init (&frame);
 #endif
 
@@ -738,13 +739,12 @@ openvpn (const struct options *options,
        */
 
       /* Initialize packet ID tracking */
-      if (options->packet_id)
+      if (options->replay)
 	{
+	  packet_id_init (&packet_id, options->replay_window, options->replay_time);
 	  crypto_options.packet_id = &packet_id;
 	  crypto_options.pid_persist = pid_persist;
 	  crypto_options.packet_id_long_form = true;
-	  crypto_options.packet_id_require_sequential
-	    = link_socket_proto_connection_oriented (options->proto);
 	  packet_id_persist_load_obj (pid_persist, crypto_options.packet_id);
 	}
 
@@ -787,11 +787,11 @@ openvpn (const struct options *options,
 				     &ks->key_type,
 				     options->ciphername_defined,
 				     options->use_iv,
-				     options->packet_id,
+				     options->replay,
 				     true);
 
       /* Sanity check on IV, sequence number, and cipher mode options */
-      check_replay_iv_consistency(&ks->key_type, options->packet_id, options->use_iv);
+      check_replay_iv_consistency(&ks->key_type, options->replay, options->use_iv);
 
       /*
        * Test-crypto is a debugging tool
@@ -836,6 +836,10 @@ openvpn (const struct options *options,
       /* Let user specify a script to verify the incoming certificate */
       tls_set_verify_command (options->tls_verify);
 
+      /* Let user specify a certificate revocation list to
+	 check the incoming certificate */
+      tls_set_crl_verify (options->crl_file);
+
       if (!ks->ssl_ctx)
 	{
 	  /*
@@ -865,7 +869,7 @@ openvpn (const struct options *options,
 	}
 
       /* Sanity check on IV, sequence number, and cipher mode options */
-      check_replay_iv_consistency(&ks->key_type, options->packet_id, options->use_iv);
+      check_replay_iv_consistency(&ks->key_type, options->replay, options->use_iv);
 
       /* In short form, unique datagram identifier is 32 bits, in long form 64 bits */
       packet_id_long_form = cfb_ofb_mode (&ks->key_type);
@@ -875,7 +879,7 @@ openvpn (const struct options *options,
 				     &ks->key_type,
 				     options->ciphername_defined,
 				     options->use_iv,
-				     options->packet_id,
+				     options->replay,
 				     packet_id_long_form);
       tls_adjust_frame_parameters(&frame);
 
@@ -884,10 +888,10 @@ openvpn (const struct options *options,
       to.ssl_ctx = ks->ssl_ctx;
       to.key_type = ks->key_type;
       to.server = options->tls_server;
-      to.packet_id = options->packet_id;
+      to.replay = options->replay;
       to.packet_id_long_form = packet_id_long_form;
-      to.packet_id_require_sequential
-	= link_socket_proto_connection_oriented (options->proto);
+      to.replay_window = options->replay_window;
+      to.replay_time = options->replay_time;
       to.transition_window = options->transition_window;
       to.handshake_window = options->handshake_window;
       to.packet_timeout = options->tls_timeout;
@@ -903,8 +907,6 @@ openvpn (const struct options *options,
 	  to.tls_auth_key = ks->tls_auth_key;
 	  to.tls_auth.pid_persist = pid_persist;
 	  to.tls_auth.packet_id_long_form = true;
-	  to.tls_auth.packet_id_require_sequential
-	    = to.packet_id_require_sequential;
 	  crypto_adjust_frame_parameters(&to.frame,
 					 &ks->key_type,
 					 false,
@@ -1017,9 +1019,18 @@ openvpn (const struct options *options,
 #endif
 
 #ifdef FRAGMENT_ENABLE
-  /* fragmenting code has buffers to initialize once frame parameters are known */
+  /* fragmenting code has buffers to initialize
+     once frame parameters are known */
   if (fragment)
-    fragment_frame_init (fragment, &frame_fragment);
+    {
+      ASSERT (options->fragment);
+      frame_set_mtu_dynamic (
+			     &frame_fragment,
+			     options->fragment,
+			     SET_MTU_UPPER_BOUND
+			     );
+      fragment_frame_init (fragment, &frame_fragment);
+    }
 #endif
 
   /*
@@ -1965,7 +1976,7 @@ openvpn (const struct options *options,
 				   max_recv_size_local);
 			      if (!options->mssfix_defined
 #ifdef FRAGMENT_ENABLE
-				  && !options->mtu_dynamic
+				  && !options->fragment
 #endif
 				  && options->proto == PROTO_UDPv4
 				  && max_send_size_local > TUN_MTU_MIN
@@ -2322,6 +2333,8 @@ openvpn (const struct options *options,
 
 #ifdef USE_CRYPTO
 
+  packet_id_free (&packet_id);
+
   free_buf (&encrypt_buf);
   free_buf (&decrypt_buf);
 
@@ -2475,9 +2488,11 @@ main (int argc, char *argv[])
    */
   do {
     struct options options;
+    struct options defaults;
     int dev = DEV_TYPE_UNDEF;
 
     init_options (&options);
+    init_options (&defaults);
 
     /*
      * Parse command line options,
@@ -2589,31 +2604,22 @@ main (int argc, char *argv[])
        */
 
       if (options.daemon && options.inetd)
-	{
-	  msg (M_WARN, "Options error: only one of --daemon or --inetd may be specified");
-	  usage_small ();
-	}
+	msg (M_USAGE, "Options error: only one of --daemon or --inetd may be specified");
 
       if (options.inetd && (options.local || options.remote))
-	{
-	  msg (M_WARN, "Options error: --local or --remote cannot be used with --inetd");
-	  usage_small ();
-	}
+	msg (M_USAGE, "Options error: --local or --remote cannot be used with --inetd");
 
       if (options.inetd && options.proto == PROTO_TCPv4_CLIENT)
-	{
-	  msg (M_WARN, "Options error: --proto tcp-client cannot be used with --inetd");
-	  usage_small ();
-	}
+	msg (M_USAGE, "Options error: --proto tcp-client cannot be used with --inetd");
 
       /*
        * Sanity check on MTU parameters
        */
       if (options.tun_mtu_defined && options.link_mtu_defined)
-	{
-	  msg (M_WARN, "Options error: only one of --tun-mtu or --link-mtu may be defined (note that --ifconfig implies --link-mtu %d)", LINK_MTU_DEFAULT);
-	  usage_small ();
-	}
+	msg (M_USAGE, "Options error: only one of --tun-mtu or --link-mtu may be defined (note that --ifconfig implies --link-mtu %d)", LINK_MTU_DEFAULT);
+
+      if (options.proto != PROTO_UDPv4 && options.mtu_test)
+	msg (M_USAGE, "Options error: --mtu-test only makes sense with --proto udp");
 
       /*
        * Set MTU defaults
@@ -2646,32 +2652,20 @@ main (int argc, char *argv[])
        */
       if (string_defined_equal (options.local, options.remote)
 	  && options.local_port == options.remote_port)
-	{
-	  msg (M_WARN, "Options error: --remote and --local addresses are the same");
-	  usage_small ();
-	}
+	msg (M_USAGE, "Options error: --remote and --local addresses are the same");
 	
       if (string_defined_equal (options.local, options.ifconfig_local)
 	  || string_defined_equal (options.local, options.ifconfig_remote_netmask)
 	  || string_defined_equal (options.remote, options.ifconfig_local)
 	  || string_defined_equal (options.remote, options.ifconfig_remote_netmask))
-	{
-	  msg (M_WARN, "Options error: --local and --remote addresses must be distinct from --ifconfig addresses");
-	  usage_small ();
-	}
+	msg (M_USAGE, "Options error: --local and --remote addresses must be distinct from --ifconfig addresses");
 
       if (string_defined_equal (options.ifconfig_local, options.ifconfig_remote_netmask))
-	{
-	  msg (M_WARN, "Options error: local and remote/netmask --ifconfig addresses must be different");
-	  usage_small ();
-	}
+	msg (M_USAGE, "Options error: local and remote/netmask --ifconfig addresses must be different");
 
 #ifdef WIN32
       if (dev == DEV_TYPE_TUN && !(options.ifconfig_local && options.ifconfig_remote_netmask))
-	{
-	  msg (M_WARN, "Options error: On Windows, --ifconfig is required when --dev tun is used");
-	  usage_small ();
-	}
+	msg (M_USAGE, "Options error: On Windows, --ifconfig is required when --dev tun is used");
       if (options.ifconfig_noexec)
 	{
 	  options.tuntap_flags &= ~IP_SET_MASK;
@@ -2683,31 +2677,42 @@ main (int argc, char *argv[])
       /*
        * Check that protocol options make sense.
        */
+
 #ifdef FRAGMENT_ENABLE
-      if (options.proto != PROTO_UDPv4 && options.mtu_dynamic)
-	{
-	  msg (M_WARN, "Options error: --mtu-dynamic cannot be used with non-UDP protocols");
-	  usage_small ();
-	}
+      if (options.proto != PROTO_UDPv4 && options.fragment)
+	msg (M_USAGE, "Options error: --fragment can only be used with --proto udp");
 #endif
       if (!options.remote && options.proto == PROTO_TCPv4_CLIENT)
-	{
-	  msg (M_WARN, "Options error: --remote MUST be used in TCP Client mode");
-	  usage_small ();
-	}
+	msg (M_USAGE, "Options error: --remote MUST be used in TCP Client mode");
 
 #ifdef USE_CRYPTO
 
       if (first_time)
 	init_ssl_lib ();
 
+      /*
+       * Check consistency of replay options
+       */
+      if ((options.proto != PROTO_UDPv4)
+	  && (options.replay_window != defaults.replay_window
+	      || options.replay_time != defaults.replay_time))
+	msg (M_USAGE, "Options error: --replay-window only makes sense with --proto udp");
+
+      if (!options.replay
+	  && (options.replay_window != defaults.replay_window
+	      || options.replay_time != defaults.replay_time))
+	msg (M_USAGE, "Options error: --replay-window doesn't make sense when replay protection is disabled with --no-replay");
+
+      /* Don't use replay window for TCP mode (i.e. require that packets
+	 be strictly in sequence). */
+      if (link_socket_proto_connection_oriented (options.proto))
+	options.replay_window = options.replay_time = 0;
+
 #ifdef USE_SSL
       if (options.tls_server + options.tls_client +
 	  (options.shared_secret_file != NULL) > 1)
-	{
-	  msg (M_WARN, "specify only one of --tls-server, --tls-client, or --secret");
-	  usage_small ();
-	}
+	msg (M_USAGE, "specify only one of --tls-server, --tls-client, or --secret");
+
       if (options.tls_server)
 	{
 	  notnull (options.dh_file, "DH file (--dh)");
@@ -2727,12 +2732,10 @@ main (int argc, char *argv[])
 	   * when in non-TLS mode.
 	   */
 
-#define MUST_BE_UNDEF(parm) if (options.parm != def.parm) msg (M_FATAL, err, #parm);
+#define MUST_BE_UNDEF(parm) if (options.parm != defaults.parm) msg (M_USAGE, err, #parm);
 
 	  const char err[] = "Parameter %s can only be specified in TLS-mode, i.e. where --tls-server or --tls-client is also specified.";
-	  struct options def;
 
-	  init_options (&def);
 	  MUST_BE_UNDEF (ca_file);
 	  MUST_BE_UNDEF (dh_file);
 	  MUST_BE_UNDEF (cert_file);
@@ -2747,6 +2750,7 @@ main (int argc, char *argv[])
 	  MUST_BE_UNDEF (transition_window);
 	  MUST_BE_UNDEF (tls_auth_file);
 	  MUST_BE_UNDEF (single_session);
+	  MUST_BE_UNDEF (crl_file);
 	}
 #undef MUST_BE_UNDEF
 #endif /* USE_CRYPTO */

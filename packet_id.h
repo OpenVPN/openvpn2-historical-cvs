@@ -34,14 +34,14 @@
 #ifndef PACKET_ID_H
 #define PACKET_ID_H
 
+#include "circ_list.h"
+#include "buffer.h"
+#include "error.h"
+
 /*
  * Enables OpenVPN to be compiled in special packet_id test mode.
  */
 /*#define PID_TEST*/
-
-#include "circ_list.h"
-#include "buffer.h"
-#include "error.h"
 
 #if 1
 /*
@@ -109,14 +109,18 @@ typedef unsigned int packet_id_print_type;
  * sequence number due to packets arriving
  * out of order.
  */
-#define SEQ_BACKTRACK 256
+#define MIN_SEQ_BACKTRACK 0
+#define MAX_SEQ_BACKTRACK 65536
+#define DEFAULT_SEQ_BACKTRACK 64
 
 /*
  * Maximum allowed backtrack in
  * seconds due to packets arriving
  * out of order.
  */
-#define TIME_BACKTRACK 15
+#define MIN_TIME_BACKTRACK 0
+#define MAX_TIME_BACKTRACK 600
+#define DEFAULT_TIME_BACKTRACK 15
 
 /*
  * Do a reap pass through the sequence number
@@ -127,19 +131,22 @@ typedef unsigned int packet_id_print_type;
  */
 #define SEQ_REAP_INTERVAL 5
 
-CIRC_LIST (pkt_id, time_t, SEQ_BACKTRACK);
+CIRC_LIST (seq_list, time_t);
 
 /*
  * This is the data structure we keep on the receiving side,
  * to check that no packet-id (i.e. sequence number + optional timestamp)
- * was received more than once.
+ * is accepted more than once.
  */
 struct packet_id_rec
 {
-  time_t last_reap;        /* last call of packet_id_reap */
-  time_t time;             /* highest time stamp received */
-  packet_id_type id;       /* highest sequence number received */
-  struct pkt_id id_list;   /* packet-id "memory" */
+  time_t last_reap;           /* last call of packet_id_reap */
+  time_t time;                /* highest time stamp received */
+  packet_id_type id;          /* highest sequence number received */
+  int seq_backtrack;          /* set from --replay-window */
+  int time_backtrack;         /* set from --replay-window */
+  bool initialized;           /* true if packet_id_init was called */
+  struct seq_list *seq_list;  /* packet-id "memory" */
 };
 
 /*
@@ -208,10 +215,12 @@ struct packet_id
   struct packet_id_rec rec;
 };
 
+void packet_id_init (struct packet_id *p, int seq_backtrack, int time_backtrack);
+void packet_id_free (struct packet_id *p);
+
 /* should we accept an incoming packet id ? */
 bool packet_id_test (const struct packet_id_rec *p,
-		     const struct packet_id_net *pin,
-		     bool require_sequential);
+		     const struct packet_id_net *pin);
 
 /* change our current state to reflect an accepted packet id */
 void packet_id_add (struct packet_id_rec *p,

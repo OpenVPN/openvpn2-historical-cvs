@@ -44,6 +44,7 @@
 #include "ssl.h"
 #include "error.h"
 #include "common.h"
+#include "integer.h"
 #include "socket.h"
 #include "thread.h"
 #include "misc.h"
@@ -266,12 +267,19 @@ tmp_rsa_cb (SSL * s, int is_export, int keylength)
  */
 
 static const char *verify_command;
+static const char *crl_file;
 static int verify_maxlevel;
 
 void
 tls_set_verify_command (const char *cmd)
 {
   verify_command = cmd;
+}
+
+void
+tls_set_crl_verify (const char *crl)
+{
+  crl_file = crl;
 }
 
 int
@@ -324,7 +332,6 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 	{
 	  msg (D_HANDSHAKE, "VERIFY SCRIPT OK: depth=%d, %s",
 	       ctx->error_depth, txt);
-	  return 1;		/* Accept connection */
 	}
       else
 	{
@@ -335,11 +342,53 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 	  return 0;		/* Reject connection */
 	}
     }
-  else
+  
+  if (crl_file)
     {
-      msg (D_HANDSHAKE, "VERIFY OK: depth=%d, %s", ctx->error_depth, txt);
-      return 1;			/* Accept connection */
+      X509_CRL *crl=NULL;
+      X509_REVOKED *revoked;
+      BIO *in=NULL;
+      int n,i,retval = 0;
+
+      in=BIO_new(BIO_s_file());
+
+      if (in == NULL) {
+	msg (M_ERR, "CRL: BIO err");
+	goto end;
+      }
+      if (BIO_read_filename(in,crl_file) <= 0) {
+	msg (M_ERR, "CRL: cannot read: %s",crl_file);
+	goto end;
+      }
+      crl=PEM_read_bio_X509_CRL(in,NULL,NULL,NULL);
+      if (crl == NULL) {
+	msg (M_ERR, "CRL: cannot read CRL from file %s",crl_file);
+	goto end;
+      }
+
+      n = sk_num(X509_CRL_get_REVOKED(crl));
+
+      for (i = 0; i < n; i++) {
+	revoked = (X509_REVOKED *)sk_value(X509_CRL_get_REVOKED(crl), i);
+	if (ASN1_INTEGER_cmp(revoked->serialNumber, X509_get_serialNumber(ctx->current_cert)) == 0) {
+	  msg (D_HANDSHAKE, "CRL CHECK FAILED: %s is REVOKED",txt);
+	  goto end;
+	}
+      }
+
+      retval = 1;
+      msg (D_HANDSHAKE, "CRL CHECK OK: %s",txt);
+
+    end:
+
+      BIO_free(in);
+      if (!retval)
+	return retval;
     }
+
+  msg (D_HANDSHAKE, "VERIFY OK: depth=%d, %s", ctx->error_depth, txt);
+
+  return 1;			/* Accept connection */
 }
 
 /*
@@ -877,6 +926,11 @@ key_state_init (struct tls_session *session, struct key_state *ks,
   reliable_init (&ks->rec_reliable, BUF_SIZE (&session->opt->frame),
 		 EXTRA_FRAME (&session->opt->frame), TLS_RELIABLE_N_REC_BUFFERS);
   reliable_set_timeout (&ks->send_reliable, session->opt->packet_timeout);
+
+  /* init packet ID tracker */
+  packet_id_init (&ks->packet_id,
+		  session->opt->replay_window,
+		  session->opt->replay_time);
 }
 
 static void
@@ -900,6 +954,8 @@ key_state_free (struct key_state *ks, bool clear)
   free_buf (&ks->ack_write_buf);
   reliable_free (&ks->send_reliable);
   reliable_free (&ks->rec_reliable);
+
+  packet_id_free (&ks->packet_id);
 
   if (clear)
     CLEAR (*ks);
@@ -940,6 +996,11 @@ tls_session_init (struct tls_multi *multi, struct tls_session *session)
   /* Set session internal pointers (also called if session object is moved in memory) */
   tls_session_set_self_referential_pointers (session);
 
+  /* initialize packet ID replay window for --tls-auth */
+  packet_id_init (session->tls_auth.packet_id,
+		  session->opt->replay_window,
+		  session->opt->replay_time);
+
   /* load most recent packet-id to replay protect on --tls-auth */
   packet_id_persist_load_obj (session->tls_auth.pid_persist, session->tls_auth.packet_id);
 
@@ -953,6 +1014,9 @@ static void
 tls_session_free (struct tls_session *session, bool clear)
 {
   int i;
+
+  if (session->tls_auth.packet_id)
+    packet_id_free (session->tls_auth.packet_id);
 
   for (i = 0; i < KS_SIZE; ++i)
     key_state_free (&session->key[i], false);
@@ -2118,10 +2182,9 @@ tls_pre_decrypt (struct tls_multi *multi,
 		{
 		  /* return appropriate data channel decrypt key in opt */
 		  opt->key_ctx_bi = &ks->key;
-		  opt->packet_id = multi->opt.packet_id ? &ks->packet_id : NULL;
+		  opt->packet_id = multi->opt.replay ? &ks->packet_id : NULL;
 		  opt->pid_persist = NULL;
 		  opt->packet_id_long_form = multi->opt.packet_id_long_form;
-		  opt->packet_id_require_sequential = multi->opt.packet_id_require_sequential;
 		  ASSERT (buf_advance (buf, 1));
 		  ++ks->n_packets;
 		  ks->n_bytes += buf->len;
@@ -2440,7 +2503,6 @@ tls_pre_decrypt (struct tls_multi *multi,
   opt->packet_id = NULL;
   opt->pid_persist = NULL;
   opt->packet_id_long_form = false;
-  opt->packet_id_require_sequential = false;
   return ret;
 }
 
@@ -2459,7 +2521,7 @@ tls_pre_encrypt (struct tls_multi *multi,
 	  if (ks->state >= S_ACTIVE)
 	    {
 	      opt->key_ctx_bi = &ks->key;
-	      opt->packet_id = multi->opt.packet_id ? &ks->packet_id : NULL;
+	      opt->packet_id = multi->opt.replay ? &ks->packet_id : NULL;
 	      opt->pid_persist = NULL;
 	      opt->packet_id_long_form = multi->opt.packet_id_long_form;
 	      multi->save_ks = ks;

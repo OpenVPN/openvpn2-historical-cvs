@@ -31,6 +31,7 @@
 #ifdef HAVE_GETTIMEOFDAY
 
 #include "basic.h"
+#include "integer.h"
 #include "misc.h"
 #include "error.h"
 

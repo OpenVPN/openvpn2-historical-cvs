@@ -28,6 +28,7 @@
 
 #include "basic.h"
 #include "common.h"
+#include "integer.h"
 
 /* socket descriptor passed by inetd/xinetd server to us */
 #define INETD_SOCKET_DESCRIPTOR 0

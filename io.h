@@ -34,6 +34,7 @@
 #define OPENVPN_IO_H
 
 #include "common.h"
+#include "integer.h"
 #include "error.h"
 #include "basic.h"
 #include "mtu.h"

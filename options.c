@@ -41,6 +41,7 @@
 #include "openvpn.h"
 #include "misc.h"
 #include "socket.h"
+#include "packet_id.h"
 #include "win32.h"
 
 #include "memdbg.h"
@@ -223,6 +224,9 @@ static const char usage_message[] =
   "                  If unspecified, defaults to cipher-specific default.\n"
 #endif
   "--no-replay     : Disable replay protection.\n"
+  "--replay-window n [t] : Use a replay protection sliding window of size n\n"
+  "                        and a time window of t seconds.\n"
+  "                        Default n=%d t=%d\n"
   "--no-iv         : Disable cipher IV -- only allowed with CBC mode ciphers.\n"
   "--replay-persist file : Persist replay-protection state across sessions\n"
   "                  using file.\n"
@@ -258,6 +262,7 @@ static const char usage_message[] =
   "                  control channel to protect against DoS attacks.\n"
   "                  f (required) is a shared-secret passphrase file.\n"
   "--askpass       : Get PEM password from controlling tty before we daemonize.\n"
+  "--crl-verify crl: Check peer certificate against a CRL.\n"
   "--tls-verify cmd: Execute shell command cmd to verify the X509 name of a\n"
   "                  pending TLS connection that has otherwise passed all other\n"
   "                  tests of certification.  cmd should return 0 to allow\n"
@@ -319,9 +324,6 @@ init_options (struct options *o)
   o->link_mtu = LINK_MTU_DEFAULT;
   o->mtu_discover_type = -1;
   o->occ = true;
-#ifdef FRAGMENT_ENABLE
-  o->mtu_icmp = true;
-#endif
 #ifdef USE_LZO
   o->comp_lzo_adaptive = true;
 #endif
@@ -333,7 +335,9 @@ init_options (struct options *o)
   o->ciphername_defined = true;
   o->authname = "SHA1";
   o->authname_defined = true;
-  o->packet_id = true;
+  o->replay = true;
+  o->replay_window = DEFAULT_SEQ_BACKTRACK;
+  o->replay_time = DEFAULT_TIME_BACKTRACK;
   o->use_iv = true;
 #ifdef USE_SSL
   o->tls_timeout = 2;
@@ -412,12 +416,7 @@ show_settings (const struct options *o)
   SHOW_INT (tun_mtu_extra);
   SHOW_BOOL (tun_mtu_extra_defined);
 #ifdef FRAGMENT_ENABLE
-  SHOW_BOOL (mtu_dynamic);
-  SHOW_INT (mtu_min);
-  SHOW_BOOL (mtu_min_defined);
-  SHOW_INT (mtu_max);
-  SHOW_BOOL (mtu_max_defined);
-  SHOW_BOOL (mtu_icmp);
+  SHOW_INT (fragment);
 #endif
   SHOW_INT (mtu_discover_type);
   SHOW_INT (mtu_test);
@@ -481,7 +480,9 @@ show_settings (const struct options *o)
   SHOW_BOOL (authname_defined);
   SHOW_STR (authname);
   SHOW_INT (keysize);
-  SHOW_BOOL (packet_id);
+  SHOW_BOOL (replay);
+  SHOW_INT (replay_window);
+  SHOW_INT (replay_time);
   SHOW_STR (packet_id_file);
   SHOW_BOOL (use_iv);
   SHOW_BOOL (test_crypto);
@@ -495,6 +496,7 @@ show_settings (const struct options *o)
   SHOW_STR (priv_key_file);
   SHOW_STR (cipher_list);
   SHOW_STR (tls_verify);
+  SHOW_STR (crl_file);
 
   SHOW_INT (tls_timeout);
 
@@ -592,7 +594,7 @@ options_string (const struct options *o,
 #endif
 
 #ifdef FRAGMENT_ENABLE
-  if (o->mtu_dynamic)
+  if (o->fragment)
     buf_printf (&out, ",mtu-dynamic");
 #endif
 
@@ -627,7 +629,7 @@ options_string (const struct options *o,
 	buf_printf (&out, ",keysize %d", kt_key_size (&kt));
 	if (o->shared_secret_file)
 	  buf_printf (&out, ",secret");
-	if (!o->packet_id)
+	if (!o->replay)
 	  buf_printf (&out, ",no-replay");
 	if (!o->use_iv)
 	  buf_printf (&out, ",no-iv");
@@ -745,6 +747,7 @@ usage (void)
 	   TAP_MTU_DEFAULT, o.tun_mtu_extra, o.link_mtu,
 	   o.verbosity,
 	   o.authname, o.ciphername,
+           o.replay_window, o.replay_time,
 	   o.tls_timeout, o.renegotiate_seconds,
 	   o.handshake_window, o.transition_window);
 #elif defined(USE_CRYPTO)
@@ -752,7 +755,8 @@ usage (void)
 	   title_string, o.local_port, o.remote_port,
 	   TAP_MTU_DEFAULT, o.tun_mtu_extra, o.link_mtu,
 	   o.verbosity,
-	   o.authname, o.ciphername);
+	   o.authname, o.ciphername,
+           o.replay_window, o.replay_time);
 #else
   fprintf (fp, usage_message,
 	   title_string, o.local_port, o.remote_port,
@@ -783,10 +787,7 @@ void
 notnull (const char *arg, const char *description)
 {
   if (!arg)
-    {
-      msg (M_WARN|M_NOPREFIX, "Options error: You must define %s", description);
-      usage_small ();
-    }
+    msg (M_USAGE, "Options error: You must define %s", description);
 }
 
 bool
@@ -801,8 +802,7 @@ string_defined_equal (const char *s1, const char *s2)
 static void
 ping_rec_err (void)
 {
-  msg (M_WARN|M_NOPREFIX, "Options error: only one of --ping-exit or --ping-restart options may be specified");
-  usage_small ();
+  msg (M_USAGE, "Options error: only one of --ping-exit or --ping-restart options may be specified");
 }
 
 static int
@@ -948,10 +948,7 @@ parse_argv (struct options* options, int argc, char *argv[])
       CLEAR (p);
       p[0] = argv[i];
       if (strncmp(p[0], "--", 2))
-	{
-	  msg (M_WARN|M_NOPREFIX, "I'm trying to parse \"%s\" as an --option parameter but I don't see a leading '--'", p[0]);
-	  usage_small ();
-	}
+	msg (M_USAGE, "I'm trying to parse \"%s\" as an --option parameter but I don't see a leading '--'", p[0]);
       p[0] += 2;
 
       for (j = 1; j < MAX_PARMS; ++j)
@@ -1171,30 +1168,12 @@ add_option (struct options *options, int i, char *p[],
 #ifdef FRAGMENT_ENABLE
   else if (streq (p[0], "mtu-dynamic"))
     {
-      options->mtu_dynamic = true;
-      if (p[1])
-	{
-	  if ((options->mtu_min = positive (atoi (p[1]))))
-	    options->mtu_min_defined = true;
-	  ++i;
-	}
-      if (p[2])
-	{
-	  if ((options->mtu_max = positive (atoi (p[2]))))
-	    options->mtu_max_defined = true;
-	  ++i;
-	}
-    }
-  else if (streq (p[0], "mtu-noicmp"))
-    {
-      options->mtu_icmp = false;
+      msg (M_USAGE, "--mtu-dynamic has been replaced by --fragment");
     }
   else if (streq (p[0], "fragment") && p[1])
     {
       ++i;
-      options->mtu_dynamic = true;
-      options->mtu_max = positive (atoi (p[1]));
-      options->mtu_max_defined = true;
+      options->fragment = positive (atoi (p[1]));
     }
 #endif
   else if (streq (p[0], "mtu-disc") && p[1])
@@ -1225,13 +1204,11 @@ add_option (struct options *options, int i, char *p[],
       options->shaper = atoi (p[1]);
       if (options->shaper < SHAPER_MIN || options->shaper > SHAPER_MAX)
 	{
-	  msg (M_WARN, "bad shaper value, must be between %d and %d",
+	  msg (M_USAGE, "bad shaper value, must be between %d and %d",
 	       SHAPER_MIN, SHAPER_MAX);
-	  usage_small ();
 	}
 #else /* HAVE_GETTIMEOFDAY */
-      msg (M_WARN, "--shaper requires the gettimeofday() function which is missing");
-      usage_small ();
+      msg (M_USAGE, "--shaper requires the gettimeofday() function which is missing");
 #endif /* HAVE_GETTIMEOFDAY */
     }
   else if (streq (p[0], "port") && p[1])
@@ -1239,30 +1216,21 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       options->local_port = options->remote_port = atoi (p[1]);
       if (options->local_port <= 0 || options->remote_port <= 0)
-	{
-	  msg (M_WARN, "Bad port number: %s", p[1]);
-	  usage_small ();
-	}
+	msg (M_USAGE, "Bad port number: %s", p[1]);
     }
   else if (streq (p[0], "lport") && p[1])
     {
       ++i;
       options->local_port = atoi (p[1]);
       if (options->local_port <= 0)
-	{
-	  msg (M_WARN, "Bad local port number: %s", p[1]);
-	  usage_small ();
-	}
+	msg (M_USAGE, "Bad local port number: %s", p[1]);
     }
   else if (streq (p[0], "rport") && p[1])
     {
       ++i;
       options->remote_port = atoi (p[1]);
       if (options->remote_port <= 0)
-	{
-	  msg (M_WARN, "Bad remote port number: %s", p[1]);
-	  usage_small ();
-	}
+	msg (M_USAGE, "Bad remote port number: %s", p[1]);
     }
   else if (streq (p[0], "nobind"))
     {
@@ -1278,12 +1246,9 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       options->proto = ascii2proto (p[1]);
       if (options->proto < 0)
-	{
-	  msg (M_WARN, "Bad protocol: '%s'.  Allowed protocols with --proto option: %s",
-	       p[1],
-	       proto2ascii_all());
-	  usage_small ();
-	}
+	msg (M_USAGE, "Bad protocol: '%s'.  Allowed protocols with --proto option: %s",
+	     p[1],
+	     proto2ascii_all());
     }
   else if (streq (p[0], "ping") && p[1])
     {
@@ -1388,13 +1353,10 @@ add_option (struct options *options, int i, char *p[],
       const int index = ascii2ipset (p[1]);
       ++i;
       if (index < 0)
-	{
-	  msg (M_WARN|M_NOPREFIX,
-	       "Bad --ip-win32 method: '%s'.  Allowed methods: %s",
-	       p[1],
-	       ipset2ascii_all());
-	  usage_small ();
-	}
+	msg (M_USAGE,
+	     "Bad --ip-win32 method: '%s'.  Allowed methods: %s",
+	     p[1],
+	     ipset2ascii_all());
 
 #if 1
       if (index == IP_SET_DHCP)
@@ -1495,7 +1457,35 @@ add_option (struct options *options, int i, char *p[],
     }
   else if (streq (p[0], "no-replay"))
     {
-      options->packet_id = false;
+      options->replay = false;
+    }
+  else if (streq (p[0], "replay-window"))
+    {
+      if (p[1])
+	{
+	  ++i;
+	  options->replay_window = atoi (p[1]);
+	  if (!(MIN_SEQ_BACKTRACK <= options->replay_window && options->replay_window <= MAX_SEQ_BACKTRACK))
+	    msg (M_USAGE, "replay-window window size parameter (%d) must be between %d and %d",
+		 options->replay_window,
+		 MIN_SEQ_BACKTRACK,
+		 MAX_SEQ_BACKTRACK);
+
+	  if (p[2])
+	    {
+	      ++i;
+	      options->replay_time = atoi (p[2]);
+	      if (!(MIN_TIME_BACKTRACK <= options->replay_time && options->replay_time <= MAX_TIME_BACKTRACK))
+		msg (M_USAGE, "replay-window time window parameter (%d) must be between %d and %d",
+		     options->replay_time,
+		     MIN_TIME_BACKTRACK,
+		     MAX_TIME_BACKTRACK);
+	    }
+	}
+      else
+	{
+	  msg (M_USAGE, "replay-window option is missing window size parameter");
+	}
     }
   else if (streq (p[0], "no-iv"))
     {
@@ -1516,10 +1506,7 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       options->keysize = atoi (p[1]) / 8;
       if (options->keysize < 0 || options->keysize > MAX_CIPHER_KEY_LENGTH)
-	{
-	  msg (M_WARN, "Bad keysize: %s", p[1]);
-	  usage_small ();
-	}
+	msg (M_USAGE, "Bad keysize: %s", p[1]);
     }
 #endif
 #ifdef USE_SSL
@@ -1567,6 +1554,11 @@ add_option (struct options *options, int i, char *p[],
     {
       ++i;
       options->cipher_list = p[1];
+    }
+  else if (streq (p[0], "crl-verify") && p[1])
+    {
+      ++i;
+      options->crl_file = p[1];
     }
   else if (streq (p[0], "tls-verify") && p[1])
     {
@@ -1625,10 +1617,9 @@ add_option (struct options *options, int i, char *p[],
   else
     {
       if (file)
-	msg (M_WARN|M_NOPREFIX, "Unrecognized option or missing parameter(s) in %s:%d: %s", file, line, p[0]);
+	msg (M_USAGE, "Unrecognized option or missing parameter(s) in %s:%d: %s", file, line, p[0]);
       else
-	msg (M_WARN|M_NOPREFIX, "Unrecognized option or missing parameter(s): --%s", p[0]);
-      usage_small ();
+	msg (M_USAGE, "Unrecognized option or missing parameter(s): --%s", p[0]);
     }
   return i;
 }

@@ -334,7 +334,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
       if (have_pin)
 	{
 	  packet_id_reap_test (&opt->packet_id->rec, current);
-	  if (packet_id_test (&opt->packet_id->rec, &pin, opt->packet_id_require_sequential))
+	  if (packet_id_test (&opt->packet_id->rec, &pin))
 	    {
 	      packet_id_add (&opt->packet_id->rec, &pin, current);
 	      if (opt->pid_persist && opt->packet_id_long_form)
@@ -342,7 +342,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	    }
 	  else
 	    {
-	      msg (D_CRYPT_ERRORS, "%s: bad packet ID (may be a replay): %s",
+	      msg (D_CRYPT_ERRORS, "%s: bad packet ID (may be a replay): %s -- see the man page entry for --no-replay and --replay-window for more info",
 		   error_prefix, packet_id_net_print (&pin, true));
 	      goto error_exit;
 	    }

@@ -34,6 +34,7 @@
 #include "syshead.h"
 #include "misc.h"
 #include "fragment.h"
+#include "integer.h"
 #include "memdbg.h"
 
 #define FRAG_ERR(s) { errmsg = s; goto error; }
@@ -87,15 +88,19 @@ fragment_init (struct frame *frame)
 
   ret = (struct fragment_master *) malloc (sizeof (struct fragment_master));
   ASSERT (ret);
-  CLEAR (*ret); /* code that initializes other parts of fragment_master assume an initial CLEAR */
+  CLEAR (*ret); /* code that initializes other parts of
+		   fragment_master assume an initial CLEAR */
 
   /* add in the size of our contribution to the expanded frame size */
   frame_add_to_extra_frame (frame, sizeof(fragment_header_type));
 
   /*
-   * Outgoing sequence ID is randomized to reduce the probability of sequence number collisions
-   * when openvpn sessions are restarted.  This is not done out of any need for security, as all
-   * fragmentation control information resides inside of the encrypted/authenticated envelope.
+   * Outgoing sequence ID is randomized to reduce
+   * the probability of sequence number collisions
+   * when openvpn sessions are restarted.  This is
+   * not done out of any need for security, as all
+   * fragmentation control information resides
+   * inside of the encrypted/authenticated envelope.
    */
   ret->outgoing_seq_id = (int)get_random() & (N_SEQ_ID - 1);
 

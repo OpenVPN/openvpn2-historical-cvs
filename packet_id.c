@@ -44,6 +44,7 @@
 
 #include "packet_id.h"
 #include "misc.h"
+#include "integer.h"
 
 #include "memdbg.h"
 
@@ -51,60 +52,97 @@
  * Special time_t value that indicates that
  * sequence number has expired.
  */
+#define SEQ_UNSEEN  ((time_t)0)
 #define SEQ_EXPIRED ((time_t)1)
+
+void
+packet_id_init (struct packet_id *p, int seq_backtrack, int time_backtrack)
+{
+  msg (D_PID_DEBUG_LOW, "PID packet_id_init seq_backtrack=%d time_backtrack=%d",
+       seq_backtrack,
+       time_backtrack);
+
+  ASSERT (p);
+  CLEAR (*p);
+
+  if (seq_backtrack)
+    {
+      ASSERT (MIN_SEQ_BACKTRACK <= seq_backtrack && seq_backtrack <= MAX_SEQ_BACKTRACK);
+      ASSERT (MIN_TIME_BACKTRACK <= time_backtrack && time_backtrack <= MAX_TIME_BACKTRACK);
+      CIRC_LIST_ALLOC (p->rec.seq_list, struct seq_list, seq_backtrack);
+      p->rec.seq_backtrack = seq_backtrack;
+      p->rec.time_backtrack = time_backtrack;
+    }
+  p->rec.initialized = true;
+}
+
+void
+packet_id_free (struct packet_id *p)
+{
+  ASSERT (p);
+  msg (D_PID_DEBUG_LOW, "PID packet_id_free");
+  free (p->rec.seq_list);
+  CLEAR (*p);
+}
 
 void
 packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin, time_t current)
 {
-  packet_id_type diff;
-
-  /*
-   * If time value increases, start a new
-   * sequence number sequence.
-   */
-  if (!CIRC_LIST_SIZE (p->id_list)
-      || pin->time > p->time
-      || (pin->id >= SEQ_BACKTRACK
-	  && pin->id - SEQ_BACKTRACK > p->id))
+  if (p->seq_list)
     {
-      p->time = pin->time;
-      p->id = 0;
-      if (pin->id > SEQ_BACKTRACK)
-	p->id = pin->id - SEQ_BACKTRACK;
-      CLEAR (p->id_list);
-    }
+      packet_id_type diff;
 
-  while (p->id < pin->id)
-    {
-      CIRC_LIST_PUSH (p->id_list, (time_t)0);
-      ++p->id;
-    }
+      /*
+       * If time value increases, start a new
+       * sequence number sequence.
+       */
+      if (!CIRC_LIST_SIZE (p->seq_list)
+	  || pin->time > p->time
+	  || (pin->id >= (packet_id_type)p->seq_backtrack
+	      && pin->id - (packet_id_type)p->seq_backtrack > p->id))
+	{
+	  p->time = pin->time;
+	  p->id = 0;
+	  if (pin->id > (packet_id_type)p->seq_backtrack)
+	    p->id = pin->id - (packet_id_type)p->seq_backtrack;
+	  CIRC_LIST_RESET (p->seq_list);
+	}
 
-  diff = p->id - pin->id;
-  if (diff < (packet_id_type) CIRC_LIST_SIZE (p->id_list)
-      && current > SEQ_EXPIRED)
-    CIRC_LIST_ITEM (p->id_list, diff) = current;
+      while (p->id < pin->id)
+	{
+	  CIRC_LIST_PUSH (p->seq_list, SEQ_UNSEEN);
+	  ++p->id;
+	}
+
+      diff = p->id - pin->id;
+      if (diff < (packet_id_type) CIRC_LIST_SIZE (p->seq_list)
+	  && current > SEQ_EXPIRED)
+	CIRC_LIST_ITEM (p->seq_list, diff) = current;
+    }
 }
 
 /*
  * Expire sequence numbers which can no longer
  * be accepted because they would violate
- * TIME_BACKTRACK.
+ * time_backtrack.
  */
 void
 packet_id_reap (struct packet_id_rec *p, time_t current)
 {
-  int i;
-  bool expire = false;
-  for (i = 0; i < CIRC_LIST_SIZE (p->id_list); ++i)
+  if (p->time_backtrack)
     {
-      const time_t t = CIRC_LIST_ITEM (p->id_list, i);
-      if (t == SEQ_EXPIRED)
-	break;
-      if (!expire && t && t + TIME_BACKTRACK < current)
-	expire = true;
-      if (expire)
-	CIRC_LIST_ITEM (p->id_list, i) = SEQ_EXPIRED;
+      int i;
+      bool expire = false;
+      for (i = 0; i < CIRC_LIST_SIZE (p->seq_list); ++i)
+	{
+	  const time_t t = CIRC_LIST_ITEM (p->seq_list, i);
+	  if (t == SEQ_EXPIRED)
+	    break;
+	  if (!expire && t && t + p->time_backtrack < current)
+	    expire = true;
+	  if (expire)
+	    CIRC_LIST_ITEM (p->seq_list, i) = SEQ_EXPIRED;
+	}
     }
   p->last_reap = current;
 }
@@ -115,9 +153,9 @@ packet_id_reap (struct packet_id_rec *p, time_t current)
  */
 bool
 packet_id_test (const struct packet_id_rec *p,
-		const struct packet_id_net *pin,
-		bool require_sequential)
+		const struct packet_id_net *pin)
 {
+  static int max_backtrack_stat;
   packet_id_type diff;
 
   msg (D_PID_DEBUG,
@@ -125,14 +163,16 @@ packet_id_test (const struct packet_id_rec *p,
        (time_type)p->time, (packet_id_print_type)p->id, (time_type)pin->time,
        (packet_id_print_type)pin->id);
 
+  ASSERT (p->initialized);
+
   if (!pin->id)
     return false;
 
-  if (!require_sequential)
+  if (p->seq_backtrack)
     {
       /*
        * In backtrack mode, we allow packet reordering subject
-       * to the SEQ_BACKTRACK and TIME_BACKTRACK constraints.
+       * to the seq_backtrack and time_backtrack constraints.
        *
        * This mode is used with UDP.
        */
@@ -144,10 +184,18 @@ packet_id_test (const struct packet_id_rec *p,
 
 	  /* check packet-id sliding window for original/replay status */
 	  diff = p->id - pin->id;
-	  if (diff >= (packet_id_type) CIRC_LIST_SIZE (p->id_list))
+
+	  /* keep track of maximum backtrack seen for debugging purposes */
+	  if ((int)diff > max_backtrack_stat)
+	    {
+	      max_backtrack_stat = (int)diff;
+	      msg (D_BACKTRACK, "Replay-window backtrack occurred [%d]", max_backtrack_stat);
+	    }
+
+	  if (diff >= (packet_id_type) CIRC_LIST_SIZE (p->seq_list))
 	    return false;
 
-	  return CIRC_LIST_ITEM (p->id_list, diff) == 0;
+	  return CIRC_LIST_ITEM (p->seq_list, diff) == 0;
 	}
       else if (pin->time < p->time) /* if time goes back, reject */
 	return false;
@@ -329,17 +377,16 @@ packet_id_persist_print (const struct packet_id_persist *p)
 
 void packet_id_interactive_test ()
 {
-  struct packet_id_rec p;
-  struct packet_id_send s;
+  struct packet_id pid;
   struct packet_id_net pin;
   bool long_form;
   bool count = 0;
   bool test;
 
-  const bool require_sequential = false;
+  const int seq_backtrack = 10;
+  const int time_backtrack = 10;
 
-  CLEAR (p);
-  CLEAR (s);
+  packet_id_init (&pid, seq_backtrack, time_backtrack);
 
   while (true) {
     char buf[80];
@@ -347,30 +394,31 @@ void packet_id_interactive_test ()
       break;
     if (sscanf (buf, "%lu,%u", &pin.time, &pin.id) == 2)
       {
-	packet_id_reap_test (&p, time (NULL));
-	test = packet_id_test (&p, &pin, require_sequential);
+	packet_id_reap_test (&pid.rec, time (NULL));
+	test = packet_id_test (&pid.rec, &pin);
 	printf ("packet_id_test (" packet_id_format ", " packet_id_format ") returned %d\n",
 		(time_type)pin.time,
 		(packet_id_print_type)pin.id,
 		test);
 	if (test)
-	  packet_id_add (&p, &pin, time (NULL));
+	  packet_id_add (&pid.rec, &pin, time (NULL));
       }
     else
       {
 	long_form = (count < 20);
-	packet_id_alloc_outgoing (&s, &pin, long_form);
+	packet_id_alloc_outgoing (&pid.send, &pin, long_form);
 	printf ("(" time_format "(" packet_id_format "), " time_format "(" packet_id_format "), %d)\n",
 		(time_type)pin.time,
 		(time_type)pin.time,
 		(packet_id_print_type)pin.id,
 		(packet_id_print_type)pin.id,
 		long_form);
-	if (s.id == 10)
-	  s.id = 0xFFFFFFF8;
+	if (pid.send.id == 10)
+	  pid.send.id = 0xFFFFFFF8;
 	++count;
       }
   }
+  packet_id_free (&pid);
 }
 #endif
 

@@ -230,7 +230,7 @@ struct tls_options
   const char *remote_options;
 
   /* from command line */
-  bool packet_id;
+  bool replay;
   bool single_session;
   bool disable_occ;
   int transition_window;
@@ -242,7 +242,9 @@ struct tls_options
 
   /* use 32 bit or 64 bit packet-id? */
   bool packet_id_long_form;
-  bool packet_id_require_sequential;
+
+  int replay_window;                   /* --replay-window parm */
+  int replay_time;                     /* --replay-window parm */
 
   /* packet authentication for TLS handshake */
   struct crypto_options tls_auth;
@@ -385,6 +387,7 @@ void get_highest_preference_tls_cipher (char *buf, int size);
 int pem_password_callback (char *buf, int size, int rwflag, void *u);
 
 void tls_set_verify_command (const char *cmd);
+void tls_set_crl_verify (const char *crl);
 int get_max_tls_verify_id ();
 
 void tls_adjust_frame_parameters(struct frame *frame);

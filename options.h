@@ -92,12 +92,7 @@ struct options
   bool mtu_test;
 
 #ifdef FRAGMENT_ENABLE
-  bool mtu_dynamic;      /* should we fragment and reassemble packets? */
-  int mtu_min;
-  bool mtu_min_defined;
-  int mtu_max;
-  bool mtu_max_defined;
-  bool mtu_icmp;         /* if fragment=true, bounce back "fragmentation needed but DF set" ICMPs */
+  int fragment;          /* internal fragmentation size */
 #endif
 
   bool mlock;
@@ -173,7 +168,9 @@ struct options
   bool authname_defined;
   const char *authname;
   int keysize;
-  bool packet_id;
+  bool replay;
+  int replay_window;
+  int replay_time;
   const char *packet_id_file;
   bool use_iv;
   bool test_crypto;
@@ -188,6 +185,7 @@ struct options
   const char *priv_key_file;
   const char *cipher_list;
   const char *tls_verify;
+  const char *crl_file;
 
   /* Per-packet timeout on control channel */
   int tls_timeout;

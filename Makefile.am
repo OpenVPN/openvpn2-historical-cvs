@@ -33,7 +33,8 @@ openvpn_SOURCES = basic.h buffer.c buffer.h circ_list.h common.h \
                   crypto.c crypto.h encrypt_sign.h \
 		  errlevel.h error.c error.h \
                   fdmisc.c fdmisc.h fragment.c \
-                  fragment.h gremlin.c gremlin.h interval.h \
+                  fragment.h gremlin.c gremlin.h \
+                  integer.h interval.h \
                   io.c io.h lzo.c lzo.h memdbg.h misc.c misc.h \
                   mss.c mss.h mtu.c mtu.h openvpn.c \
                   openvpn.h options.c options.h packet_id.c \

@@ -63,11 +63,13 @@ extern int msg_line_num;
 #define M_NOLOCK          (1<<11)        /* don't lock/unlock mutex */      
 #define M_NOMUTE          (1<<12)        /* don't do mute processing */
 #define M_NOPREFIX        (1<<13)        /* don't show date/time prefix */
+#define M_USAGE_SMALL     (1<<14)        /* fatal options error, call usage_small */
 
 /* flag combinations which are frequently used */
 #define M_ERR     (M_FATAL | M_ERRNO)
 #define M_SOCKERR (M_FATAL | M_ERRNO_SOCK)
 #define M_SSLERR  (M_FATAL | M_SSL)
+#define M_USAGE   (M_USAGE_SMALL | M_NOPREFIX)
 
 /*
  * Mute levels are designed to avoid large numbers of

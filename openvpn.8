@@ -103,6 +103,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-comp\-lzo\fR\ ]
 [\ \fB\-\-comp\-noadapt\fR\ ]
 [\ \fB\-\-config\fR\ \fIfile\fR\ ]
+[\ \fB\-\-crl\-verify\fR\ \fIcrl\fR\ ]
 [\ \fB\-\-daemon\fR\ ]
 [\ \fB\-\-dev\-name\fR\ \fIname\fR\ ]
 [\ \fB\-\-dev\-node\fR\ \fInode\fR\ ]
@@ -155,6 +156,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-reneg\-pkts\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-sec\fR\ \fIn\fR\ ]
 [\ \fB\-\-replay\-persist\fR\ \fIfile\fR\ ]
+[\ \fB\-\-replay\-window\fR\ \fIn\ [t]\fR\ ]
 [\ \fB\-\-resolv\-retry\fR\ \fIn\fR\ ]
 [\ \fB\-\-route\fR\ \fInetwork\ [netmask]\ [gateway]\ [metric]\fR\ ]
 [\ \fB\-\-route\-delay\fR\ \fIn\fR\ ]
@@ -1775,6 +1777,92 @@ the
 algorithm used
 by IPSec.
 .TP
+.B --replay-window n [t]
+Use a replay protection sliding-window of size
+.B n
+and a time window of
+.B t
+seconds.
+
+By default
+.B n
+is 64 (the IPSec default) and
+.B t
+is 15 seconds.
+
+This option is only relevant in UDP mode, i.e.
+when either
+.B --proto udp
+is specifed, or no
+.B --proto
+option is specified.
+
+When OpenVPN tunnels IP packets over UDP, there is the possibility that
+packets might be dropped or delivered out of order.  Because OpenVPN, like IPSec,
+is emulating the physical network layer,
+it will accept an out-of-order packet sequence, and
+will deliver such packets in the same order they were received to
+the TCP/IP protocol stack, provided they satisfy several constraints.
+
+.B (a)
+The packet cannot be a replay (unless
+.B --no-replay
+is specified, which disables replay protection altogether).
+
+.B (b)
+If a packet arrives out of order, it will only be accepted if the difference
+between its sequence number and the highest sequence number received
+so far is less than
+.B n.
+
+.B (c)
+If a packet arrives out of order, it will only be accepted if it arrives no later
+than
+.B t
+seconds after any packet containing a higher sequence number.
+
+If you are using a network link with a large pipeline (meaning that
+the product of bandwidth and latency is high), you may want to use
+a larger value for
+.B n.
+Satellite links in particular often require this.
+
+If you run OpenVPN at
+.B --verb 4,
+you will see the message "Replay-window backtrack occurred [x]"
+every time the maximum sequence number backtrack seen thus far
+increases.  This can be used to calibrate
+.B n.
+
+There is some controversy on the appropriate method of handling packet
+reordering at the security layer.
+
+Namely, to what extent should the
+security layer protect the encapsulated protocol from attacks which masquerade
+as the kinds of normal packet loss and reordering that occur over IP networks?
+
+The IPSec and OpenVPN approach is to allow packet reordering within a certain
+fixed sequence number window.
+
+OpenVPN adds to the IPSec model by limiting the window size in time as well as
+sequence space.
+
+OpenVPN also adds TCP transport as an option (not offered by IPSec) in which
+case OpenVPN can adopt a very strict attitude towards message deletion and
+reordering:  Don't allow it.  Since TCP guarantees reliability, any packet
+loss or reordering event can be assumed to be an attack.
+
+In this sense, it could be argued that TCP tunnel transport is preferred when
+tunneling non-IP or UDP application protocols which might be vulnerable to a
+message deletion or reordering attack which falls within the normal
+operational parameters of IP networks.
+
+So I would make the statement that one should never tunnel a non-IP protocol
+or UDP application protocol over UDP, if the protocol might be vulnerable to a
+message deletion or reordering attack that falls within the normal operating
+parameters of what is to be expected from the physical IP layer.  The problem
+is easily fixed by simply using TCP as the VPN transport layer.
+.TP
 .B --replay-persist file
 Persist replay-protection state across sessions using
 .B file
@@ -2171,12 +2259,23 @@ not it should be accepted.  For a simple perl script which will test
 the common name field on the certificate, see the file
 .B verify-cn
 in the OpenVPN distribution.
+.TP
+.B --crl-verify crl
+Check peer certificate against the file
+.B crl
+in PEM format.
 
-While OpenVPN currently doesn't support CRLs (certificate
-revocation lists), a simple
-.B --tls-verify
-script could be implemented that rejects certificates
-based on the CN (Common Name).
+A CRL (certificate revocation list) is used when a particular key is
+compromised but when the overall PKI is still intact.
+
+Suppose you had a PKI consisting of a CA, root certificate, and a number of
+client certificates.  Suppose a laptop computer containing a client key and
+certificate was stolen.  By adding the stolen certificate to the CRL file,
+you could reject any connection which attempts to use it, while preserving the
+overall integrity of the PKI.
+
+The only time when it would be necessary to rebuild the entire PKI from scratch would be
+if the root certificate key itself was compromised.
 .SS SSL Library information:
 .TP
 .B --show-ciphers

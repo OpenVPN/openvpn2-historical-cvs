@@ -136,6 +136,8 @@ void x_msg (unsigned int flags, const char *format, ...)
   char *tmp;
   int e;
 
+  void usage_small (void);
+
 #ifndef HAVE_VARARG_MACROS
   /* the macro has checked this otherwise */
   if (!MSG_TEST(flags))
@@ -214,7 +216,7 @@ void x_msg (unsigned int flags, const char *format, ...)
 #endif
 
 #if SYSLOG_CAPABILITY
-  if (flags & (M_FATAL|M_NONFATAL))
+  if (flags & (M_FATAL|M_NONFATAL|M_USAGE_SMALL))
     level = LOG_ERR;
   else if (flags & M_WARN)
     level = LOG_WARNING;
@@ -263,6 +265,9 @@ void x_msg (unsigned int flags, const char *format, ...)
   
   if (flags & M_FATAL)
     openvpn_exit (OPENVPN_EXIT_STATUS_ERROR); /* exit point */
+
+  if (flags & M_USAGE_SMALL)
+    usage_small ();
 }
 
 void

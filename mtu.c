@@ -35,6 +35,7 @@
 #include "buffer.h"
 #include "mtu.h"
 #include "error.h"
+#include "integer.h"
 
 #include "memdbg.h"
 

@@ -1,8 +1,17 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.19 2003/10/13 06:18:54 jimyonan Exp $
-	
+$Id: ChangeLog,v 1.86.2.20 2003/10/19 08:48:27 jimyonan Exp $
+
+2003.10.xx -- Version 1.5-beta13
+
+* Added CRL (certificate revocation list) capability
+  using --crl-verify option (Stefano Bracalenti).
+* Added --replay-window option for variable
+  replay-protection window sizes.
+* Fixed --fragment bug which might have caused
+  some large packets to be sent unfragmented. 
+
 2003.10.12 -- Version 1.5-beta12
 
 * Fixed Linux-only bug in --mktun and --rmtun which was

@@ -151,10 +151,23 @@ set_nice (int niceval)
 
 /* Pass tunnel endpoint and MTU parms to a user-supplied script */
 void
-run_script (const char *command, const char *arg, int tun_mtu, int link_mtu,
-	    const char *ifconfig_local, const char* ifconfig_remote,
-	    const char *context)
+run_script (const char *command,
+	    const char *arg,
+	    int tun_mtu,
+	    int link_mtu,
+	    const char *ifconfig_local,
+	    const char* ifconfig_remote,
+	    const char *context,
+	    const char *signal_text,
+	    const char *script_type)
 {
+  if (signal_text)
+    setenv_str ("signal", signal_text);
+  setenv_str ("script_context", context);
+  setenv_int ("tun_mtu", tun_mtu);
+  setenv_int ("link_mtu", link_mtu);
+  setenv_str ("dev", arg);
+
   if (command)
     {
       char command_line[512];
@@ -168,6 +181,8 @@ run_script (const char *command, const char *arg, int tun_mtu, int link_mtu,
       if (!context)
 	context = "";
 
+      setenv_str ("script_type", script_type);
+
       openvpn_snprintf (command_line, sizeof (command_line),
 			"%s %s %d %d %s %s %s",
 			command, arg, tun_mtu, link_mtu,
@@ -176,6 +191,30 @@ run_script (const char *command, const char *arg, int tun_mtu, int link_mtu,
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "script failed", true);
     }
+}
+
+/* remove non-parameter environmental vars except for signal */
+void
+del_env_nonparm (void)
+{
+  setenv_del ("script_context");
+  setenv_del ("tun_mtu");
+  setenv_del ("link_mtu");
+  setenv_del ("dev");
+
+  setenv_del ("untrusted_ip");
+  setenv_del ("untrusted_port");
+  setenv_del ("trusted_ip");
+  setenv_del ("trusted_port");
+
+  setenv_del ("tls_id_0");
+  setenv_del ("tls_id_1");
+  setenv_del ("tls_id_2");
+  setenv_del ("tls_id_3");
+  setenv_del ("tls_id_4");
+  setenv_del ("tls_id_5");
+  setenv_del ("tls_id_6");
+  setenv_del ("tls_id_7");
 }
 
 /* Get the file we will later write our process ID to */
@@ -248,7 +287,7 @@ daemon(int nochdir, int noclose)
     openvpn_chdir ("/");
 
   if (!noclose)
-    set_std_files_to_null ();
+    set_std_files_to_null (false);
 #else
   msg (M_FATAL, "Sorry but I can't become a daemon because this operating system doesn't appear to support either the daemon() or fork() system calls");
 #endif
@@ -261,15 +300,18 @@ daemon(int nochdir, int noclose)
  * Set standard file descriptors to /dev/null
  */
 void
-set_std_files_to_null (void)
+set_std_files_to_null (bool stdin_only)
 {
 #if defined(HAVE_DUP) && defined(HAVE_DUP2)
   int fd;
   if ((fd = open ("/dev/null", O_RDWR, 0)) != -1)
     {
       dup2 (fd, 0);
-      dup2 (fd, 1);
-      dup2 (fd, 2);
+      if (!stdin_only)
+	{
+	  dup2 (fd, 1);
+	  dup2 (fd, 2);
+	}
       if (fd > 2)
 	close (fd);
     }
@@ -302,7 +344,8 @@ save_inetd_socket_descriptor (void)
 #if defined(HAVE_DUP) && defined(HAVE_DUP2)
   /* use handle passed by inetd/xinetd */
   if ((inetd_socket_descriptor = dup (INETD_SOCKET_DESCRIPTOR)) < 0)
-    msg (M_ERR, "dup(%d) failed", INETD_SOCKET_DESCRIPTOR);
+    msg (M_ERR, "INETD_SOCKET_DESCRIPTOR dup(%d) failed", INETD_SOCKET_DESCRIPTOR);
+  set_std_files_to_null (true);
 #endif
 }
 
@@ -408,15 +451,18 @@ system_check (const char* command, const char* error_message, bool fatal)
   else
     {
       if (error_message)
-	msg ((fatal ? M_FATAL : M_WARN), "%s: %s", error_message, system_error_message (stat));
+	msg ((fatal ? M_FATAL : M_WARN), "%s: %s",
+	     error_message,
+	     system_error_message (stat));
       return false;
     }
 }
 
 /*
- * Initialize random number seed.  random() is only used when "weak" random numbers
- * are acceptable.  OpenSSL routines are always used when cryptographically strong
- * random numbers are required.
+ * Initialize random number seed.  random() is only used
+ * when "weak" random numbers are acceptable.
+ * OpenSSL routines are always used when cryptographically
+ * strong random numbers are required.
  */
 
 void
@@ -488,4 +534,141 @@ strerror_ts (int errnum)
 #else
   return "[error string unavailable]";
 #endif
+}
+
+/*
+ * Set environmental variable (int or string).
+ *
+ * On Posix, we use putenv for portability,
+ * and put up with its painful semantics
+ * that require all the support code below.
+ */
+
+#ifdef HAVE_PUTENV
+static char *estrings[40];
+
+static bool
+env_string_equal (const char *s1, const char *s2)
+{
+  int c;
+  ASSERT (s1);
+  ASSERT (s2);
+
+  while ((c = *s1++) == *s2++)
+    {
+      ASSERT (c);
+      if (c == '=')
+	return true;
+    }
+  return false;
+}
+
+static void
+remove_env (char *str)
+{
+  int i;
+  for (i = 0; i < (int) SIZE (estrings); ++i)
+    {
+      if (estrings[i] && env_string_equal (estrings[i], str))
+	{
+	  free (estrings[i]);
+	  estrings[i] = NULL;
+	}
+    }
+}
+
+static void
+add_env (char *str)
+{
+  int i;
+  for (i = 0; i < (int) SIZE (estrings); ++i)
+    {
+      if (!estrings[i])
+	{
+	  estrings[i] = str;
+	  return;
+	}
+    }
+  ASSERT (0); /* buffer full */
+}
+
+static void
+manage_env (char *str)
+{
+  remove_env (str);
+  add_env (str);
+}
+
+#endif
+
+void
+setenv_int (const char *name, int value)
+{
+  char buf[64];
+  openvpn_snprintf (buf, sizeof(buf), "%d", value);
+  setenv_str (name, buf);
+}
+
+void
+setenv_str (const char *name, const char *value)
+{
+  ASSERT (name && strlen(name) > 1);
+  if (!value)
+    value = "";
+
+#if defined(WIN32)
+ {
+   char buf[256];
+
+   strncpynt (buf, value, sizeof (buf));
+   safe_string (buf);
+   if (!SetEnvironmentVariable (name, buf))
+     msg (M_WARN | M_ERRNO, "SetEnvironmentVariable failed, name='%s', value='%s'", name, buf);
+ }
+#elif defined(HAVE_PUTENV)
+ {
+   const int len = strlen(name) + strlen(value) + 2;
+   struct buffer out = alloc_buf (len);
+   char *str = out.data;
+   int status;
+   
+   buf_printf (&out, "%s %s", name, value);
+   safe_string (str);
+   str[strlen(name)] = '=';
+   mutex_lock (L_PUTENV);
+   status = putenv (str);
+   mutex_unlock (L_PUTENV);
+   if (status)
+     msg (M_WARN | M_ERRNO, "putenv('%s') failed", str);
+   manage_env (str);
+ }
+#endif
+}
+
+void
+setenv_del (const char *name)
+{
+  ASSERT (name);
+#if defined(WIN32)
+  SetEnvironmentVariable (name, NULL);
+#elif defined(HAVE_PUTENV)
+  setenv_str (name, NULL);
+#endif
+}
+
+/* make cp safe to be passed to system() or set as an environmental variable */
+void
+safe_string (char *cp)
+{
+  int c;
+  while ((c = *cp))
+    {
+      if (isalnum (c)
+	  || c == '/'
+	  || c == '.' || c == '@' || c == '_' || c == '-' || c == '=')
+	;
+      else
+	*cp = '.';
+      ++cp;
+    }
 }

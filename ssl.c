@@ -254,23 +254,6 @@ tmp_rsa_cb (SSL * s, int is_export, int keylength)
   return (rsa_tmp);
 }
 
-/* make cp safe to be passed to system() */
-static void
-system_safe_string (char *cp)
-{
-  int c;
-  while ((c = *cp))
-    {
-      if (isalnum (c)
-	  || c == '/'
-	  || c == '.' || c == '@' || c == '_' || c == '-' || c == '=')
-	;
-      else
-	*cp = '.';
-      ++cp;
-    }
-}
-
 /*
  * Our verify callback function -- check
  * that an incoming peer certificate is good.
@@ -288,11 +271,13 @@ static int
 verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 {
   char txt[512];
+  char envname[64];
+  const int max_depth = 8;
 
   X509_NAME_oneline (X509_get_subject_name (ctx->current_cert), txt,
 		     sizeof (txt));
   txt[sizeof (txt) - 1] = '\0';
-  system_safe_string (txt);
+  safe_string (txt);
 
   if (!preverify_ok)
     {
@@ -302,11 +287,21 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
       return 0;			/* Reject connection */
     }
 
+  if (ctx->error_depth >= max_depth)
+    msg (M_WARN, "TLS Warning: Convoluted certificate chain detected with depth [%d] greater than %d", ctx->error_depth, max_depth);
+
+  /* export subject name string as environmental variable */
+  openvpn_snprintf (envname, sizeof(envname), "tls_id_%d", ctx->error_depth);
+  setenv_str (envname, txt);
+
   if (verify_command)
     {
       char command[512];
       struct buffer out;
       int ret;
+
+      setenv_str ("script_type", "tls-verify");
+
       buf_set_write (&out, (uint8_t*)command, sizeof (command));
       buf_printf (&out, "%s %d %s", verify_command, ctx->error_depth, txt);
       msg (D_TLS_DEBUG, "executing verify command: %s", command);
@@ -1690,8 +1685,8 @@ tls_multi_process (struct tls_multi *multi,
 
       /* set initial remote address */
       if (i == TM_ACTIVE && ks->state == S_INITIAL &&
-	  addr_defined (&to_link_socket->addr->actual))
-	ks->remote_addr = to_link_socket->addr->actual;
+	  addr_defined (&to_link_socket->lsa->actual))
+	ks->remote_addr = to_link_socket->lsa->actual;
 
       msg (D_TLS_DEBUG,
 	   "tls_multi_process: i=%d state=%s, mysid=%s, stored-sid=%s, stored-ip=%s",
@@ -2202,11 +2197,13 @@ tls_pre_decrypt (struct tls_multi *multi,
 	      if (!session_id_defined (&ks->session_id_remote))
 		{
 		  msg (D_TLS_DEBUG_LOW,
-		       "TLS: tls_pre_decrypt: first response to initial packet sid=%s",
+		       "TLS: tls_pre_decrypt: first response to initial packet from %s, sid=%s",
+		       print_sockaddr (from),
 		       session_id_print (&sid));
 		  do_burst = true;
 		  new_link = true;
 		  i = TM_ACTIVE;
+		  setenv_sockaddr ("untrusted", from);
 		}
 	    }
 
@@ -2233,6 +2230,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 
 	      new_link = true;
 	      i = TM_UNTRUSTED;
+	      setenv_sockaddr ("untrusted", from);
 	    }
 	  else
 	    {

@@ -81,7 +81,7 @@ static const char usage_message[] =
   "--remote host   : Remote host name or ip address.\n"
   "--proto p       : Use protocol p for communicating with peer.\n"
   "                  p = udp (default), tcp-server, or tcp-client\n"
-  "--resolv-retry n: If hostname resolve fails for --local or --remote, retry\n"
+  "--resolv-retry n: If hostname resolve fails for --remote, retry\n"
   "                  resolve for n seconds before failing (disabled by default).\n"
   "--float         : Allow remote to change its IP address/port, such as through\n"
   "                  DHCP (this is the default if --remote is not used).\n"
@@ -159,6 +159,8 @@ static const char usage_message[] =
   "                  as the program name to the system logger.\n"
   "--inetd [name]  : Run as an inetd or xinetd server.  See --daemon\n"
   "                  above for a description of the 'name' parameter.\n"
+  "--log file      : Output log to file which is created/truncated on open.\n"
+  "--log-append file : Append log to file, or create file if nonexistent.\n"
   "--writepid file : Write main process ID to file.\n"
   "--nice n        : Change process priority (>0 = lower, <0 = higher).\n"
 #ifdef USE_PTHREAD
@@ -322,9 +324,24 @@ init_options (struct options *o)
 #define SHOW_BOOL(var) SHOW_PARM(var, (o->var ? "ENABLED" : "DISABLED"), "%s");
 
 void
+setenv_settings (const struct options *o)
+{
+  setenv_str ("config", o->config);
+  setenv_str ("proto", proto2ascii (o->proto, false));
+  setenv_str ("local", o->local);
+  setenv_int ("local_port", o->local_port);
+  setenv_str ("remote", o->remote);
+  setenv_int ("remote_port", o->remote_port);
+  setenv_str ("ifconfig_local", o->ifconfig_local);
+  setenv_str ("ifconfig_remote", o->ifconfig_remote);
+}
+
+void
 show_settings (const struct options *o)
 {
   msg (D_SHOW_PARMS, "Current Parameter Settings:");
+
+  SHOW_STR (config);
 
 #ifdef TUNSETPERSIST
   SHOW_BOOL (persist_config);
@@ -402,6 +419,7 @@ show_settings (const struct options *o)
   SHOW_BOOL (up_restart);
   SHOW_BOOL (daemon);
   SHOW_BOOL (inetd);
+  SHOW_BOOL (log);
   SHOW_INT (nice);
   SHOW_INT (verbosity);
   SHOW_INT (mute);
@@ -760,6 +778,11 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
   else if (streq (p1, "config") && p2)
     {
       ++i;
+
+      /* save first config file only in options */
+      if (!options->config)
+	options->config = p2;
+
       read_config_file (options, p2, level, file, line);
     }
   else if (streq (p1, "dev") && p2)
@@ -875,6 +898,18 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
 	  if (p2)
 	    ++i;
 	}
+    }
+  else if (streq (p1, "log") && p2)
+    {
+      ++i;
+      options->log = true;
+      redirect_stdout_stderr (p2, false);
+    }
+  else if (streq (p1, "log-append") && p2)
+    {
+      ++i;
+      options->log = true;
+      redirect_stdout_stderr (p2, true);
     }
   else if (streq (p1, "mlock"))
     {

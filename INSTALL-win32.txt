@@ -10,8 +10,22 @@ and XP.  OpenVPN also runs on Linux, Mac OS X,
 Solaris, FreeBSD, NetBSD, and OpenBSD, making it
 one of the most portable VPN packages today.
 
-What's new in 1.5-beta5
+What's new in 1.5-beta7
 -----------------------
+
+Fixed bug that caused OpenVPN not to respond to
+exit/restart signals when --resolv-retry is used and
+a local or remote DNS name cannot be resolved.
+
+Exported a series of environmental variables
+with useful info for scripts.  See man
+page for more info.
+
+Check that user is a member of Administrator group
+before attempting install or uninstall.
+
+What's new overall in the 1.5-beta series
+-----------------------------------------
 
 You can now run one or more OpenVPN tunnels as a
 Windows service if you select the "OpenVPN Service"
@@ -20,7 +34,7 @@ option in the installer.
 See "Running as a Windows Service" below for more
 details.
 
-Also new in 1.5-beta5 are right-clickable
+Also new are are right-clickable
 options on .ovpn files (The windows file
 extension for OpenVPN config files), including the
 ability to instantiate an OpenVPN process
@@ -51,8 +65,8 @@ to allow several VPN tunnels to run concurrently
 How to Install
 --------------
 
-Download and Unzip the most recent OpenVPN-Win32 beta
-which can be found in:
+Download and Unzip the most recent OpenVPN distribution
+from:
 
 http://prdownloads.sourceforge.net/openvpn/
 
@@ -297,13 +311,19 @@ What is Bridging?
   Bridging is a technique of creating a virtual, wide-area
   ethernet LAN, running on a single subnet.
 
-What is the fundamental difference between bridging
+What are the fundamental differences between bridging
 and routing in terms of configuration?
 
   When a client connects via bridging to a remote network,
   it is assigned an IP address that is part of the remote
-  subnet and is then able to interact with other machines
-  on the remote subnet as if it were connected locally.
+  physical ethernet subnet and is then able to interact
+  with other machines on the remote subnet as if it were
+  connected locally. Bridging setups require a special
+  OS-specific tool to bridge a physical ethernet adapter
+  with a virtual TAP style device.  On Linux, for example,
+  "brtcl" is this tool.  On Windows, select your TAP-Win32
+  adapter and your ethernet adapter in Control Panel -> Network
+  Connections, then right click and select Bridge Connections.
 
   When a client connects via routing, it uses
   its own separate subnet, and routes are set up on both
@@ -316,11 +336,100 @@ and routing in terms of configuration?
   the major difference being that a routed VPN will not
   pass IP broadcasts while a bridged VPN will. 
 
+  When you are bridging, you must always use --dev tap
+  on both ends of the connection.  If you are routing
+  you can use either --dev tap or --dev tun, but you
+  must use the same on either end of the connection.
+  --dev tun tends to be slightly more efficient for
+  the routing case.
+
+Example running a point-to-point VPN between two Windows machines
+-----------------------------------------------------------------
+
+For purposes of this example, we will refer to our two
+Windows machines as "A" and "B".
+ 
+The Windows OpenVPN installer should have already installed
+a TAP-Win32 adapter on each machine.  You should go
+to Start -> Control Panel -> Network Connections and rename
+the adapter to "my-tap" on both machines.
+
+Now set the IP address/subnet on both TAP-Win32 adapters with
+the following commands (use a command prompt window):
+
+Machine A:
+
+  netsh interface ip set address my-tap static 10.3.0.1 255.255.255.0
+
+Machine B:
+
+  netsh interface ip set address my-tap static 10.3.0.2 255.255.255.0
+
+We are assuming that the network 10.3.0.0 subnet 255.255.255.0
+is a new and distinct subnet from any that you are currently
+using.  If it is not, choose a different subnet by
+substituting something else for the "10.3.0" component of
+the subnet.
+
+Now generate a static key on Machine A:
+
+  openvpn --genkey --secret key
+
+(Or use the shortcut in the start menu)
+
+Copy this key to Machine B over a secure medium.
+
+Now edit the config files for both ends of the connection.
+
+On Machine A create a file config.ovpn :
+
+  remote [IP address of B]
+  dev tap
+  dev-node my-tap
+  secret key
+  ping 10
+  verb 3
+  mute 10
+
+On Machine B create a file config.ovpn :
+
+  remote [IP address of A]
+  dev tap
+  dev-node my-tap
+  secret key
+  ping 10
+  verb 3
+  mute 10
+
+Now the moment of truth... Type:
+
+ openvpn --config config.ovpn
+
+On both A and B.
+
+Alternatively, bring up the folder
+that contains the .ovpn file, right click on the
+.ovpn file, and select "Start OpenVPN on this
+config file".
+
+If everything worked correctly you will now have a
+point-to-point VPN connecting the two boxes.
+
+On Machine A you can ping B with the following command:
+
+  ping 10.3.0.2
+
+On Machine B you can ping A with the following command:
+
+  ping 10.3.0.1
+
 Example running a routed VPN between Windows and Linux
 ------------------------------------------------------
 
-You should already have a TAP-Win32 adapter on the Windows
-side called "my-tap".
+The Windows OpenVPN installer should have already installed
+a TAP-Win32 adapter on the Windows side.  You should go
+to Start -> Control Panel -> Network Connections and rename
+the adapter to "my-tap".
 
 If you have not already done this, set the IP/subnet on my-tap:
 
@@ -348,7 +457,7 @@ on the windows side create a file config.ovpn :
   dev-node my-tap
   secret key
   verb 3
-  mute 20
+  mute 10
 
 on linux create a file config.ovpn :
 
@@ -598,10 +707,11 @@ on the Windows side.
 * First make a TAP-Win32 adapter ("tap-bridge") without setting
   any TCP/IP properties.
 
-* Select tap-bridge and your ethernet adapter in Network Connections,
-  then right click and select Bridge Connections.  I am assuming
-  that the bridged network address is 10.0.0.0 subnet 255.255.255.0.
-  The connecting client will use an address of 10.0.0.7.
+* Select tap-bridge and your ethernet adapter in Control Panel ->
+  Network Connections, then right click and select Bridge Connections.
+  I am assuming that the bridged network address is 10.0.0.0
+  subnet 255.255.255.0.  The connecting client will use an
+  address of 10.0.0.7.
 
 * Note that if your ethernet adapter is a DHCP client, the act of
   bridging the connection may cause it to get a new IP address
@@ -627,6 +737,96 @@ on the Windows side.
    ping 5
    secret key
 
+Notes -- Setting TAP-Win32 address/subnet automatically via DHCP
+----------------------------------------------------------------
+
+Setting the TAP-Win32 address/subnet automatically via DHCP is
+a convenient method of managing IP addresses in a bridge situation,
+though there are some caveats that must be handled.
+
+The problem with getting addresses for VPN clients via DHCP is that you
+only want to get the IP address and subnet mask, not the gateway.
+Therefore in a bridge situation, a DHCP server must be able to
+differentiate between local clients and remote VPN clients.
+
+Dave Lau contributed a config file for ISC's dhcp3 server that does
+just this.  I reproduce Dave's email describing his setup
+in full below, including the DHCP server config file.
+
+[Editors note: The 00:FF MAC prefix is not my original idea --
+I got it from the Linux TAP driver.]
+
+***********************************************
+
+I've been using openVPN since you ported it to windows, and I must say it is
+fantastic.  In just 2 short weeks of testing, I have decided to scrap my
+IPSec VPN that I have been using for my small business in place of openVPN.
+One thing that I have found to be immensely useful is the ethernet bridging.
+I would rather bridge than route for my particular situation, because I want
+my remote vpn clients to be on the same subnet as the office-bound clients
+for myriad reasons.  I did not like having to manually configure IP
+addresses for each client, so I elected to use a dhcp server to serve my
+remote clients an IP address through the openVPN tunnel.
+
+Rather than relying on client hostnames to distinguish between openVPN and
+non-openVPN connections, I took advantage of your clever idea to create MAC
+addresses for the Tap adapters as 00:FF:xx:xx:xx:xx, and I wrote my
+dhcpd.conf file accordingly.  The reason this is necessary for me is that I
+do not want to hand out a default gateway or DNS server to my openVPN
+clients, I only want local traffic going through the tunnel.  I'm sure there
+are many other possible instances in which the dhcp server would like to
+handle openVPN clients differently from standard clients, so I though I
+would share my dhcp server config with you on the off chance that it might
+be useful to others.  This particular config is for ISC's dhcp3 server, but
+I'm sure it would work with just about anything.  There is nothing
+particularly clever or tricky about this config file, I just did not happen
+to see any examples of it anywhere, so if this could save someone some time
+and effort, that would be great:
+
+Thank you, Jim, for writing this fantastic piece of software.
+
+Sincerely,
+Dave Lau
+
+******************************
+
+beefcake:~# cat /etc/dhcp3/dhcpd.conf
+## If hardware address begins with 00:FF, the client is an
+## openvpn tap adapter, and we do not want to assign a
+## default gateway or dns server.  Assign then to a special
+## subclass and configure a pool which does not hand out
+## these parameters.
+
+class "openvpn" {
+     match if substring (hardware, 1, 2) = 00:FF;
+ }
+## end class declaration
+
+## subnet for br0
+
+authoritative;
+subnet 172.16.0.0 netmask 255.255.255.0 {
+always-broadcast on;
+max-lease-time 3600;
+default-lease-time 1800;
+option domain-name "ezone.net";
+option subnet-mask 255.255.255.0;
+
+pool {
+     deny members of "openvpn";
+     range 172.16.0.150 172.16.0.254;
+     option routers 172.16.0.1;
+     option domain-name-servers 172.16.0.1;
+     option tftp-server-name "172.16.0.209";
+     }
+
+pool {
+     allow members of "openvpn";
+     range 172.16.0.100 172.16.0.125;
+     }
+
+}
+
 Notes -- Driver Stability
 -------------------------
 
@@ -641,6 +841,23 @@ the Windows Driver Verifier when running in its most
 rigourous verification mode.  The 1.5-beta1 driver had
 problems crashing on sleep/resume and I believe these
 bugs have been fixed in 1.5-beta2 and higher.
+
+Notes -- TAP vs. TUN devices
+----------------------------
+
+A TAP device is a virtual ethernet adapter, while a TUN device
+is a virtual point-to-point IP link.
+
+As of OpenVPN 1.5.0, the TAP-Win32 driver only supports
+"tap" style devices.  This means that you must also specify
+--dev tap on the other end of the connection.
+
+YOU CANNOT MIX --dev tun AND --dev tap ON DIFFERENT ENDS
+OF THE CONNECTION.  Use one or the other consistently.
+
+Since Windows currently only supports a tap-style virtual
+networking device, the other end of the connection must
+also support tap devices.
 
 Notes -- MTU
 ------------
@@ -683,14 +900,41 @@ a VPN client or server with a firewall.
 The important points for setting up firewalling
 on a Windows system running OpenVPN are:
 
-(1) Leave open the UDP or TCP port that OpenVPN
-    is using to communicate with the remote OpenVPN
-    server.
-(2) Try to set up the firewall not to filter packets
-    coming in on the TAP-Win32 adapter.  Once an IP
+(1) Make sure that your connection to the internet
+    is always firewalled, especially when you are
+    running a VPN.  VPNs create trusted relationships
+    between geographically disparate networks, and
+    if any network on the VPN is compromised by
+    a virus or worm, the exploit has the potential
+    of jumping across the VPN and infecting other
+    machines.
+(2) You can enable firewalling
+    on a given network adapter by going to
+    Control Panel -> Network Connections, right-click
+    on the icon that represents your link to the
+    internet, select properties, go the the Advanced
+    tab, and enable Internet Connection Firewall.
+(3) If you are running OpenVPN as a server on a Windows
+    machine, you will need to configure your firewall
+    to allow incoming clients to connect to OpenVPN's
+    port number which is UDP 5000 by default.
+(4) In general, running OpenVPN as a client doesn't
+    require any special firewall configuration,
+    provided you use the --ping option to preserve
+    the state of the OpenVPN connection in the
+    firewall.
+(5) In general, you don't need to enable firewalling
+    on the TAP-Win32 adapter.  Once an IP
     packet appears to be "coming in" on the TAP-Win32
     adapter, it has already been decrypted and
-    authenticated by OpenVPN.
+    authenticated by OpenVPN, even though the
+    connection between OpenVPN peers might transit
+    an untrusted network such as the internet.
+(6) One case where you might
+    want to firewall the TAP-Win32 adapter is if you
+    are connecting to an untrusted machine, or a machine
+    which will route or bridge your connection with
+    an untrusted network.
 
 Notes -- Media Status
 ---------------------
@@ -758,20 +1002,22 @@ Posix version of OpenVPN are either missing or implemented
 differently in the Windows version as of 1.5-beta3.
 
 (1) Only TAP virtual devices are supported on Windows, not
-    TUN devices.
+    TUN devices.  This means that OpenVPN on Windows can
+    only connect to other platforms which also support
+    TAP devices.
 
 (2) --shaper doesn't work yet due to the lack of a
     gettimeofday library function.  This is not difficult
     to fix and could be implemented by borrowing some code
     from the cygwin library.
 
-(3) Windows doesn't support Posix signals directly, however
-    keyboard shortcuts have been set up for the current
-    windows beta to simulate signals using the following
-    mapping: F1:USR1 F2:USR2 F3:HUP F4:TERM.  When running
-    as a service, the OpenVPN service wrapper will send
-    a terminate signal to all OpenVPN subprocesses when
-    it gets a stop signal.
+(3) Windows doesn't support Posix-style signals directly, however
+    when OpenVPN is run from a command prompt window,
+    keyboard shortcuts have been set up to simulate signals
+    using the following mapping: F1:USR1 F2:USR2 F3:HUP F4:TERM.
+    When running as a service, the OpenVPN service wrapper
+    will send a terminate signal to all OpenVPN subprocesses when
+    it gets a stop signal from the SCM (Service Control Manager).
 
 Notes -- Differences between TAP-Win32 driver and CIPE driver
 -------------------------------------------------------------

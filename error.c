@@ -52,10 +52,24 @@ static int mute_cutoff;
 static int mute_count;
 static int mute_category;
 
+/*
+ * Output mode priorities are as follows:
+ *
+ *  (1) --log-x overrides everything
+ *  (2) syslog is used if --daemon or --inetd is defined and not --log-x
+ *  (3) if OPENVPN_DEBUG_COMMAND_LINE is defined, output
+ *      to constant logfile name defined in openvpn.h (for debugging only).
+ *  (4) Output to stdout.
+ */
+
+/* If true, indicates that stdin/stdout/stderr
+   have been redirected due to --log */
+static bool std_redir;
+
 /* Should messages be written to the syslog? */
 static bool use_syslog;
 
-/* If non-null, messages should be written here */
+/* If non-null, messages should be written here (used for debugging only) */
 static FILE *msgfp;
 
 void
@@ -73,7 +87,7 @@ set_mute_cutoff (int cutoff)
 void
 error_reset ()
 {
-  use_syslog = false;
+  use_syslog = std_redir = false;
   x_debug_level = 1;
   mute_cutoff = 0;
   mute_count = 0;
@@ -206,7 +220,7 @@ void x_msg (unsigned int flags, const char *format, ...)
     level = LOG_NOTICE;
 #endif
 
-  if (use_syslog)
+  if (use_syslog && !std_redir)
     {
 #if SYSLOG_CAPABILITY
       syslog (level, "%s", m1);
@@ -259,7 +273,7 @@ void
 open_syslog (const char *pgmname)
 {
 #if SYSLOG_CAPABILITY
-  if (!msgfp)
+  if (!msgfp && !std_redir)
     {
       if (!use_syslog)
 	{
@@ -267,7 +281,7 @@ open_syslog (const char *pgmname)
 	  use_syslog = true;
 
 	  /* Better idea: somehow pipe stdout/stderr output to msg() */
-	  set_std_files_to_null ();
+	  set_std_files_to_null (false);
 	}
     }
 #else
@@ -284,6 +298,36 @@ close_syslog ()
       closelog();
       use_syslog = false;
     }
+#endif
+}
+
+void
+redirect_stdout_stderr (const char *file, bool append)
+{
+#if defined(WIN32)
+  msg (M_WARN, "WARNING: The --log option is not directly supported on Windows, however you can use the OpenVPN service wrapper (openvpnserv.exe) to accomplish the same function -- see the Windows README.");
+#elif defined(HAVE_DUP2)
+  if (!std_redir)
+    {
+      int out  = open (file,
+		   O_CREAT | O_WRONLY | (append ? O_APPEND : O_TRUNC),
+		   S_IRUSR | S_IWUSR);
+
+      if (out < 0)
+	msg (M_ERR, "Error redirecting stdout/stderr to --log file: %s", file);
+      if (dup2 (out, 1) == -1)
+	msg (M_ERR, "--log file redirection error on stdout");
+      if (dup2 (out, 2) == -1)
+	msg (M_ERR, "--log file redirection error on stderr");
+
+      if (out > 2)
+	close (out);
+
+      std_redir = true;
+    }
+
+#else
+  msg (M_WARN, "WARNING: The --log option is not supported on this OS because it lacks the dup2 function");
 #endif
 }
 

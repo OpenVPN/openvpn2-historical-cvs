@@ -42,7 +42,7 @@ struct buffer
 #define BLAST(buf) (((buf)->data && (buf)->len) ? (BPTR(buf) + (buf)->len - 1) : NULL)
 #define BLEN(buf)  ((buf)->len)
 #define BDEF(buf)  ((buf)->data != NULL)
-#define BSTR(buf)  (char *)BPTR(buf)
+#define BSTR(buf)  ((char *)BPTR(buf))
 
 struct buffer alloc_buf (size_t size);
 struct buffer clone_buf (const struct buffer* buf);

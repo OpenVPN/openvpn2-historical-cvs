@@ -143,6 +143,9 @@ check_debug_level (unsigned int level)
 void open_syslog (const char *pgmname);
 void close_syslog ();
 
+/* log file output */
+void redirect_stdout_stderr (const char *file, bool append);
+
 /* exit program */
 void openvpn_exit (int status);
 

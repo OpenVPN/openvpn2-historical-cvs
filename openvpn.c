@@ -70,7 +70,7 @@ possibly_become_daemon (int level, const struct options* options, const bool fir
       ASSERT (!options->inetd);
       if (level == DAEMONIZATION_LEVEL)
 	{
-	  if (daemon (options->cd_dir != NULL, 0) < 0)
+	  if (daemon (options->cd_dir != NULL, options->log) < 0)
 	    msg (M_ERR, "daemon() failed");
 	  ret = true;
 	}
@@ -81,6 +81,30 @@ possibly_become_daemon (int level, const struct options* options, const bool fir
 /* Handle signals */
 
 static volatile int signal_received = 0;
+
+static const char *
+signal_description (int signum, const char *sigtext)
+{
+  if (sigtext)
+    return sigtext;
+  else
+    {
+      switch (signum) {
+      case SIGUSR1:
+	return "sigusr1";
+      case SIGUSR2:
+	return "sigusr2";
+      case SIGHUP:
+	return "sighup";
+      case SIGTERM:
+	return "sigterm";
+      case SIGINT:
+	return "sigint";
+      default:
+	return "unknown";
+      }
+    }
+}
 
 #ifdef HAVE_SIGNAL_H
 
@@ -379,6 +403,9 @@ openvpn (const struct options *options,
 
   /* temporary variable */
   bool did_we_daemonize = false;
+
+  /* description of signal */
+  const char *signal_text = NULL;
 
 #ifdef HAVE_SIGNAL_H
   /*
@@ -745,6 +772,19 @@ openvpn (const struct options *options,
   /* tun code has buffers to initialize once frame parameters are known */
   tun_frame_init (&frame, tuntap);
 
+  /* bind the TCP/UDP socket */
+  link_socket_init_phase1 (&link_socket,
+			   options->local, options->remote,
+			   options->local_port, options->remote_port,
+			   options->proto,
+			   options->bind_local,
+			   options->remote_float,
+			   options->inetd,
+			   link_socket_addr,
+			   options->ipchange,
+			   options->resolve_retry_seconds,
+			   options->mtu_discover_type);
+
   if (!tuntap_defined (tuntap))
     {
       /* do ifconfig */
@@ -766,7 +806,7 @@ openvpn (const struct options *options,
       /* run the up script */
       run_script (options->up_script, tuntap->actual, TUN_MTU_SIZE (&frame),
 		  max_rw_size_link, options->ifconfig_local, options->ifconfig_remote,
-		  "init");
+		  "init", NULL, "up");
     }
   else
     {
@@ -776,7 +816,7 @@ openvpn (const struct options *options,
       if (options->up_restart)
 	run_script (options->up_script, tuntap->actual, TUN_MTU_SIZE (&frame),
 		    max_rw_size_link, options->ifconfig_local, options->ifconfig_remote,
-		    "restart");
+		    "restart", NULL, "up");
     }
 
 #ifdef HAVE_GETTIMEOFDAY
@@ -830,20 +870,15 @@ openvpn (const struct options *options,
       thread_init();
     }
 
-  /* open the TCP/UDP socket */
-  link_socket_init (&link_socket, options->local, options->remote,
-		    options->proto,
-		    options->local_port, options->remote_port,
-		    options->bind_local, options->remote_float,
-		    options->inetd,
-		    link_socket_addr, options->ipchange,
-		    options->resolve_retry_seconds,
-		    options->mtu_discover_type,
-		    &frame,
-		    &signal_received);
-
+  /* finalize the TCP/UDP socket */
+  link_socket_init_phase2 (&link_socket, &frame, &signal_received);
   if (signal_received)
-    goto cleanup;
+    {
+#if 0
+      signal_text = "socket";
+#endif
+      goto cleanup;
+    }
   
   /* start the TLS thread */
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
@@ -910,6 +945,8 @@ openvpn (const struct options *options,
       struct timeval *tv = NULL;
       struct timeval timeval;
 
+      signal_text = NULL;
+
       /* initialize select() timeout */
       timeval.tv_sec = BIG_TIMEOUT;
       timeval.tv_usec = 0;
@@ -964,6 +1001,7 @@ openvpn (const struct options *options,
 	    {
 	      msg (M_INFO, "Inactivity timeout (--inactive), exiting");
 	      signal_received = 0;
+	      signal_text = "inactive";
 	      break;
 	    }
 	  event_timeout_wakeup (&inactivity_interval, current, &timeval);
@@ -984,10 +1022,12 @@ openvpn (const struct options *options,
 		case PING_EXIT:
 		  msg (M_INFO, "Inactivity timeout (--ping-exit), exiting");
 		  signal_received = 0;
+		  signal_text = "ping-exit";
 		  break;
 		case PING_RESTART:
 		  msg (M_INFO, "Inactivity timeout (--ping-restart), restarting");
 		  signal_received = SIGUSR1;
+		  signal_text = "ping-restart";
 		  break;
 		default:
 		  ASSERT (0);
@@ -1289,9 +1329,17 @@ openvpn (const struct options *options,
 	      if (socket_connection_reset (&link_socket, status))
 		{
 		  /* received a disconnect from a connection-oriented protocol */
-		  signal_received = SIGUSR1;
-		  msg (M_INFO, "Connection reset, restarting [%d]", status);
-		  sleep (2);
+		  if (options->inetd)
+		    {
+		      signal_received = SIGTERM;
+		      msg (M_INFO, "Connection reset, inetd/xinetd exit [%d]", status);
+		    }
+		  else
+		    {
+		      signal_received = SIGUSR1;
+		      msg (M_INFO, "Connection reset, restarting [%d]", status);
+		    }
+		  signal_text = "connection-reset";
 		  break;		  
 		}
 
@@ -1352,6 +1400,7 @@ openvpn (const struct options *options,
 			    {
 			      msg (M_WARN, "TLS thread is not responding, exiting (1)");
 			      signal_received = 0;
+			      signal_text = "error";
 			      mutex_unlock (L_TLS);
 			      break;
 			    }
@@ -1436,6 +1485,7 @@ openvpn (const struct options *options,
 		{
 		  msg (M_WARN, "TLS thread is not responding, exiting (2)");
 		  signal_received = 0;
+		  signal_text = "error";
 		  break;
 		}
 	    }
@@ -1716,6 +1766,15 @@ openvpn (const struct options *options,
 
  cleanup:
 
+  /*
+   * If xinetd/inetd mode, don't allow restart.
+   */
+  if (options->inetd && (signal_received == SIGHUP || signal_received == SIGUSR1))
+    {
+      signal_received = SIGTERM;
+      msg (M_INFO, "OpenVPN started by inetd/xinetd cannot restart... Exiting.");
+    }
+
   if (free_to_link)
     free_buf (&to_link);
     
@@ -1785,7 +1844,9 @@ openvpn (const struct options *options,
 	 privilege if, for example, "--user nobody" was used. */
       run_script (options->down_script, tuntap_actual, TUN_MTU_SIZE (&frame),
 		  max_rw_size_link, options->ifconfig_local,
-		  options->ifconfig_remote, "init");
+		  options->ifconfig_remote, "init",
+		  signal_description (signal_received, signal_text),
+		  "down");
     }
   else
     {
@@ -1794,8 +1855,13 @@ openvpn (const struct options *options,
 	run_script (options->down_script, tuntap->actual,
 		    TUN_MTU_SIZE (&frame),
 		    max_rw_size_link, options->ifconfig_local,
-		    options->ifconfig_remote, "restart");
+		    options->ifconfig_remote, "restart",
+		    signal_description (signal_received, signal_text),
+		    "down");
     }
+
+  /* remove non-parameter environmental vars except for signal */
+  del_env_nonparm ();
   
 #ifdef USE_CRYPTO
   /*
@@ -1854,6 +1920,8 @@ main (int argc, char *argv[])
   packet_id_interactive_test();  /* test the sequence number code */
   goto exit;
 #endif
+
+  del_env_nonparm ();
 
   /*
    * This loop is initially executed on startup and then
@@ -2124,6 +2192,9 @@ main (int argc, char *argv[])
 
       /* show all option settings */
       show_settings (&options);
+
+      /* set certain options as environmental variables */
+      setenv_settings (&options);
 
 #ifdef WIN32
       /* put a title on the top window bar */

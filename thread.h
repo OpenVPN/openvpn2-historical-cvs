@@ -38,7 +38,8 @@
 #define L_INET_NTOA 3
 #define L_CTIME     4
 #define L_STRERR    5
-#define N_MUTEXES   6
+#define L_PUTENV    6
+#define N_MUTEXES   7
 
 #ifdef USE_PTHREAD
 

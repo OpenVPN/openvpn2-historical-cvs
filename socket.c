@@ -141,7 +141,10 @@ h_errno_msg(int h_errno_err)
  * resolve_retry_seconds seconds.
  */
 static in_addr_t
-getaddr (const char *hostname, int resolve_retry_seconds, bool fatal)
+getaddr (const char *hostname,
+	 int resolve_retry_seconds,
+	 bool fatal,
+	 volatile int *signal_received)
 {
   struct in_addr ia;
   int status;
@@ -169,6 +172,13 @@ getaddr (const char *hostname, int resolve_retry_seconds, bool fatal)
 	  if (--resolve_retries <= 0 && !fatal)
 	    return ia.s_addr;
 
+	  if (signal_received)
+	    {
+	      GET_SIGNAL (*signal_received);
+	      if (*signal_received)
+		return ia.s_addr;
+	    }
+
 	  sleep (fail_wait_interval);
 	}
 
@@ -191,7 +201,7 @@ update_remote (const char* host,
 {
   if (host && addr)
     {
-      const in_addr_t new_addr = getaddr (host, 1, false);
+      const in_addr_t new_addr = getaddr (host, 1, false, NULL);
       if (new_addr && addr->sin_addr.s_addr != new_addr)
 	{
 	  addr->sin_addr.s_addr = new_addr;
@@ -210,16 +220,20 @@ socket_listen_accept (int sd,
 		      const char *remote_dynamic,
 		      bool *remote_changed,
 		      const struct sockaddr_in *local,
+		      bool do_listen,
 		      volatile int *signal_received)
 {
   socklen_t remote_len = sizeof (*remote);
   struct sockaddr_in remote_verify = *remote;
   int new_sd;
 
-  msg (M_INFO, "Listening for incoming TCP connection on %s", 
-       print_sockaddr (local));
-  if (listen (sd, 1))
-    msg (M_SOCKERR, "listen() failed");
+  if (do_listen)
+    {
+      msg (M_INFO, "Listening for incoming TCP connection on %s", 
+	   print_sockaddr (local));
+      if (listen (sd, 1))
+	msg (M_SOCKERR, "listen() failed");
+    }
 
   /* set socket to non-blocking mode */
   set_nonblock (sd);
@@ -342,6 +356,104 @@ socket_frame_init (const struct frame *frame, struct link_socket *sock)
  * Create a TCP/UDP socket
  */
 
+static void
+create_socket (struct link_socket *sock)
+{
+  /* create socket */
+  if (sock->proto == PROTO_UDPv4)
+    {
+      if ((sock->sd = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+	msg (M_SOCKERR, "Cannot create UDP socket");
+    }
+  else if (sock->proto == PROTO_TCPv4_SERVER
+	   || sock->proto == PROTO_TCPv4_CLIENT)
+    {
+      if ((sock->sd = socket (PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+	msg (M_SOCKERR, "Cannot create TCP socket");
+
+      /* set SO_REUSEADDR on socket */
+      {
+	int on = 1;
+	if (setsockopt (sock->sd, SOL_SOCKET, SO_REUSEADDR,
+			(void *) &on, sizeof (on)) < 0)
+	  msg (M_SOCKERR, "Cannot setsockopt SO_REUSEADDR on TCP socket");
+      }
+#if 0
+      /* set socket linger options */
+      {
+	struct linger linger;
+	linger.l_onoff = 1;
+	linger.l_linger = 2;
+	if (setsockopt (sock->sd, SOL_SOCKET, SO_LINGER,
+			(void *) &linger, sizeof (linger)) < 0)
+	  msg (M_SOCKERR, "Cannot setsockopt SO_LINGER on TCP socket");
+      }
+#endif
+    }
+  else
+    {
+      ASSERT (0);
+    }
+}
+
+static void
+resolve_bind_local (struct link_socket *sock)
+{
+  /* resolve local address if undefined */
+  if (!addr_defined (&sock->lsa->local))
+    {
+      sock->lsa->local.sin_family = AF_INET;
+      sock->lsa->local.sin_addr.s_addr =
+	(sock->local_host ? getaddr (sock->local_host, 0, true, NULL)
+	 : htonl (INADDR_ANY));
+      sock->lsa->local.sin_port = htons (sock->local_port);
+    }
+  
+  /* bind to local address/port */
+  if (sock->bind_local)
+    {
+      if (bind (sock->sd, (struct sockaddr *) &sock->lsa->local,
+		sizeof (sock->lsa->local)))
+	{
+	  const int errnum = openvpn_errno_socket ();
+	  msg (M_FATAL, "Socket bind failed on local address %s: %s",
+	       print_sockaddr (&sock->lsa->local),
+	       strerror_ts (errnum));
+	}
+    }
+}
+
+static void
+resolve_remote (struct link_socket *sock,
+		const char **remote_dynamic,
+		volatile int *signal_received)
+{
+  /* resolve remote address if undefined */
+  if (!addr_defined (&sock->lsa->remote))
+    {
+      sock->lsa->remote.sin_family = AF_INET;
+      sock->lsa->remote.sin_addr.s_addr =
+	(sock->remote_host
+	 ? getaddr (sock->remote_host, sock->resolve_retry_seconds,
+		    true, signal_received)
+	 : 0);
+      sock->lsa->remote.sin_port = htons (sock->remote_port);
+      if (signal_received && *signal_received)
+	return;
+    }
+  
+  /* should we re-use previous active remote address? */
+  if (addr_defined (&sock->lsa->actual))
+    {
+      msg (M_INFO, "Preserving recently used remote address: %s",
+	   print_sockaddr (&sock->lsa->actual));
+      if (remote_dynamic)
+	*remote_dynamic = NULL;
+    }
+  else
+    sock->lsa->actual = sock->lsa->remote;
+}
+
 void
 link_socket_reset (struct link_socket *sock)
 {
@@ -349,133 +461,112 @@ link_socket_reset (struct link_socket *sock)
   sock->sd = -1;
 }
 
+/* bind socket if necessary */
 void
-link_socket_init (struct link_socket *sock,
-		  const char *local_host,
-		  const char *remote_host,
-		  int proto,
-		  int local_port,
-		  int remote_port,
-		  bool bind_local,
-		  bool remote_float,
-		  bool inetd,
-		  struct link_socket_addr *lsa,
-		  const char *ipchange_command,
-		  int resolve_retry_seconds,
-		  int mtu_discover_type,
-		  const struct frame *frame,
-		  volatile int *signal_received)
+link_socket_init_phase1 (struct link_socket *sock,
+			 const char *local_host,
+			 const char *remote_host,
+			 int local_port,
+			 int remote_port,
+			 int proto,
+			 bool bind_local,
+			 bool remote_float,
+			 bool inetd,
+			 struct link_socket_addr *lsa,
+			 const char *ipchange_command,
+			 int resolve_retry_seconds,
+			 int mtu_discover_type)
 {
-  const char *remote_dynamic = NULL;
-  bool remote_changed = false;
-
   link_socket_reset (sock);
-  sock->remote_float = remote_float;
-  sock->addr = lsa;
-  sock->ipchange_command = ipchange_command;
+  sock->local_host = local_host;
+  sock->remote_host = remote_host;
+  sock->local_port = local_port;
+  sock->remote_port = remote_port;
   sock->proto = proto;
+  sock->bind_local = bind_local;
+  sock->remote_float = remote_float;
+  sock->inetd = inetd;
+  sock->lsa = lsa;
+  sock->ipchange_command = ipchange_command;
+  sock->resolve_retry_seconds = resolve_retry_seconds;
+  sock->mtu_discover_type = mtu_discover_type;
 
   /* bind behavior for TCP server vs. client */
   if (sock->proto == PROTO_TCPv4_SERVER)
-    bind_local = true;
+    sock->bind_local = true;
   else if (sock->proto == PROTO_TCPv4_CLIENT)
-    bind_local = false;
+    sock->bind_local = false;
+
+  /* were we started by inetd or xinetd? */
+  if (sock->inetd)
+    {
+      ASSERT (sock->proto != PROTO_TCPv4_CLIENT);
+      ASSERT (inetd_socket_descriptor >= 0);
+      sock->sd = inetd_socket_descriptor;
+    }
+  else
+    {
+      create_socket (sock);
+      resolve_bind_local (sock);
+      if (!sock->resolve_retry_seconds)
+	resolve_remote (sock, NULL, NULL);
+    }
+}
+
+/* finalize socket initialization */
+void
+link_socket_init_phase2 (struct link_socket *sock,
+			 const struct frame *frame,
+			 volatile int *signal_received)
+{
+  const char *remote_dynamic = NULL;
+  bool remote_changed = false;
 
   /*
    * Pass a remote name to connect/accept so that
    * they can test for dynamic IP address changes
    * and throw a SIGUSR1 if appropriate.
    */
-  if (resolve_retry_seconds)
-    remote_dynamic = remote_host;
+  if (sock->resolve_retry_seconds)
+    remote_dynamic = sock->remote_host;
 
   /* were we started by inetd or xinetd? */
-  if (inetd)
+  if (sock->inetd)
     {
-      ASSERT (inetd_socket_descriptor >= 0);
-      sock->sd = inetd_socket_descriptor;
+      if (sock->proto == PROTO_TCPv4_SERVER)
+	sock->sd =
+	  socket_listen_accept (sock->sd, &sock->lsa->actual,
+				remote_dynamic, &remote_changed,
+				&sock->lsa->local, false, signal_received);
+      ASSERT (!remote_changed);
+      if (*signal_received)
+	return;
     }
   else
     {
-       /* create socket */
-      if (sock->proto == PROTO_UDPv4)
-	{
-	  if ((sock->sd = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-	    msg (M_SOCKERR, "Cannot create UDP socket");
-	}
-      else if (sock->proto == PROTO_TCPv4_SERVER
-	       || sock->proto == PROTO_TCPv4_CLIENT)
-	{
-	  int on = 1;
-	  if ((sock->sd = socket (PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
-	    msg (M_SOCKERR, "Cannot create TCP socket");
-	  if (setsockopt (sock->sd, SOL_SOCKET, SO_REUSEADDR,
-			  (void *) &on, sizeof (on)) < 0)
-	    msg (M_SOCKERR, "Cannot setsockopt on TCP socket");
-	}
-      else
-	{
-	  ASSERT (0);
-	}
-      
-      /* resolve local address if undefined */
-      if (!addr_defined (&lsa->local))
-	{
-	  lsa->local.sin_family = AF_INET;
-	  lsa->local.sin_addr.s_addr =
-	    (local_host ? getaddr (local_host, resolve_retry_seconds, true)
-	     : htonl (INADDR_ANY));
-	  lsa->local.sin_port = htons (local_port);
-	}
+      if (sock->resolve_retry_seconds)
+	resolve_remote (sock, &remote_dynamic, signal_received);
 
-      /* bind to local address/port */
-      if (bind_local)
-	{
-	  if (bind (sock->sd, (struct sockaddr *) &lsa->local, sizeof (lsa->local)))
-	    {
-	      const int errnum = openvpn_errno_socket ();
-	      msg (M_FATAL, "Socket bind failed on local address %s: %s",
-		   print_sockaddr (&lsa->local),
-		   strerror_ts (errnum));
-	    }
-	}
-
-      /* resolve remote address if undefined */
-      if (!addr_defined (&lsa->remote))
-	{
-	  lsa->remote.sin_family = AF_INET;
-	  lsa->remote.sin_addr.s_addr =
-	    (remote_host ? getaddr (remote_host, resolve_retry_seconds, true) : 0);
-	  lsa->remote.sin_port = htons (remote_port);
-	}
-
-      /* should we re-use previous active remote address? */
-      if (addr_defined (&lsa->actual))
-	{
-	  msg (M_INFO, "Preserving recently used remote address: %s",
-	       print_sockaddr (&lsa->actual));
-	  remote_dynamic = NULL;
-	}
-      else
-	lsa->actual = lsa->remote;
+      if (*signal_received)
+	return;
 
       /* TCP client/server */
       if (sock->proto == PROTO_TCPv4_SERVER)
-	sock->sd = socket_listen_accept (sock->sd, &lsa->actual,
+	sock->sd = socket_listen_accept (sock->sd, &sock->lsa->actual,
 					 remote_dynamic, &remote_changed,
-					 &lsa->local, signal_received);
+					 &sock->lsa->local, true, signal_received);
       else if (sock->proto == PROTO_TCPv4_CLIENT)
-	socket_connect (sock->sd, &lsa->actual,
+	socket_connect (sock->sd, &sock->lsa->actual,
 			remote_dynamic, &remote_changed,
 			signal_received);
-
+      
       if (*signal_received)
 	return;
 
       if (remote_changed)
 	{
 	  msg (M_INFO, "Note: Dynamic remote address changed during TCP connection establishment");
-	  lsa->remote.sin_addr.s_addr = lsa->actual.sin_addr.s_addr;
+	  sock->lsa->remote.sin_addr.s_addr = sock->lsa->actual.sin_addr.s_addr;
 	}
     }
 
@@ -487,7 +578,7 @@ link_socket_init (struct link_socket *sock,
   set_cloexec (sock->sd);
 
   /* set Path MTU discovery options on the socket */
-  set_mtu_discover_type (sock->sd, mtu_discover_type);
+  set_mtu_discover_type (sock->sd, sock->mtu_discover_type);
 
 #if EXTENDED_SOCKET_ERROR_CAPABILITY
   /* if the OS supports it, enable extended error passing on the socket */
@@ -495,18 +586,18 @@ link_socket_init (struct link_socket *sock,
 #endif
 
   /* print local address */
-  if (sock->sd == INETD_SOCKET_DESCRIPTOR)
+  if (sock->inetd)
     msg (M_INFO, "%s link local: [inetd]", proto2ascii (sock->proto, true));
   else
     msg (M_INFO, "%s link local%s: %s",
 	 proto2ascii (sock->proto, true),
-	 (bind_local ? " (bound)" : ""),
-	 print_sockaddr_ex (&lsa->local, bind_local, ":"));
+	 (sock->bind_local ? " (bound)" : ""),
+	 print_sockaddr_ex (&sock->lsa->local, sock->bind_local, ":"));
 
   /* print active remote address */
   msg (M_INFO, "%s link remote: %s",
        proto2ascii (sock->proto, true),
-       print_sockaddr_ex (&lsa->actual, addr_defined (&lsa->actual), ":"));
+       print_sockaddr_ex (&sock->lsa->actual, addr_defined (&sock->lsa->actual), ":"));
 
   /* initialize buffers */
   socket_frame_init (frame, sock);
@@ -528,7 +619,7 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
   mutex_lock (L_SOCK);
   if (!buf || buf->len > 0)
     {
-      struct link_socket_addr *lsa = sock->addr;
+      struct link_socket_addr *lsa = sock->lsa;
       ASSERT (addr_defined (addr));
       if ((sock->remote_float
 	   || !addr_defined (&lsa->remote)
@@ -540,10 +631,12 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
 	  sock->set_outgoing_initial = true;
 	  mutex_unlock (L_SOCK);
 	  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual));
+	  setenv_sockaddr ("trusted", &lsa->actual);
 	  if (sock->ipchange_command)
 	    {
 	      char command[512];
 	      struct buffer out;
+	      setenv_str ("script_type", "ipchange");
 	      buf_set_write (&out, (uint8_t *)command, sizeof (command));
 	      buf_printf (&out, "%s %s",
 			  sock->ipchange_command,
@@ -569,9 +662,9 @@ link_socket_incoming_addr (struct buffer *buf,
 	goto bad;
       if (!addr_defined (from_addr))
 	goto bad;
-      if (sock->remote_float || !addr_defined (&sock->addr->remote))
+      if (sock->remote_float || !addr_defined (&sock->lsa->remote))
 	goto good;
-      if (addr_match_proto (from_addr, &sock->addr->remote, sock->proto))
+      if (addr_match_proto (from_addr, &sock->lsa->remote, sock->proto))
 	goto good;
     }
 
@@ -580,7 +673,7 @@ bad:
        "Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
        print_sockaddr (from_addr),
        (int)from_addr->sin_family,
-       print_sockaddr (&sock->addr->remote));
+       print_sockaddr (&sock->lsa->remote));
   buf->len = 0;
   mutex_unlock (L_SOCK);
   return;
@@ -600,7 +693,7 @@ link_socket_get_outgoing_addr (struct buffer *buf,
   mutex_lock (L_SOCK);
   if (buf->len > 0)
     {
-      struct link_socket_addr *lsa = sock->addr;
+      struct link_socket_addr *lsa = sock->lsa;
       if (addr_defined (&lsa->actual))
 	{
 	  *addr = lsa->actual;
@@ -617,7 +710,7 @@ link_socket_get_outgoing_addr (struct buffer *buf,
 void
 link_socket_close (struct link_socket *sock)
 {
-  if (sock->sd != -1 && sock->sd != INETD_SOCKET_DESCRIPTOR)
+  if (sock->sd != -1)
     {
 #ifdef WIN32
       overlapped_io_close (&sock->reads);
@@ -788,6 +881,21 @@ print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* sep
       buf_printf (&out, "%d", port);
     }
   return BSTR (&out);
+}
+
+/* set environmental variables for ip/port in *addr */
+void
+setenv_sockaddr (const char *name_prefix, const struct sockaddr_in *addr)
+{
+  char name_buf[256];
+
+  openvpn_snprintf (name_buf, sizeof (name_buf), "%s_ip", name_prefix);
+  mutex_lock (L_INET_NTOA);
+  setenv_str (name_buf, inet_ntoa (addr->sin_addr));
+  mutex_unlock (L_INET_NTOA);
+
+  openvpn_snprintf (name_buf, sizeof (name_buf), "%s_port", name_prefix);
+  setenv_int (name_buf, ntohs (addr->sin_port));
 }
 
 /*

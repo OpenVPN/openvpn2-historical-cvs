@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [1.5-beta6], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [1.5-beta7], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -268,7 +268,7 @@ AC_FUNC_FORK
 AC_CHECK_FUNCS(daemon chroot getpwnam setuid nice system getpid dup dup2 dnl
 	       getpass strerror syslog openlog mlockall getgrnam setgid dnl
 	       setgroups stat flock readv writev setsockopt getsockopt dnl
-	       setsid chdir gettimeofday)
+	       setsid chdir gettimeofday putenv)
 AC_REPLACE_FUNCS(inet_aton)
 AC_CACHE_SAVE
 

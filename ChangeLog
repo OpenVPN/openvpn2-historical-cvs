@@ -2,106 +2,94 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.10 2003/08/16 23:16:34 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.11 2003/08/29 05:59:22 jimyonan Exp $
 	
 Upcoming version 1.5.0
 
-* Added TCP support via the new --proto
-  option (beta1).
-* Renamed udp-centric options such as
-  --udp-mtu to --link-mtu (old option
-  names preserved for compatibility)
+* Added TCP support via the new --proto option (beta1).
+* Renamed udp-centric options such as --udp-mtu to
+  --link-mtu (old option names preserved for compatibility)
   (beta1).
-* Ported to Windows 2000 + XP
-  using mingw and a TAP driver derived
-  from the Cipe-Win32 project by Damion
-  K. Wilson (beta1).
-* Added --show-adapters flag for
-  windows version (beta1).
-* Reworked the SSL/TLS packet acknowledge
-  code to better handle certain corner
-  cases (beta1).
-* Turned off the default enabling of
-  IP forwarding in the
-  sample-scripts/openvpn.init script
-  for Redhat.
-  Forwarding can be enabled by users
-  in their --up scripts or firewall
-  config (beta1).
-* Added --up-restart option based on
-  suggestion from Sean Reifschneider
+* Ported to Windows 2000 + XP using mingw and a TAP driver
+  derived from the Cipe-Win32 project by Damion K. Wilson
   (beta1).
-* If --dev tap or --dev-type tap
-  is specified, --tun-mtu
-  defaults to 1500 and --tun-mtu-extra
-  defaults to 64 (beta1).
-* Enabled --verb 5 debugging mode that
-  prints 'R' and 'W' for each packet
-  read or write on the TCP/UDP socket
+* Added --show-adapters flag for windows version (beta1).
+* Reworked the SSL/TLS packet acknowledge code to better
+  handle certain corner cases (beta1).
+* Turned off the default enabling of IP forwarding in the
+  sample-scripts/openvpn.init script for Redhat.
+  Forwarding can be enabled by users in their --up scripts
+  or firewall config (beta1).
+* Added --up-restart option based on suggestion from Sean
+  Reifschneider (beta1).
+* If --dev tap or --dev-type tap is specified, --tun-mtu
+  defaults to 1500 and --tun-mtu-extra defaults to 64
   (beta1).
-* Renamed INSTALL.w32 to
-  INSTALL-win32.txt and reformatted
-  in Windows ASCII so it's easier to
-  click and view (beta2).
-* Added postscript and PDF versions
-  of the HOWTO to the web site
-  (C R Zamana) (beta2).
-* Merged Michael Clarke's stability
-  patch into TAP-Win32 driver (beta2)
-  which appears to fix the suspend/resume
-  driver bug and significantly
-  improve driver stability.
-* Added Christof Meerwald's
-  Media Status patch to
-  the TAP-Win32 driver which shows
-  the TAP adapter to be disconnected
-  when OpenVPN is not running (beta2).
-* Moved socket connect and TCP server
-  listen code to a later point in
-  openvpn() function so that the TCP
-  server listen state is entered after
-  daemonization (beta2).
-* Added keyboard shortcuts to simulate
-  signals in the Windows version, see
-  the window title bar for
-  descriptions (beta2).
-* Added md5.h include to crypto.c
-  to fix build problem on OpenBSD
+* Enabled --verb 5 debugging mode that prints 'R' and 'W'
+  for each packet read or write on the TCP/UDP socket
+  (beta1).
+* Renamed INSTALL.w32 to INSTALL-win32.txt and reformatted
+  in Windows ASCII so it's easier to click and view (beta2).
+* Added postscript and PDF versions of the HOWTO to the web
+  site (C R Zamana) (beta2).
+* Merged Michael Clarke's stability patch into TAP-Win32
+  driver which appears to fix the suspend/resume driver bug
+  and significantly improve driver stability (beta2).
+* Added Christof Meerwald's Media Status patch to the
+  TAP-Win32 driver which shows the TAP adapter to be
+  disconnected when OpenVPN is not running (beta2).
+* Moved socket connect and TCP server listen code to a later
+  point in openvpn() function so that the TCP server listen
+  state is entered after daemonization (beta2).
+* Added keyboard shortcuts to simulate signals in the Windows
+  version, see the window title bar for descriptions (beta2).
+* Added md5.h include to crypto.c to fix build problem on
+  OpenBSD (beta3).
+* Created a Win32 installer using NSIS (beta3).
+* Removed DelService command from TAP-Win32 INF file.  It appears
+  to be not necessary and it interfered with the ability to
+  uninstall and reinstall the driver without needing to reboot
   (beta3).
-* Created a Win32 installer using
-  NSIS (beta3).
-* Removed DelService command from
-  TAP-Win32 INF file.  It appears
-  to be not necessary and it
-  interfered with the ability to
-  uninstall and reinstall the driver
-  without needing to reboot (beta3).
-* On Windows version, added "addtap"
-  and "deltapall" batch files to
-  add and delete TAP-Win32 adapter
-  instances (beta3).
-* Extra refinements and error checking
-  added to Windows NSIS install
-  script (beta4).
-* Added user-configurability of the
-  TAP-Win32 adapter MTU through the
-  adapter advanced properties page
-  (beta5).
-* Added Windows Service support
-  (beta5).
-* On Windows, added file association
-  and right-clickability for .ovpn
-  files (OpenVPN config files)
-  (beta5).
-* Fixed TAP-Win32 driver to properly
-  increment the Rx/Tx count. 
+* On Windows version, added "addtap" and "deltapall" batch
+  files to add and delete TAP-Win32 adapter instances (beta3).
+* Extra refinements and error checking added to Windows
+  NSIS install script (beta4).
+* Added user-configurability of the TAP-Win32 adapter MTU
+  through the adapter advanced properties page (beta5).
+* Added Windows Service support (beta5).
+* On Windows, added file association and right-clickability
+  for .ovpn files (OpenVPN config files) (beta5).
+* Fixed TAP-Win32 driver to properly increment the Rx/Tx count
   (beta6).
-* Protocol compatibility is maintained
-  with the 1.4.x and 1.3.x series.
-  If you are connecting to a 1.3.x peer,
-  you must use the --disable-occ option
-  on the 1.3.x peer if you are using
-  TLS mode.
+* Fixed bug that caused OpenVPN not to respond to exit/restart
+  signals when --resolv-retry is used and a local or remote DNS
+  name cannot be resolved (beta7).
+* Exported a series of environmental variables with useful
+  info for scripts.  See man page for more info.  Based
+  on a suggestion by Anthony Ciaravalo (beta7).
+* Moved TCP/UDP socket bind to a point in the initialization
+  before the --up script gets called.  This is desirable
+  because (a) a socket bind failure will happen before
+  daemonization, allowing an error status code to be returned
+  to the shell and (b) the possibility is eliminated of a
+  socket bind failure causing the --up script to be run
+  but not the --down script.  This change has a side effect
+  that --resolv-retry will no longer work with --local (beta7).
+* Fixed bug where if an OpenVPN TCP server went down and back
+  up again, Solaris or FreeBSD clients would fail to reconnect
+  to it (beta7).
+* Fixed bug that prevented OpenVPN from being run by
+  inetd/xinetd in TCP mode (beta7).
+* Added --log and --log-append options for logging messages
+  to a file (beta7).
+* On Windows, check that the current user is a member of
+  the Administrator group before attempting install
+  or uninstall (beta7).
+* Protocol compatibility is maintained with the 1.4.x and
+  1.3.x series.  If you are connecting to a 1.3.x peer,
+  you must use the --disable-occ option on the 1.3.x peer
+  if you are using TLS mode.  See Compatibility Notes
+  on web site for more info.
 
 2003.08.04 -- Version 1.4.3
 

@@ -147,6 +147,19 @@ Pop $R0
 ;--------------------------------
 ;Installer Sections
 
+Function .onInit
+  ClearErrors
+  UserInfo::GetName
+  IfErrors ok
+  Pop $R0
+  UserInfo::GetAccountType
+  Pop $R1
+  StrCmp $R1 "Admin" ok
+    Messagebox MB_OK "Administrator privileges required to install OpenVPN [$R0/$R1]"
+    Abort
+  ok:
+FunctionEnd
+
 !define SF_SELECTED 1
 
 Section "OpenVPN User-Space Components" SecOpenVPNUserSpace
@@ -412,6 +425,19 @@ SectionEnd
 
 ;--------------------------------
 ;Uninstaller Section
+
+Function un.onInit
+  ClearErrors
+  UserInfo::GetName
+  IfErrors ok
+  Pop $R0
+  UserInfo::GetAccountType
+  Pop $R1
+  StrCmp $R1 "Admin" ok
+    Messagebox MB_OK "Administrator privileges required to uninstall OpenVPN [$R0/$R1]"
+    Abort
+  ok:
+FunctionEnd
 
 Section "Uninstall"
 

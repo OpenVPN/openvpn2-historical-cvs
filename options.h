@@ -31,6 +31,9 @@ extern const char title_string[];
 /* Command line options */
 struct options
 {
+  /* first config file */
+  const char *config;
+
   /* mode parms */
   bool persist_config;
   int persist_mode;
@@ -116,6 +119,7 @@ struct options
   bool up_restart;
   bool daemon;
   bool inetd;
+  bool log;
   int nice;
 #ifdef USE_PTHREAD
   int nice_work;
@@ -187,6 +191,7 @@ void notnull (const char *arg, const char *description);
 void usage_small (void);
 
 void init_options (struct options *o);
+void setenv_settings (const struct options *o);
 void show_settings (const struct options *o);
 char *options_string (const struct options *o, const struct frame *frame);
 

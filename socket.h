@@ -105,14 +105,23 @@ struct link_socket
   int sd;			/* file descriptor for socket */
 #endif
 
+  /* set on initial call to init phase 1 */
+  const char *local_host;
+  const char *remote_host;
+  int local_port;
+  int remote_port;
   int proto;                    /* Protocol (PROTO_x defined below) */
-  struct link_socket_addr *addr;
-
+  bool bind_local;
   bool remote_float;
+  bool inetd;
+  struct link_socket_addr *lsa;
+  const char *ipchange_command;
+  int resolve_retry_seconds;
+  int mtu_discover_type;
+
   int mtu;                      /* OS discovered MTU, or 0 if unknown */
   int mtu_changed;              /* Set to true when mtu value is changed */
   bool set_outgoing_initial;
-  const char *ipchange_command;
 
   /* for stream sockets */
   struct stream_buf stream_buf;
@@ -154,21 +163,24 @@ int socket_finalize (
 
 void link_socket_reset (struct link_socket *sock);
 
-void link_socket_init (struct link_socket *sock,
-		       const char *local_host,
-		       const char *remote_host,
-		       int proto,
-		       int local_port,
-		       int remote_port,
-		       bool bind_local,
-		       bool remote_float,
-		       bool inetd,
-		       struct link_socket_addr *lsa,
-		       const char *ipchange_command,
-		       int resolve_retry_seconds,
-		       int mtu_discover_type,
-		       const struct frame *frame,
-		       volatile int *signal_received);
+void link_socket_init_phase1 (struct link_socket *sock,
+			      const char *local_host,
+			      const char *remote_host,
+			      int local_port,
+			      int remote_port,
+			      int proto,
+			      bool bind_local,
+			      bool remote_float,
+			      bool inetd,
+			      struct link_socket_addr *lsa,
+			      const char *ipchange_command,
+			      int resolve_retry_seconds,
+			      int mtu_discover_type);
+
+
+void link_socket_init_phase2 (struct link_socket *sock,
+			      const struct frame *frame,
+			      volatile int *signal_received);
 
 void socket_adjust_frame_parameters (struct frame *frame, int proto);
 
@@ -191,6 +203,8 @@ const char *print_sockaddr_ex (const struct sockaddr_in *addr,
 			       const char* separator);
 
 const char *print_sockaddr (const struct sockaddr_in *addr);
+
+void setenv_sockaddr (const char *name_prefix, const struct sockaddr_in *addr);
 
 /*
  * Transport protocol naming and other details.
@@ -369,7 +383,7 @@ link_socket_read (struct link_socket *sock,
   else if (sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT)
     {
       /* from address was returned by accept */
-      *from = sock->addr->actual;
+      *from = sock->lsa->actual;
       return link_socket_read_tcp (sock, buf);
     }
   else

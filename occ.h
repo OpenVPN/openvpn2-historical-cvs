@@ -80,7 +80,7 @@ extern const uint8_t occ_magic[];
 static inline bool
 is_occ_msg (const struct buffer* buf)
 {
-  return buf_string_match (buf, occ_magic, OCC_STRING_SIZE);
+  return buf_string_match_head (buf, occ_magic, OCC_STRING_SIZE);
 }
 
 void process_received_occ_msg (struct context *c);

@@ -17,7 +17,7 @@
    ClassGUID = {4d36e972-e325-11ce-bfc1-08002be10318}
    Provider = %l_Provider%
    Class = Net
-   DriverVer=02/22/2004,5.00.00.0002
+   DriverVer=03/13/2004,6.00.00.0002
 
 [Strings]
    l_DeviceDescription = "TAP-Win32 Adapter"
@@ -75,6 +75,9 @@
    HKR, Ndi\params\MediaStatus,        Optional,  0, "0"
    HKR, Ndi\params\MediaStatus\enum,   "0",       0, "Application Controlled"
    HKR, Ndi\params\MediaStatus\enum,   "1",       0, "Always Connected"
+   HKR, Ndi\params\MAC,                ParamDesc, 0, "MAC Address"
+   HKR, Ndi\params\MAC,                Type,      0, "edit"
+   HKR, Ndi\params\MAC,                Optional,  0, "1"
 
 ;----------------------------------------------------------------
 ;                             Service Section

@@ -1948,8 +1948,8 @@ get_adapt_info (DWORD index)
 }
 
 /*
- * Given an adapter index, return whether the adapter
- * is DHCP enabled (true) or fixed address (false).
+ * Given an adapter index, return true if the adapter
+ * is DHCP disabled.
  */
 static bool
 dhcp_disabled (DWORD index)
@@ -2132,6 +2132,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   /*
    * Open Windows TAP-Win32 adapter
    */
+
   openvpn_snprintf (device_path, sizeof(device_path), "%s%s%s",
 		    USERMODEDEVICEDIR,
 		    device_guid,

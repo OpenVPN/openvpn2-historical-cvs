@@ -291,41 +291,17 @@ encrypt_sign (struct context *c, bool comp_frag)
   c->c2.free_to_link = false;
 }
 
-void
-pre_select (struct context *c)
+/*
+ * Coarse timers work to 1 second resolution.
+ */
+static void
+process_coarse_timers (struct context *c)
 {
-  /* make sure current time (c->c2.current) is updated on function entry */
-
-  /*
-   * Start with an effectively infinite timeout, then let it
-   * reduce to a timeout that reflects the component which
-   * needs the earliest service.
-   */
-  c->c2.timeval.tv_sec = BIG_TIMEOUT;
-  c->c2.timeval.tv_usec = 0;
-
-#if defined(WIN32) && defined(TAP_WIN32_DEBUG)
-  c->c2.timeval.tv_sec = 1;
-  if (check_debug_level (D_TAP_WIN32_DEBUG))
-    tun_show_debug (&c->c1.tuntap);
-#endif
-
 #ifdef USE_CRYPTO
   /* flush current packet-id to file once per 60
      seconds if --replay-persist was specified */
-  packet_id_persist_flush (&c->c1.pid_persist, c->c2.current, 60);
+  check_packet_id_persist_flush (c);
 #endif
-
-  /* Does TLS need service? */
-  check_tls (c);
-
-  /* In certain cases, TLS errors will require a restart */
-  check_tls_errors (c);
-  if (c->sig->signal_received)
-    return;
-
-  /* check for incoming configuration info on the control channel */
-  check_incoming_control_channel (c);
 
   /* process connection establishment items */
   check_connection_established (c);
@@ -349,121 +325,62 @@ pre_select (struct context *c)
   /* Should we send an MTU load test? */
   check_send_occ_load_test (c);
 
-  /* Should we send an OCC message? */
-  check_send_occ_msg (c);
-
-  /* Should we deliver a datagram fragment to remote? */
-  check_fragment (c);
-
   /* Should we ping the remote? */
   check_ping_send (c);
-
-  /* caller should do garbage collect after this function returns */
 }
 
-void
-single_select (struct context *c)
+static void
+check_coarse_timers_dowork (struct context *c)
 {
-  /*
-   * Set up for select call.
-   *
-   * Decide what kind of events we want to wait for.
-   */
-  wait_reset (&c->c2.event_wait);
+  const struct timeval save = c->c2.timeval;
+  c->c2.timeval.tv_sec = BIG_TIMEOUT;
+  c->c2.timeval.tv_usec = 0;
+  process_coarse_timers (c);
+  c->c2.coarse_timer_wakeup = c->c2.current + c->c2.timeval.tv_sec; 
 
-  /*
-   * On win32 we use the keyboard or an event object as a source
-   * of asynchronous signals.
-   */
-  WAIT_SIGNAL (&c->c2.event_wait);
+  msg (D_INTERVAL, "TIMER: coarse timer wakeup %d seconds", (int) c->c2.timeval.tv_sec);
 
-  /*
-   * If outgoing data (for TCP/UDP port) pending, wait for ready-to-send
-   * status from TCP/UDP port. Otherwise, wait for incoming data on
-   * TUN/TAP device.
-   */
-  if (c->c2.to_link.len > 0)
+  /* Is the course timeout NOT the earliest one? */
+  if (c->c2.timeval.tv_sec > save.tv_sec)
+    c->c2.timeval = save;
+}
+
+static inline void
+check_coarse_timers (struct context *c)
+{
+  if (c->c2.current >= c->c2.coarse_timer_wakeup)
     {
-      /*
-       * If sending this packet would put us over our traffic shaping
-       * quota, don't send -- instead compute the delay we must wait
-       * until it will be OK to send the packet.
-       */
-
-#ifdef HAVE_GETTIMEOFDAY
-      int delay = 0;
-
-      /* set traffic shaping delay in microseconds */
-      if (c->options.shaper)
-	delay = max_int (delay, shaper_delay (&c->c2.shaper));
-
-      if (delay < 1000)
-	{
-	  SOCKET_SET_WRITE (&c->c2.event_wait, &c->c2.link_socket);
-	}
-      else
-	{
-	  shaper_soonest_event (&c->c2.timeval, delay);
-	}
-#else /* HAVE_GETTIMEOFDAY */
-      SOCKET_SET_WRITE (&c->c2.event_wait, &c->c2.link_socket);
-#endif /* HAVE_GETTIMEOFDAY */
-    }
-  else if (!c->c2.fragment || !fragment_outgoing_defined (c->c2.fragment))
-    {
-      TUNTAP_SET_READ (&c->c2.event_wait, &c->c1.tuntap);
-#if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-      if (c->options.tls_thread)
-	{
-	  TLS_THREAD_SOCKET_SET (c->c2.tls_multi, &c->c2.event_wait,
-				 &c->c2.thread_parms, reads);
-	}
-#endif
-    }
-
-  /*
-   * If outgoing data (for TUN/TAP device) pending, wait for ready-to-send status
-   * from device.  Otherwise, wait for incoming data on TCP/UDP port.
-   */
-  if (c->c2.to_tun.len > 0)
-    {
-      TUNTAP_SET_WRITE (&c->c2.event_wait, &c->c1.tuntap);
+      check_coarse_timers_dowork (c);
     }
   else
     {
-      SOCKET_SET_READ (&c->c2.event_wait, &c->c2.link_socket);
+      const int need_wakeup = c->c2.coarse_timer_wakeup - c->c2.current;
+      if (need_wakeup < c->c2.timeval.tv_sec)
+	{
+	  c->c2.timeval.tv_sec = need_wakeup;
+	  c->c2.timeval.tv_usec = 0;
+	}
     }
+}
 
-  /*
-   * Possible scenarios:
-   *  (1) tcp/udp port has data available to read
-   *  (2) tcp/udp port is ready to accept more data to write
-   *  (3) tun dev has data available to read
-   *  (4) tun dev is ready to accept more data to write
-   *  (5) tls background thread has data available to forward to
-   *      tcp/udp port
-   *  (6) we received a signal (handler sets signal_received)
-   *  (7) timeout (tv) expired (from TLS, shaper, inactivity
-   *      timeout, or ping timeout)
-   */
+static void
+check_timeout_random_component_dowork (struct context *c)
+{
+  const int update_interval = 10; /* seconds */
+  c->c2.update_timeout_random_component = c->c2.current + update_interval;
+  c->c2.timeout_random_component.tv_usec = (time_t) get_random () & 0x000FFFFF;
+  c->c2.timeout_random_component.tv_sec = 0;
 
-  /*
-   * Wait for something to happen.
-   */
-  c->c2.select_status = 1;	/* this will be our return "status" if select doesn't get called */
-  if (!c->sig->signal_received && !SOCKET_READ_RESIDUAL (&c->c2.link_socket))
-    {
-      if (check_debug_level (D_SELECT))
-	show_select_status (c);
-      c->c2.select_status = SELECT (&c->c2.event_wait, &c->c2.timeval);
-      check_status (c->c2.select_status, "select", NULL, NULL);
-    }
+  msg (D_INTERVAL, "RANDOM USEC=%d", (int) c->c2.timeout_random_component.tv_usec);
+}
 
-  /* current should always be a reasonably up-to-date timestamp */
-  c->c2.current = time (NULL);
-
-  /* set signal_received if a signal was received */
-  SELECT_SIGNAL_RECEIVED (&c->c2.event_wait, c->sig->signal_received);
+static inline void
+check_timeout_random_component (struct context *c)
+{
+  if (c->c2.current >= c->c2.update_timeout_random_component)
+    check_timeout_random_component_dowork (c);
+  if (c->c2.timeval.tv_sec >= 1)
+    tv_add_approx (&c->c2.timeval, &c->c2.timeout_random_component);
 }
 
 /*
@@ -998,6 +915,158 @@ process_incoming_tls_thread (struct context *c)
     }
 }
 #endif
+
+void
+pre_select (struct context *c)
+{
+  /* make sure current time (c->c2.current) is updated on function entry */
+
+  /*
+   * Start with an effectively infinite timeout, then let it
+   * reduce to a timeout that reflects the component which
+   * needs the earliest service.
+   */
+  c->c2.timeval.tv_sec = BIG_TIMEOUT;
+  c->c2.timeval.tv_usec = 0;
+
+#if defined(WIN32) && defined(TAP_WIN32_DEBUG)
+  c->c2.timeval.tv_sec = 1;
+  if (check_debug_level (D_TAP_WIN32_DEBUG))
+    tun_show_debug (&c->c1.tuntap);
+#endif
+
+  /* check coarse timers? */
+  check_coarse_timers (c);
+  if (c->sig->signal_received)
+    return;
+
+  /* Does TLS need service? */
+  check_tls (c);
+
+  /* In certain cases, TLS errors will require a restart */
+  check_tls_errors (c);
+  if (c->sig->signal_received)
+    return;
+
+  /* check for incoming configuration info on the control channel */
+  check_incoming_control_channel (c);
+
+  /* Should we send an OCC message? */
+  check_send_occ_msg (c);
+
+  /* Should we deliver a datagram fragment to remote? */
+  check_fragment (c);
+
+  /* Update random component of timeout */
+  check_timeout_random_component (c);
+
+  /* JYFIXME: caller should do garbage collect after this function returns */
+}
+
+void
+single_select (struct context *c)
+{
+  /*
+   * Set up for select call.
+   *
+   * Decide what kind of events we want to wait for.
+   */
+  wait_reset (&c->c2.event_wait);
+
+  /*
+   * On win32 we use the keyboard or an event object as a source
+   * of asynchronous signals.
+   */
+  WAIT_SIGNAL (&c->c2.event_wait);
+
+  /*
+   * If outgoing data (for TCP/UDP port) pending, wait for ready-to-send
+   * status from TCP/UDP port. Otherwise, wait for incoming data on
+   * TUN/TAP device.
+   */
+  if (c->c2.to_link.len > 0)
+    {
+      /*
+       * If sending this packet would put us over our traffic shaping
+       * quota, don't send -- instead compute the delay we must wait
+       * until it will be OK to send the packet.
+       */
+
+#ifdef HAVE_GETTIMEOFDAY
+      int delay = 0;
+
+      /* set traffic shaping delay in microseconds */
+      if (c->options.shaper)
+	delay = max_int (delay, shaper_delay (&c->c2.shaper));
+
+      if (delay < 1000)
+	{
+	  SOCKET_SET_WRITE (&c->c2.event_wait, &c->c2.link_socket);
+	}
+      else
+	{
+	  shaper_soonest_event (&c->c2.timeval, delay);
+	}
+#else /* HAVE_GETTIMEOFDAY */
+      SOCKET_SET_WRITE (&c->c2.event_wait, &c->c2.link_socket);
+#endif /* HAVE_GETTIMEOFDAY */
+    }
+  else if (!c->c2.fragment || !fragment_outgoing_defined (c->c2.fragment))
+    {
+      TUNTAP_SET_READ (&c->c2.event_wait, &c->c1.tuntap);
+#if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
+      if (c->options.tls_thread)
+	{
+	  TLS_THREAD_SOCKET_SET (c->c2.tls_multi, &c->c2.event_wait,
+				 &c->c2.thread_parms, reads);
+	}
+#endif
+    }
+
+  /*
+   * If outgoing data (for TUN/TAP device) pending, wait for ready-to-send status
+   * from device.  Otherwise, wait for incoming data on TCP/UDP port.
+   */
+  if (c->c2.to_tun.len > 0)
+    {
+      TUNTAP_SET_WRITE (&c->c2.event_wait, &c->c1.tuntap);
+    }
+  else
+    {
+      SOCKET_SET_READ (&c->c2.event_wait, &c->c2.link_socket);
+    }
+
+  /*
+   * Possible scenarios:
+   *  (1) tcp/udp port has data available to read
+   *  (2) tcp/udp port is ready to accept more data to write
+   *  (3) tun dev has data available to read
+   *  (4) tun dev is ready to accept more data to write
+   *  (5) tls background thread has data available to forward to
+   *      tcp/udp port
+   *  (6) we received a signal (handler sets signal_received)
+   *  (7) timeout (tv) expired (from TLS, shaper, inactivity
+   *      timeout, or ping timeout)
+   */
+
+  /*
+   * Wait for something to happen.
+   */
+  c->c2.select_status = 1;	/* this will be our return "status" if select doesn't get called */
+  if (!c->sig->signal_received && !SOCKET_READ_RESIDUAL (&c->c2.link_socket))
+    {
+      if (check_debug_level (D_SELECT))
+	show_select_status (c);
+      c->c2.select_status = SELECT (&c->c2.event_wait, &c->c2.timeval);
+      check_status (c->c2.select_status, "select", NULL, NULL);
+    }
+
+  /* current should always be a reasonably up-to-date timestamp */
+  c->c2.current = time (NULL);
+
+  /* set signal_received if a signal was received */
+  SELECT_SIGNAL_RECEIVED (&c->c2.event_wait, c->sig->signal_received);
+}
 
 void
 process_io (struct context *c)

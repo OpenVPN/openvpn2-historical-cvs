@@ -248,7 +248,6 @@ packet_id_persist_init (struct packet_id_persist *p)
   p->fd = -1;
   p->time = p->time_last_written = 0;
   p->id = p->id_last_written = 0;
-  p->last_flush = 0;
 }
 
 /* close the file descriptor if it is open, and switch to disabled state */

@@ -123,4 +123,16 @@ check_fragment (struct context *c)
     check_fragment_dowork (c);
 }
 
+/*
+ * Should we persist our anti-replay packet ID state to disk?
+ */
+static inline void
+check_packet_id_persist_flush (struct context *c)
+{
+  if (packet_id_persist_enabled (&c->c1.pid_persist)
+      && event_timeout_trigger (&c->c2.packet_id_persist_interval, c->c2.current,
+				&c->c2.timeval))
+    packet_id_persist_save (&c->c1.pid_persist);
+}
+
 #endif /* EVENT_INLINE_H */

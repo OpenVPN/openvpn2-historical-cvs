@@ -36,6 +36,7 @@
 
 struct multi_instance {
   bool defined;
+  struct timeval wakeup; /* absolute time */
   struct mroute_list real;
   struct mroute_list virtual;
   struct context context;
@@ -44,6 +45,7 @@ struct multi_instance {
 struct multi_context {
   struct multi_instance *link_out;
   struct multi_instance *tun_out;
+  struct multi_instance *earliest_wakeup;
   struct multi_instance *array;
 };
 
@@ -53,8 +55,6 @@ void multi_print_status (struct multi_context *m, struct context *t);
 void multi_process_io (struct multi_context *m, struct context *t);
 void multi_process_timeout (struct multi_context *m, struct context *t);
 void multi_uninit (struct multi_context *m);
-
-void multi_get_timeout (struct multi_context *m, struct timeval *tv, time_t current);
 
 #endif /* P2MP */
 #endif /* MULTI_H */

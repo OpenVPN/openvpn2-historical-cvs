@@ -205,13 +205,13 @@ struct context_2
   /* did we open TLS thread? */
   bool thread_opened;
 
-#endif
+#endif /* USE_PTHREAD */
 
   /* used to optimize calls to tls_multi_process
      in single-threaded mode */
   struct interval tmp_int;
 
-#endif
+#endif /* USE_SSL */
 
   /* workspace buffers used by crypto routines */
   struct buffer encrypt_buf;
@@ -224,7 +224,9 @@ struct context_2
 
   /* used to keep track of data channel packet sequence numbers */
   struct packet_id packet_id;
-#endif
+  struct event_timeout packet_id_persist_interval;
+
+#endif /* USE_CRYPTO */
 
   /*
    * LZO compression library objects.
@@ -275,6 +277,14 @@ struct context_2
 
   /* how long to wait before we will need to be serviced */
   struct timeval timeval;
+
+  /* next wakeup for processing coarse timers (>1 sec resolution) */
+  time_t coarse_timer_wakeup;
+
+  /* maintain a random delta to add to timeouts to avoid contexts
+     waking up simultaneously */
+  time_t update_timeout_random_component;
+  struct timeval timeout_random_component;
 
   /* return from main event loop select (or windows equivalent) */
   int select_status;

@@ -69,5 +69,15 @@ bool mroute_extract_sockaddr_in (struct mroute_addr *addr, const struct sockaddr
 void mroute_list_init (struct mroute_list *list);
 void mroute_list_free (struct mroute_list *list);
 
+static inline bool
+mroute_addr_equal (const struct mroute_addr *a1, const struct mroute_addr *a2)
+{
+  if (a1->type != a2->type)
+    return false;
+  if (a1->len != a2->len)
+    return false;
+  return memcmp (a1->addr, a2->addr, a1->len) == 0;
+}
+
 #endif /* P2MP */
 #endif /* MROUTE_H */

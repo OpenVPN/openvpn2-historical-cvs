@@ -848,7 +848,7 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
 	  && (!addr_match_proto (addr, &lsa->actual, sock->proto)
 	      || !sock->set_outgoing_initial))
 	{
-	  lsa->actual = *addr;
+	  lsa->actual = *addr; // JYFIXME: skip this line for --force-dest
 	  sock->set_outgoing_initial = true;
 	  mutex_unlock (L_SOCK);
 	  setenv_sockaddr ("trusted", &lsa->actual);

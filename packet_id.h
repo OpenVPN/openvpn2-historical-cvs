@@ -161,7 +161,6 @@ struct packet_id_persist
   packet_id_type id;       /* sequence number */
   time_t time_last_written;
   packet_id_type id_last_written;
-  time_t last_flush;
 };
 
 struct packet_id_persist_file_image
@@ -272,20 +271,6 @@ packet_id_persist_save_obj (struct packet_id_persist *p, const struct packet_id*
     {
       p->time = pid->rec.time;
       p->id = pid->rec.id;
-    }
-}
-
-/* flush the current packet_id to disk, once per n seconds */
-static inline void
-packet_id_persist_flush (struct packet_id_persist *p, time_t current, int n)
-{
-  if (packet_id_persist_enabled (p))
-    {
-      if (!p->last_flush || p->last_flush + n < current)
-	{
-	  packet_id_persist_save (p);
-	  p->last_flush = current;
-	}
     }
 }
 

@@ -470,12 +470,12 @@ frame_finalize_options (struct frame *frame, const struct options *options)
  * Free a key schedule, including OpenSSL components.
  */
 static void
-key_schedule_free (struct key_schedule *ks)
+key_schedule_free (struct key_schedule *ks, bool free_ssl_ctx)
 {
 #ifdef USE_CRYPTO
   free_key_ctx_bi (&ks->static_key);
 #ifdef USE_SSL
-  if (ks->ssl_ctx)
+  if (ks->ssl_ctx && free_ssl_ctx)
     SSL_CTX_free (ks->ssl_ctx);
   free_key_ctx_bi (&ks->tls_auth_key);
 #endif /* USE_SSL */
@@ -1116,6 +1116,12 @@ do_init_timers (struct context *c)
     event_timeout_init (&c->c2.occ_mtu_load_test_interval, c->c2.current,
 			OCC_MTU_LOAD_INTERVAL_SECONDS);
 
+  /* initialize packet_id persistence timer */
+#ifdef USE_CRYPTO
+  if (c->options.packet_id_file)
+    event_timeout_init (&c->c2.packet_id_persist_interval, c->c2.current, 60);
+#endif
+
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 #ifdef USE_PTHREAD
   if (!c->options.tls_thread)
@@ -1206,9 +1212,8 @@ do_close_tls (struct context *c)
 static void
 do_close_free_key_schedule (struct context *c)
 {
-  if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_key)
-      && (c->mode == CM_P2P || c->mode == CM_TOP))
-    key_schedule_free (&c->c1.ks);
+  if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_key))
+    key_schedule_free (&c->c1.ks, (c->mode == CM_P2P || c->mode == CM_TOP));
 }
 
 /*
@@ -1544,7 +1549,7 @@ test_crypto_thread (void *arg)
   frame_finalize_options (&c->c2.frame, options);
 
   test_crypto (&c->c2.crypto_options, &c->c2.frame);
-  key_schedule_free (&c->c1.ks);
+  key_schedule_free (&c->c1.ks, true);
 
 #if defined(USE_PTHREAD) && defined(USE_SSL)
   if (c->first_time && options->tls_thread)

@@ -40,6 +40,9 @@
 #include "mtu.h"
 #include "buffer.h"
 
+/* Maximum number of events we will wait for */
+#define MAX_EVENTS 5
+
 /* allocate a buffer for socket or tun layer */
 void alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tuntap_buffer);
 
@@ -130,8 +133,6 @@ overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix);
  * reason that Win32 select() can only wait on sockets, not on the TAP-Win32 file
  * handle which we must also wait on.
  */
-
-#define MAX_EVENTS 5
 
 struct event_wait {
   HANDLE events[MAX_EVENTS];
@@ -250,6 +251,8 @@ char *getpass (const char *prompt);
 
 struct event_wait {
   int max_fd_plus_one;
+  int fds[MAX_EVENTS];
+  int n_events;
   fd_set reads, writes;
 };
 
@@ -267,20 +270,31 @@ int profile_select(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, 
 static inline void
 wait_init (struct event_wait *ew)
 {
+  CLEAR (*ew);
   ew->max_fd_plus_one = -1;
+  FD_ZERO (&ew->reads);
+  FD_ZERO (&ew->writes);
 }
 
 static inline void
 wait_reset (struct event_wait *ew)
 {
-  FD_ZERO (&ew->reads);
-  FD_ZERO (&ew->writes);
+  /* FD_ZERO would be simpler, but this is more efficient */
+  int i;
+  for (i = 0; i < ew->n_events; ++i)
+    {
+      FD_CLR (ew->fds[i], &ew->reads);
+      FD_CLR (ew->fds[i], &ew->writes);
+    }
 }
 
 static inline void
 wait_update_maxfd (struct event_wait *ew, int fd)
 {
   ew->max_fd_plus_one = max_int (ew->max_fd_plus_one, fd + 1);
+
+  ASSERT (ew->n_events < MAX_EVENTS);
+  ew->fds[ew->n_events++] = fd;
 }
 
 #endif /* WIN32 */

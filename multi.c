@@ -55,6 +55,40 @@ multi_init (struct multi_context *m, struct context *t)
     }
 }
 
+static void
+multi_get_timeout (struct multi_context *m, struct timeval *dest)
+{
+  struct timeval tv, current;
+  int i;
+
+  // JYFIXME -- inefficient linear search
+
+  tv.tv_sec = BIG_TIMEOUT;
+  tv.tv_usec = 0;
+  m->earliest_wakeup = NULL;
+
+  for (i = 0; i < MULTI_N_INSTANCE; ++i)
+    {
+      struct multi_instance *mi = &m->array[i];
+      if (mi->defined && tv_lt (&mi->wakeup, &tv))
+	{
+	  m->earliest_wakeup = mi;
+	  tv = mi->wakeup;
+	}
+    }
+
+  if (m->earliest_wakeup)
+    {
+      ASSERT (!gettimeofday (&current, NULL));
+      tv_delta (dest, &current, &tv);
+    }
+  else
+    {
+      dest->tv_sec = BIG_TIMEOUT;
+      dest->tv_usec = 0;
+    }
+}
+
 void
 multi_select (struct multi_context *m, struct context *t)
 {
@@ -107,7 +141,7 @@ multi_select (struct multi_context *m, struct context *t)
       struct timeval tv;
       if (check_debug_level (D_SELECT))
 	show_select_status (t);
-      multi_get_timeout (m, &tv, t->c2.current);
+      multi_get_timeout (m, &tv);
       t->c2.select_status = SELECT (&t->c2.event_wait, &tv);
       check_status (t->c2.select_status, "multi-select", NULL, NULL);
     }
@@ -127,13 +161,75 @@ multi_print_status (struct multi_context *m, struct context *t)
 static struct multi_instance *
 multi_get_instance_by_real_addr (struct multi_context *m, const struct sockaddr_in *addr)
 {
+  struct mroute_addr ma;
+  if (mroute_extract_sockaddr_in (&ma, addr, true))
+    {
+      int i;
+      for (i = 0; i < MULTI_N_INSTANCE; ++i)
+	{
+	  struct multi_instance *mi = &m->array[i];
+	  if (mi->defined)
+	    {
+	      if (mroute_addr_equal (&ma, &mi->real.addr))
+		return mi;
+	    }
+	}
+    }
   return NULL;
 }
 
 static struct multi_instance *
 multi_get_instance_by_virtual_addr (struct multi_context *m, const struct mroute_addr *addr)
 {
+  int i;
+  for (i = 0; i < MULTI_N_INSTANCE; ++i)
+    {
+      struct multi_instance *mi = &m->array[i];
+      if (mi->defined)
+	{
+	  if (mroute_addr_equal (addr, &mi->virtual.addr))
+	    return mi;
+	}
+    }
   return NULL;
+}
+
+static inline void
+multi_close_context (struct context *c)
+{
+  c->sig->signal_received = SIGTERM;
+  close_instance (c);
+  free (c->sig);
+}
+
+static inline void
+multi_close_instance (struct multi_instance *mi)
+{
+  if (mi->defined)
+    {
+      mroute_list_free (&mi->real);
+      mroute_list_free (&mi->virtual);
+      multi_close_context (&mi->context);
+      mi->defined = false;
+    }
+}
+
+static inline bool
+multi_process_post (struct multi_instance *mi)
+{
+  if (!IS_SIG (&mi->context))
+    {
+      pre_select (&mi->context);
+      ASSERT (!gettimeofday (&mi->wakeup, NULL));
+      tv_add (&mi->wakeup, &mi->context.c2.timeval);
+    }
+  if (IS_SIG (&mi->context))
+    {
+      multi_close_instance (mi);
+      return false;
+    }
+  else
+    return true;
 }
 
 static void
@@ -144,10 +240,18 @@ multi_inherit_context (struct context *dest, const struct context *src)
   dest->mode = CM_CHILD;
   dest->first_time = false;
 
+  /* signals */
+  dest->sig = (struct signal_info *) malloc (sizeof (struct signal_info));
+  ASSERT (dest->sig);
+  CLEAR (*dest->sig);
+
   /* c1 init */
   clear_tuntap (&dest->c1.tuntap);
   packet_id_persist_init (&dest->c1.pid_persist);
   clear_route_list (&dest->c1.route_list);
+
+  /* inherit SSL context */
+  dest->c1.ks.ssl_ctx = src->c1.ks.ssl_ctx;
 
   /* options */
   dest->options = src->options;
@@ -157,21 +261,11 @@ multi_inherit_context (struct context *dest, const struct context *src)
   
   /* context init */
   init_instance (dest);
+  if (IS_SIG (dest))
+    return;
+
   link_socket_inherit_passive (&dest->c2.link_socket, &src->c2.link_socket, &dest->c1.link_socket_addr);
   tuntap_inherit_passive (&dest->c1.tuntap, &src->c1.tuntap);
-
-  /* signals */
-  dest->sig = (struct signal_info *) malloc (sizeof (struct signal_info));
-  ASSERT (dest->sig);
-  CLEAR (*dest->sig);
-}
-
-static void
-multi_close_context (struct context *c)
-{
-  c->sig->signal_received = SIGTERM;
-  close_instance (c);
-  free (c->sig);
 }
 
 static struct multi_instance *
@@ -194,6 +288,7 @@ multi_open_instance (struct multi_context *m, struct context *t)
   ASSERT (mi); /* this will fail if we run out of free instances */
 
   CLEAR (*mi);
+  mi->defined = true;
   mroute_list_init (&mi->real);
   mroute_list_init (&mi->virtual);
 
@@ -201,20 +296,11 @@ multi_open_instance (struct multi_context *m, struct context *t)
   mroute_extract_sockaddr_in (&mi->real.addr, &t->c2.from, true);
 
   multi_inherit_context (&mi->context, t);
-  mi->defined = true;
-  return mi;
-}
 
-static void
-multi_close_instance (struct multi_instance *mi)
-{
-  if (mi->defined)
-    {
-      mroute_list_free (&mi->real);
-      mroute_list_free (&mi->virtual);
-      multi_close_context (&mi->context);
-    }
-  CLEAR (*mi);
+  if (multi_process_post (mi))
+    return mi;
+  else
+    return NULL;
 }
 
 static void
@@ -243,6 +329,10 @@ multi_process_incoming_link (struct multi_context *m, struct context *t)
 
       /* decrypt in instance context */
       process_incoming_link (&m->tun_out->context);
+
+      /* postprocess and set wakeup */
+      if (!multi_process_post (m->tun_out))
+	m->tun_out = NULL;
     }
 }
 
@@ -271,20 +361,26 @@ multi_process_incoming_tun (struct multi_context *m, struct context *t)
      
       /* encrypt in instance context */
       process_incoming_tun (&m->link_out->context);
+
+      /* postprocess and set wakeup */
+      if (!multi_process_post (m->link_out))
+	m->link_out = NULL;
     }
 }
 
-static void
+static inline void
 multi_process_outgoing_link (struct multi_context *m, struct context *t)
 {
   process_outgoing_link (&m->link_out->context, &t->c2.link_socket);
+  multi_process_post (m->link_out);
   m->link_out = NULL;
 }
 
-static void
+static inline void
 multi_process_outgoing_tun (struct multi_context *m, struct context *t)
 {
   process_outgoing_tun (&m->link_out->context, &t->c1.tuntap);
+  multi_process_post (m->tun_out);
   m->tun_out = NULL;
 }
 
@@ -321,13 +417,17 @@ multi_process_io (struct multi_context *m, struct context *t)
 }
 
 void
-multi_get_timeout (struct multi_context *m, struct timeval *tv, time_t current)
-{
-}
-
-void
 multi_process_timeout (struct multi_context *m, struct context *t)
 {
+  if (m->earliest_wakeup)
+    {
+      multi_process_post (m->earliest_wakeup);
+      m->earliest_wakeup = NULL;
+    }
+  if (!m->link_out && BLEN (&m->earliest_wakeup->context.c2.to_link))
+    m->link_out = m->earliest_wakeup;
+  if (!m->tun_out && BLEN (&m->earliest_wakeup->context.c2.to_tun))
+    m->tun_out = m->earliest_wakeup;
 }
 
 void

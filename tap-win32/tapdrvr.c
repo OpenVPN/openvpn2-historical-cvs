@@ -328,6 +328,13 @@ NDIS_STATUS AdapterCreate
   l_Adapter->m_DeviceState = '?';
   l_Adapter->m_MiniportAdapterHandle = p_AdapterHandle;
 
+  //==================================
+  // Allocate spinlock for controlling
+  // access to multicast address list.
+  //==================================
+  NdisAllocateSpinLock (&l_Adapter->m_MCLock);
+  l_Adapter->m_MCLockAllocated = TRUE;
+
   //====================================================
   // Register a shutdown handler which will be called
   // on system restart/shutdown to halt our virtual NIC.
@@ -360,7 +367,7 @@ NDIS_STATUS AdapterCreate
     NDIS_CONFIGURATION_PARAMETER *parm;
 
     // set defaults in case our registry query fails
-    l_Adapter->m_MTU = DEFAULT_PACKET_LOOKAHEAD;
+    l_Adapter->m_MTU = ETHERNET_MTU;
     l_Adapter->m_MediaStateAlwaysConnected = FALSE;
     l_Adapter->m_MediaState = FALSE;
 
@@ -516,6 +523,9 @@ AdapterFreeResources (TapAdapterPointer p_Adapter)
   
   if (p_Adapter->m_RegisteredAdapterShutdownHandler)
     NdisMDeregisterAdapterShutdownHandler (p_Adapter->m_MiniportAdapterHandle);
+
+  if (p_Adapter->m_MCLockAllocated)
+    NdisFreeSpinLock (&l_Adapter->m_MCLock);
 }
 
 VOID
@@ -996,12 +1006,13 @@ NDIS_STATUS AdapterQuery
       l_QueryLength = sizeof (NDIS_MEDIUM);
       break;
 
+    case OID_GEN_PHYSICAL_MEDIUM:
+      l_Query.m_PhysicalMedium = NdisPhysicalMediumUnspecified;
+      l_QueryLength = sizeof (NDIS_PHYSICAL_MEDIUM);
+      break;
+      
     case OID_GEN_LINK_SPEED:
       l_Query.m_Long = 100000;
-      break;
-
-    case OID_802_3_MULTICAST_LIST:
-      l_Query.m_Long = 0;
       break;
 
     case OID_802_3_PERMANENT_ADDRESS:
@@ -1019,7 +1030,7 @@ NDIS_STATUS AdapterQuery
       break;
 
     case OID_802_3_MAXIMUM_LIST_SIZE:
-      l_Query.m_Long = 0;
+      l_Query.m_Long = NIC_MAX_MCAST_LIST;
       break;
 
     case OID_GEN_CURRENT_LOOKAHEAD:
@@ -1069,7 +1080,6 @@ NDIS_STATUS AdapterQuery
 
     case OID_GEN_SUPPORTED_GUIDS:
     case OID_GEN_MEDIA_CAPABILITIES:
-    case OID_GEN_PHYSICAL_MEDIUM:
     case OID_TCP_TASK_OFFLOAD:
     case OID_FFP_SUPPORT:
       l_Status = NDIS_STATUS_INVALID_OID;
@@ -1134,9 +1144,35 @@ NDIS_STATUS AdapterModify
       //                            Device Info
       //==================================================================
     case OID_802_3_MULTICAST_LIST:
-      DEBUGP (("[%s] Setting [OID_802_3_MAXIMUM_LIST_SIZE]\n",
+      DEBUGP (("[%s] Setting [OID_802_3_MULTICAST_LIST]\n",
 	       NAME (l_Adapter)));
-      l_Status = NDIS_STATUS_SUCCESS;
+
+      *p_BytesNeeded = sizeof (ETH_ADDR);
+      *p_BytesRead = p_BufferLength;
+
+      if (p_BufferLength % sizeof (ETH_ADDR))
+	l_Status = NDIS_STATUS_INVALID_LENGTH;
+      else if (p_BufferLength > sizeof (MC_LIST))
+	{
+	  l_Status = NDIS_STATUS_MULTICAST_FULL;
+	  *p_BytesNeeded = sizeof (MC_LIST);
+	}
+      else
+	{
+	  NdisAcquireSpinLock (&l_Adapter->m_MCLock);
+
+	  NdisZeroMemory(&l_Adapter->m_MCList, sizeof (MC_LIST));
+        
+	  NdisMoveMemory(&l_Adapter->m_MCList,
+			 p_Buffer,
+			 p_BufferLength);
+
+	  l_Adapter->m_MCListSize = p_BufferLength / sizeof (ETH_ADDR);
+        
+	  NdisReleaseSpinLock (&l_Adapter->m_MCLock);
+
+	  l_Status = NDIS_STATUS_SUCCESS;
+	}
       break;
 
     case OID_GEN_CURRENT_PACKET_FILTER:
@@ -1151,7 +1187,6 @@ NDIS_STATUS AdapterModify
 	  l_Status = NDIS_STATUS_SUCCESS;
 	  *p_BytesRead = sizeof (ULONG);
 	}
-
       break;
 
     case OID_GEN_CURRENT_LOOKAHEAD:
@@ -1162,7 +1197,9 @@ NDIS_STATUS AdapterModify
 	}
       else if (l_Query->m_Long > DEFAULT_PACKET_LOOKAHEAD
 	       || l_Query->m_Long <= 0)
-	l_Status = NDIS_STATUS_INVALID_DATA;
+	{
+	  l_Status = NDIS_STATUS_INVALID_DATA;
+	}
       else
 	{
 	  DEBUGP (("[%s] Setting [OID_GEN_CURRENT_LOOKAHEAD] to [%d]\n",
@@ -1171,7 +1208,6 @@ NDIS_STATUS AdapterModify
 	  l_Status = NDIS_STATUS_SUCCESS;
 	  *p_BytesRead = sizeof (ULONG);
 	}
-
       break;
 
     case OID_GEN_NETWORK_LAYER_ADDRESSES:

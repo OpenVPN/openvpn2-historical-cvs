@@ -46,6 +46,7 @@ typedef union _TapAdapterQuery
 {
   NDIS_HARDWARE_STATUS m_HardwareStatus;
   NDIS_MEDIUM m_Medium;
+  NDIS_PHYSICAL_MEDIUM m_PhysicalMedium;
   UCHAR m_MacAddress [6];
   UCHAR m_Buffer [256];
   ULONG m_Long;
@@ -148,6 +149,12 @@ typedef struct _TapAdapter
   // resources.
   BOOLEAN m_CalledAdapterFreeResources;
   BOOLEAN m_RegisteredAdapterShutdownHandler;
+
+  // Multicast list info
+  NDIS_SPIN_LOCK m_MCLock;
+  BOOLEAN m_MCLockAllocated;
+  ULONG m_MCListSize;
+  MC_LIST m_MCList;
 
   // Information on the TAP device
   TapExtension m_Extension;

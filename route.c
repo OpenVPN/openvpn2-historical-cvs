@@ -1026,6 +1026,160 @@ get_default_gateway (in_addr_t *ret)
     }
 }
 
+#elif defined(TARGET_DARWIN)
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+/* all of this is taken from <net/route.h> in Darwin */
+#define RTA_DST     0x1
+#define RTA_GATEWAY 0x2
+#define RTA_NETMASK 0x4
+
+#define RTM_GET     0x4
+#define RTM_VERSION 5
+
+#define RTF_UP      0x1
+#define RTF_GATEWAY 0x2
+
+/*
+ * These numbers are used by reliable protocols for determining
+ * retransmission behavior and are included in the routing structure.
+ */
+struct rt_metrics {
+        u_long  rmx_locks;      /* Kernel must leave these values alone */
+        u_long  rmx_mtu;        /* MTU for this path */
+        u_long  rmx_hopcount;   /* max hops expected */
+        u_long  rmx_expire;     /* lifetime for route, e.g. redirect */
+        u_long  rmx_recvpipe;   /* inbound delay-bandwidth product */
+        u_long  rmx_sendpipe;   /* outbound delay-bandwidth product */
+        u_long  rmx_ssthresh;   /* outbound gateway buffer limit */
+        u_long  rmx_rtt;        /* estimated round trip time */
+        u_long  rmx_rttvar;     /* estimated rtt variance */
+        u_long  rmx_pksent;     /* packets sent using this route */
+        u_long  rmx_filler[4];  /* will be used for T/TCP later */
+};
+
+/*
+ * Structures for routing messages.
+ */
+struct rt_msghdr {
+        u_short rtm_msglen;     /* to skip over non-understood messages */
+        u_char  rtm_version;    /* future binary compatibility */
+        u_char  rtm_type;       /* message type */
+        u_short rtm_index;      /* index for associated ifp */
+        int     rtm_flags;      /* flags, incl. kern & message, e.g. DONE */
+        int     rtm_addrs;      /* bitmask identifying sockaddrs in msg */
+        pid_t   rtm_pid;        /* identify sender */
+        int     rtm_seq;        /* for sender to identify action */
+        int     rtm_errno;      /* why failed */
+        int     rtm_use;        /* from rtentry */
+        u_long  rtm_inits;      /* which metrics we are initializing */
+        struct  rt_metrics rtm_rmx; /* metrics themselves */
+};
+
+struct {
+  struct rt_msghdr m_rtm;
+  char       m_space[512];
+} m_rtmsg;
+
+#define ROUNDUP(a) \
+        ((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
+
+static bool
+get_default_gateway (in_addr_t *ret)
+{
+  struct gc_arena gc = gc_new ();
+  int s, seq, l, pid, rtm_addrs, i;
+  struct sockaddr so_dst, so_mask;
+  char *cp = m_rtmsg.m_space; 
+  struct sockaddr *gate = NULL, *sa;
+  struct  rt_msghdr *rtm_aux;
+
+#define NEXTADDR(w, u) \
+        if (rtm_addrs & (w)) {\
+            l = ROUNDUP(u.sa_len); memmove(cp, &(u), l); cp += l;\
+        }
+
+#define ADVANCE(x, n) (x += ROUNDUP((n)->sa_len))
+
+#define rtm m_rtmsg.m_rtm
+
+  pid = getpid();
+  seq = 0;
+  rtm_addrs = RTA_DST | RTA_NETMASK;
+
+  bzero(&so_dst, sizeof(so_dst));
+  bzero(&so_mask, sizeof(so_mask));
+  bzero(&rtm, sizeof(struct rt_msghdr));
+
+  rtm.rtm_type = RTM_GET;
+  rtm.rtm_flags = RTF_UP | RTF_GATEWAY;
+  rtm.rtm_version = RTM_VERSION;
+  rtm.rtm_seq = ++seq;
+  rtm.rtm_addrs = rtm_addrs; 
+
+  so_dst.sa_family = AF_INET;
+  so_dst.sa_len = sizeof(struct sockaddr_in);
+  so_mask.sa_family = AF_INET;
+  so_mask.sa_len = sizeof(struct sockaddr_in);
+
+  NEXTADDR(RTA_DST, so_dst);
+  NEXTADDR(RTA_NETMASK, so_mask);
+
+  rtm.rtm_msglen = l = cp - (char *)&m_rtmsg;
+
+  s = socket(PF_ROUTE, SOCK_RAW, 0);
+
+  if (write(s, (char *)&m_rtmsg, l) < 0)
+    {
+      warn("writing to routing socket");
+      gc_free (&gc);
+      return false;
+    }
+
+  do {
+    l = read(s, (char *)&m_rtmsg, sizeof(m_rtmsg));
+  } while (l > 0 && (rtm.rtm_seq != seq || rtm.rtm_pid != pid));
+                        
+
+  rtm_aux = &rtm;
+
+  cp = ((char *)(rtm_aux + 1));
+  if (rtm_aux->rtm_addrs) {
+    for (i = 1; i; i <<= 1)
+      if (i & rtm_aux->rtm_addrs) {
+	sa = (struct sockaddr *)cp;
+	if (i == RTA_GATEWAY )
+	  gate = sa;
+	ADVANCE(cp, sa);
+      }
+  }
+  else
+    {
+      gc_free (&gc);
+      return false;
+    }
+
+
+  if (gate != NULL )
+    {
+      *ret = ntohl(((struct sockaddr_in *)gate)->sin_addr.s_addr);
+#if 1
+      msg (M_INFO, "gw %s",
+	   print_in_addr_t ((in_addr_t) *ret, false, &gc));
+#endif
+
+      gc_free (&gc);
+      return true;
+    }
+  else
+    {
+      gc_free (&gc);
+      return false;
+    }
+}
 
 #else
 

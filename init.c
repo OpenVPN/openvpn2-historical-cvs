@@ -1615,7 +1615,8 @@ close_instance (struct context *c)
 #endif
 
   /* close syslog */
-  do_close_syslog (c);
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_close_syslog (c);
 
   /* garbage collect */
   gc_free (&c->c2.gc);

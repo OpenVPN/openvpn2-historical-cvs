@@ -1225,11 +1225,14 @@ options_string (const struct options *o,
    * SSL Options
    */
   {
-    if (o->tls_auth_file)
-      buf_printf (&out, ",tls-auth");
+    if (TLS_CLIENT || TLS_SERVER)
+      {
+	if (o->tls_auth_file)
+	  buf_printf (&out, ",tls-auth");
 
-    if (o->key_method > 1)
-      buf_printf (&out, ",key-method %d", o->key_method);
+	if (o->key_method > 1)
+	  buf_printf (&out, ",key-method %d", o->key_method);
+      }
 
     if (remote)
       {

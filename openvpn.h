@@ -40,6 +40,7 @@
 #include "proxy.h"
 #include "socks.h"
 #include "sig.h"
+#include "misc.h"
 
 /*
  * Our global key schedules, packaged thusly

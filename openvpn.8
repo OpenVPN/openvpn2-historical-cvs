@@ -117,6 +117,8 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-gremlin\fR\ ]
 [\ \fB\-\-group\fR\ \fIgroup\fR\ ]
 [\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
+[\ \fB\-\-http\-proxy\fR\ \fIserver\ port\ [authfile]\fR\ ]
+[\ \fB\-\-http\-proxy\-retry\fR\ ]
 [\ \fB\-\-ifconfig\fR\ \fIl\ r\fR\ ]
 [\ \fB\-\-ifconfig\-noexec\fR\ ]
 [\ \fB\-\-ifconfig\-nowarn\fR\ ]
@@ -344,6 +346,19 @@ There are certain cases, however, where using TCP may be advantageous from
 a security and robustness perspective, such as tunneling non-IP or
 application-level UDP protocols, or tunneling protocols which don't
 possess a built-in reliability layer.
+.TP
+.B --http-proxy server port [authfile]
+Connect to remote host through an HTTP proxy at address
+.B server
+and port
+.B port.
+If HTTP Proxy-Authenticate is required,
+.B authfile
+is a file containing a username and password on 2 lines.
+.TP
+.B --http-proxy-retry
+Retry indefinitely on HTTP proxy errors.  If an HTTP proxy error
+occurs, simulate a SIGUSR1 reset.
 .TP
 .B --resolv-retry n
 If hostname resolve fails for

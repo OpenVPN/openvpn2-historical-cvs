@@ -157,6 +157,12 @@ struct options
   bool route_delay_defined;
   struct route_option_list routes;
 
+  /* http proxy */
+  const char *http_proxy_server;
+  int http_proxy_port;
+  const char *http_proxy_authfile;
+  bool http_proxy_retry;
+
   /* Enable options consistency check between peers */
   bool occ;
 

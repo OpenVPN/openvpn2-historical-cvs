@@ -301,4 +301,13 @@
 #define WIN32_0_1 0
 #endif
 
+/*
+ * Our socket descriptor type.
+ */
+#ifdef WIN32
+typedef SOCKET socket_descriptor_t;
+#else
+typedef int socket_descriptor_t;
+#endif
+
 #endif

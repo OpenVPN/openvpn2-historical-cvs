@@ -262,7 +262,7 @@ format_extended_socket_error (int fd, int* mtu)
     }
 
  exit:
-  buf_chomp (&out, '|');
+  buf_rmtail (&out, '|');
   return BSTR (&out);
 }
 

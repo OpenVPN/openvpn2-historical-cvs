@@ -135,18 +135,11 @@ int openvpn_snprintf(char *str, size_t size, const char *format, ...)
     ;
 
 /*
- * remove trailing newline
+ * remove trailing characters
  */
-static inline void
-buf_chomp (struct buffer *buf, uint8_t remove)
-{
-  uint8_t *cp = BLAST(buf);
-  if (cp && *cp == remove)
-    {
-      *cp = '\0'; 
-      --buf->len;
-    }
-}
+
+void buf_rmtail (struct buffer *buf, uint8_t remove);
+void chomp (char *str);
 
 /*
  * Write string in buf to file descriptor fd.

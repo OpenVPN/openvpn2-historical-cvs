@@ -78,6 +78,10 @@ static const char usage_message[] =
   "--remote host   : Remote host name or ip address.\n"
   "--proto p       : Use protocol p for communicating with peer.\n"
   "                  p = udp (default), tcp-server, or tcp-client\n"
+  "--http-proxy s p [up]: Connect to remote host through an HTTP proxy at address\n"
+  "                  s and port p.  If proxy authentication is required, up is a\n"
+  "                  file containing username/password on 2 lines.\n"
+  "--http-proxy-retry : Retry indefinitely on HTTP proxy errors.\n"
   "--resolv-retry n: If hostname resolve fails for --remote, retry\n"
   "                  resolve for n seconds before failing (disabled by default).\n"
   "--float         : Allow remote to change its IP address/port, such as through\n"
@@ -475,6 +479,11 @@ show_settings (const struct options *o)
   SHOW_UINT (tuntap_flags);
 
   SHOW_BOOL (occ);
+
+  SHOW_STR (http_proxy_server);
+  SHOW_INT (http_proxy_port);
+  SHOW_STR (http_proxy_authfile);
+  SHOW_BOOL (http_proxy_retry);
 
 #ifdef USE_LZO
   SHOW_BOOL (comp_lzo);
@@ -1245,21 +1254,21 @@ add_option (struct options *options, int i, char *p[],
     {
       ++i;
       options->local_port = options->remote_port = atoi (p[1]);
-      if (options->local_port <= 0 || options->remote_port <= 0)
+      if (!legal_ipv4_port (options->local_port))
 	msg (M_USAGE, "Bad port number: %s", p[1]);
     }
   else if (streq (p[0], "lport") && p[1])
     {
       ++i;
       options->local_port = atoi (p[1]);
-      if (options->local_port <= 0)
+      if (!legal_ipv4_port (options->local_port))
 	msg (M_USAGE, "Bad local port number: %s", p[1]);
     }
   else if (streq (p[0], "rport") && p[1])
     {
       ++i;
       options->remote_port = atoi (p[1]);
-      if (options->remote_port <= 0)
+      if (!legal_ipv4_port (options->remote_port))
 	msg (M_USAGE, "Bad remote port number: %s", p[1]);
     }
   else if (streq (p[0], "nobind"))
@@ -1279,6 +1288,24 @@ add_option (struct options *options, int i, char *p[],
 	msg (M_USAGE, "Bad protocol: '%s'.  Allowed protocols with --proto option: %s",
 	     p[1],
 	     proto2ascii_all());
+    }
+  else if (streq (p[0], "http-proxy") && p[1] && p[2])
+    {
+      i += 2;
+      options->http_proxy_server = p[1];
+      options->http_proxy_port = atoi (p[2]);
+      if (options->http_proxy_port <= 0)
+	msg (M_USAGE, "Bad http-proxy port number: %s", p[2]);
+
+      if (p[3])
+	{
+	  ++i;
+	  options->http_proxy_authfile = p[3];
+	}
+    }
+  else if (streq (p[0], "http-proxy-retry"))
+    {
+      options->http_proxy_retry = true;
     }
   else if (streq (p[0], "ping") && p[1])
     {

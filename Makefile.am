@@ -37,8 +37,10 @@ openvpn_SOURCES = basic.h buffer.c buffer.h circ_list.h common.h \
                   integer.h interval.h \
                   io.c io.h lzo.c lzo.h memdbg.h misc.c misc.h \
                   mss.c mss.h mtu.c mtu.h openvpn.c \
-                  openvpn.h options.c options.h packet_id.c \
-                  packet_id.h proto.h reliable.c reliable.h \
+                  openvpn.h options.c options.h \
+		  packet_id.c packet_id.h proto.h \
+		  proxy.c proxy.h \
+                  reliable.c reliable.h \
                   route.c route.h session_id.c \
                   session_id.h shaper.c shaper.h socket.c socket.h \
                   ssl.c ssl.h syshead.h thread.c thread.h tun.c tun.h

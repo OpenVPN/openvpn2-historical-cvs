@@ -373,7 +373,7 @@ openvpn_system (const char *command)
  * Warn if a given file is group/others accessible.
  */
 void
-warn_if_group_others_accessible(const char* filename)
+warn_if_group_others_accessible (const char* filename)
 {
 #ifdef HAVE_STAT
   struct stat st;
@@ -517,7 +517,7 @@ time_string (time_t t, bool show_usec)
   mutex_lock (L_CTIME);
   buf_printf (&out, "%s", ctime ((const time_t *)&tv.tv_sec));
   mutex_unlock (L_CTIME);
-  buf_chomp (&out, '\n');
+  buf_rmtail (&out, '\n');
 
   if (show_usec && tv.tv_usec)
     buf_printf (&out, " us=%d", (int)tv.tv_usec);

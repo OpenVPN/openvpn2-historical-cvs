@@ -380,35 +380,9 @@ socket_connect (socket_descriptor_t *sd,
       *sd = create_socket_tcp ();
       update_remote (remote_dynamic, remote, remote_changed);
     }
+
   msg (M_INFO, "TCP connection established with %s", 
        print_sockaddr (remote));
-}
-
-/*
- * Depending on protocol, sleep before restart to prevent
- * TCP race.
- */
-void
-socket_restart_pause (int proto)
-{
-  int sec = 0;
-  switch (proto)
-    {
-    case PROTO_UDPv4:
-      sec = 0;
-      break;
-    case PROTO_TCPv4_SERVER:
-      sec = 1;
-      break;
-    case PROTO_TCPv4_CLIENT:
-      sec = 3;
-      break;
-    }
-  if (sec)
-    {
-      msg (D_RESTART, "Restart pause, %d second(s)", sec);
-      sleep (sec);
-    }
 }
 
 /* For stream protocols, allocate a buffer to build up packet.
@@ -529,6 +503,7 @@ link_socket_init_phase1 (struct link_socket *sock,
 			 int local_port,
 			 int remote_port,
 			 int proto,
+			 struct http_proxy_info *http_proxy,
 			 bool bind_local,
 			 bool remote_float,
 			 bool inetd,
@@ -539,10 +514,9 @@ link_socket_init_phase1 (struct link_socket *sock,
 {
   link_socket_reset (sock);
   sock->local_host = local_host;
-  sock->remote_host = remote_host;
   sock->local_port = local_port;
-  sock->remote_port = remote_port;
   sock->proto = proto;
+  sock->http_proxy = http_proxy;
   sock->bind_local = bind_local;
   sock->remote_float = remote_float;
   sock->inetd = inetd;
@@ -550,6 +524,26 @@ link_socket_init_phase1 (struct link_socket *sock,
   sock->ipchange_command = ipchange_command;
   sock->resolve_retry_seconds = resolve_retry_seconds;
   sock->mtu_discover_type = mtu_discover_type;
+
+  /* are we running in HTTP proxy mode? */
+  if (sock->http_proxy)
+    {
+      ASSERT (sock->proto == PROTO_TCPv4_CLIENT);
+      ASSERT (!sock->inetd);
+
+      /* the proxy server */
+      sock->remote_host = http_proxy->server;
+      sock->remote_port = http_proxy->port;
+
+      /* the OpenVPN server we will use the proxy to connect to */
+      sock->proxy_dest_host = remote_host;
+      sock->proxy_dest_port = remote_port;
+    }
+  else
+    {
+      sock->remote_host = remote_host;
+      sock->remote_port = remote_port;
+    }
 
   /* bind behavior for TCP server vs. client */
   if (sock->proto == PROTO_TCPv4_SERVER)
@@ -612,13 +606,29 @@ link_socket_init_phase2 (struct link_socket *sock,
 
       /* TCP client/server */
       if (sock->proto == PROTO_TCPv4_SERVER)
-	sock->sd = socket_listen_accept (sock->sd, &sock->lsa->actual,
-					 remote_dynamic, &remote_changed,
-					 &sock->lsa->local, true, signal_received);
+	{
+	  sock->sd = socket_listen_accept (sock->sd, &sock->lsa->actual,
+					   remote_dynamic, &remote_changed,
+					   &sock->lsa->local, true, signal_received);
+	}
       else if (sock->proto == PROTO_TCPv4_CLIENT)
-	socket_connect (&sock->sd, &sock->lsa->actual,
-			remote_dynamic, &remote_changed,
-			signal_received);
+	{
+	  socket_connect (&sock->sd, &sock->lsa->actual,
+			  remote_dynamic, &remote_changed,
+			  signal_received);
+
+	  if (*signal_received)
+	    return;
+
+	  if (sock->http_proxy)
+	    {
+	      establish_http_proxy_passthru (sock->http_proxy,
+					     sock->sd,
+					     sock->proxy_dest_host,
+					     sock->proxy_dest_port,
+					     signal_received);
+	    }
+	}
       
       if (*signal_received)
 	return;

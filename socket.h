@@ -31,6 +31,7 @@
 #include "error.h"
 #include "mtu.h"
 #include "io.h"
+#include "proxy.h"
 
 /* 
  * packet_size_type is used communicate packet size
@@ -72,12 +73,6 @@ struct stream_buf
   bool error;  /* if true, fatal TCP error has occurred,
 		  requiring that connection be restarted */
 };
-
-#ifdef WIN32
-typedef SOCKET socket_descriptor_t;
-#else
-typedef int socket_descriptor_t;
-#endif
 
 /*
  * This is the main socket structure used by OpenVPN.  The SOCKET_
@@ -138,6 +133,13 @@ struct link_socket
   struct stream_buf stream_buf;
   struct buffer stream_buf_data;
   bool stream_reset;
+
+  /* HTTP proxy */
+  struct http_proxy_info *http_proxy;
+
+  /* The OpenVPN server we will use the proxy to connect to */
+  const char *proxy_dest_host;
+  int proxy_dest_port;
 };
 
 /*
@@ -181,6 +183,7 @@ void link_socket_init_phase1 (struct link_socket *sock,
 			      int local_port,
 			      int remote_port,
 			      int proto,
+			      struct http_proxy_info *proxy_info,
 			      bool bind_local,
 			      bool remote_float,
 			      bool inetd,
@@ -224,8 +227,6 @@ void setenv_sockaddr (const char *name_prefix,
 		      const struct sockaddr_in *addr);
 
 void bad_address_length (int actual, int expected);
-
-void socket_restart_pause (int proto);
 
 in_addr_t link_socket_current_remote (const struct link_socket *sock);
 
@@ -283,6 +284,12 @@ datagram_overhead (int proto)
 /*
  * Misc inline functions
  */
+
+static inline bool
+legal_ipv4_port (int port)
+{
+  return port > 0 && port < 65536;
+}
 
 static inline bool
 link_socket_proto_connection_oriented (int proto)

@@ -1,7 +1,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.23 2003/11/01 10:46:53 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.24 2003/11/02 12:01:46 jimyonan Exp $
 
 2003.11.xx -- Version 1.5-beta13
 
@@ -46,6 +46,9 @@ $Id: ChangeLog,v 1.86.2.23 2003/11/01 10:46:53 jimyonan Exp $
   --route option.
 * Added the --redirect-gateway option to configure the VPN
   as the default gateway (implemented on Linux and Windows only).
+* Added the --http-proxy option with basic authentication
+  support for use in TCP client mode.  Successfully tested
+  using Squid as the HTTP proxy.
 
 2003.10.12 -- Version 1.5-beta12
 

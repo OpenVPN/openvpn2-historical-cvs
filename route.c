@@ -391,6 +391,7 @@ redirect_default_route_to_vpn (struct route_list *rl)
 		      0,
 		      rl->spec.remote_endpoint);
 
+	  /* set a flag so we can undo later */
 	  rl->did_redirect_default_gateway = true;
 	}
     }

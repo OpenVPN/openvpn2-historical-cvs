@@ -49,6 +49,7 @@
 #include "interval.h"
 #include "io.h"
 #include "fragment.h"
+#include "proxy.h"
 #include "openvpn.h"
 #include "win32.h"
 
@@ -380,6 +381,33 @@ do_open_tun (const struct options *options,
   return ret;
 }
 
+/*
+ * Depending on protocol, sleep before restart to prevent
+ * TCP race.
+ */
+static void
+socket_restart_pause (int proto, bool http_proxy)
+{
+  int sec = 0;
+  switch (proto)
+    {
+    case PROTO_UDPv4:
+      sec = 0;
+      break;
+    case PROTO_TCPv4_SERVER:
+      sec = 1;
+      break;
+    case PROTO_TCPv4_CLIENT:
+      sec = http_proxy ? 10 : 3;
+      break;
+    }
+  if (sec)
+    {
+      msg (D_RESTART, "Restart pause, %d second(s)", sec);
+      sleep (sec);
+    }
+}
+
 /* Handle signals */
 
 static volatile int signal_received = 0;
@@ -445,7 +473,10 @@ signal_handler (int signum)
 static void
 signal_handler_exit (int signum)
 {
-  msg (M_FATAL | M_NOLOCK, "Signal %d received during initialization, exiting", signum);
+  msg (M_FATAL | M_NOLOCK,
+       "Signal %d (%s) received during initialization, exiting",
+       signum,
+       signal_description (signum, NULL));
 }
 
 #endif /* HAVE_SIGNAL_H */
@@ -555,6 +586,7 @@ openvpn (const struct options *options,
 	 struct key_schedule *ks,
 	 struct packet_id_persist *pid_persist,
 	 struct route_list *route_list,
+	 struct http_proxy_info *http_proxy,
 	 bool first_time)
 {
   /*
@@ -748,13 +780,14 @@ openvpn (const struct options *options,
    */
   signal (SIGINT, signal_handler_exit);
   signal (SIGTERM, signal_handler_exit);
-  signal (SIGHUP, SIG_IGN);
-  signal (SIGUSR1, SIG_IGN);
-  signal (SIGUSR2, SIG_IGN);
+  signal (SIGHUP, signal_handler_exit);
+  signal (SIGUSR1, signal_handler_exit);
+  signal (SIGUSR2, signal_handler_exit);
   signal (SIGPIPE, SIG_IGN);
 #endif /* HAVE_SIGNAL_H */
 
-  msg (M_INFO, "%s", title_string);
+  if (!first_time)
+    socket_restart_pause (options->proto, options->http_proxy_server != NULL);
 
   wait_init (&event_wait);
   link_socket_reset (&link_socket);
@@ -1134,6 +1167,7 @@ openvpn (const struct options *options,
 			   options->local, options->remote,
 			   options->local_port, options->remote_port,
 			   options->proto,
+			   http_proxy->defined ? http_proxy : NULL,
 			   options->bind_local,
 			   options->remote_float,
 			   options->inetd,
@@ -1384,15 +1418,15 @@ openvpn (const struct options *options,
 	      timeval.tv_sec = wakeup;
 	      timeval.tv_usec = 0;
 	    }
-	}
 
-      if (link_socket_connection_oriented (&link_socket) && tls_multi->n_errors)
-	{
-	  /* TLS errors are fatal in TCP mode */
-	  signal_received = SIGUSR1;
-	  msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
-	  signal_text = "tls-error";
-	  break;
+	  if (link_socket_connection_oriented (&link_socket) && tls_multi->n_errors)
+	    {
+	      /* TLS errors are fatal in TCP mode */
+	      signal_received = SIGUSR1;
+	      msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
+	      signal_text = "tls-error";
+	      break;
+	    }
 	}
 #endif
 
@@ -2764,6 +2798,9 @@ main (int argc, char *argv[])
       if (!options.remote && options.proto == PROTO_TCPv4_CLIENT)
 	msg (M_USAGE, "Options error: --remote MUST be used in TCP Client mode");
 
+      if (options.http_proxy_server && options.proto != PROTO_TCPv4_CLIENT)
+	msg (M_USAGE, "Options error: --http-proxy MUST be used in TCP Client mode (i.e. --proto tcp-client)");
+
 #ifdef USE_CRYPTO
 
       if (first_time)
@@ -2859,17 +2896,26 @@ main (int argc, char *argv[])
 	struct tuntap tuntap;
 	struct packet_id_persist pid_persist;
 	struct route_list route_list;
+	struct http_proxy_info http_proxy;
+
+	/* print version number */
+	msg (M_INFO, "%s", title_string);
 
 	CLEAR (usa);
 	CLEAR (ks);
 	clear_tuntap (&tuntap);
 	packet_id_persist_init (&pid_persist);
 	clear_route_list (&route_list);
+	CLEAR (http_proxy);
+	if (options.http_proxy_server)
+	  init_http_proxy (&http_proxy,
+			   options.http_proxy_server,
+			   options.http_proxy_port,
+			   options.http_proxy_retry,
+			   options.http_proxy_authfile);
 
 	do {
-	  if (!first_time)
-	    socket_restart_pause (options.proto);
-	  sig = openvpn (&options, &usa, &tuntap, &ks, &pid_persist, &route_list, first_time);
+	  sig = openvpn (&options, &usa, &tuntap, &ks, &pid_persist, &route_list, &http_proxy, first_time);
 	  first_time = false;
 	} while (sig == SIGUSR1);
       }
@@ -2909,7 +2955,11 @@ test_crypto_thread (void *arg)
   struct key_schedule ks;
   struct packet_id_persist pid_persist;
   struct route_list route_list;
+  struct http_proxy_info http_proxy;
   const struct options *opt = (struct options*) arg;
+
+  /* print version number */
+  msg (M_INFO, "%s", title_string);
 
   set_nice (opt->nice_work);
   CLEAR (usa);
@@ -2917,7 +2967,8 @@ test_crypto_thread (void *arg)
   clear_tuntap (&tuntap);
   packet_id_persist_init (&pid_persist);
   clear_route_list (&route_list);
-  openvpn (opt, &usa, &tuntap, &ks, &pid_persist, &route_list, false);
+  CLEAR (http_proxy);
+  openvpn (opt, &usa, &tuntap, &ks, &pid_persist, &route_list, &http_proxy, false);
   return NULL;
 }
 #endif

@@ -18,7 +18,17 @@ one of the most portable VPN packages today.
 What's new in 1.5-beta13
 ------------------------
 
-Most of the changes in this release involve
+The often-requested HTTP proxy feature
+has been added to allow OpenVPN to connect
+to its remote peer through an HTTP proxy
+using the HTTP CONNECT method (see the
+new --http-proxy option).  Basic authentication
+is supported as an option.
+
+The --redirect-gateway feature has been added
+which redirects all IP traffic into the tunnel.
+
+Many of the changes in this release involve
 minor additions to the crypto layer.
 
 The --secret and --tls-auth options now support
@@ -46,11 +56,11 @@ in TLS mode.
 A Certificate Revocation List capability has
 been added.
 
-None of the changes affect key file or protocol
-compatibility with previous releases, however
-all of the new crypto options (with the exception
-of --replay-window) require current versions
-of OpenVPN on both sides of the connection.
+None of the crypto changes affect key file or
+protocol compatibility with previous releases,
+however all of the new crypto options (with the
+exception of --replay-window) require current
+versions of OpenVPN on both sides of the connection.
 
 See Change Log for more details:
 

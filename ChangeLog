@@ -1,9 +1,11 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.63.2.5 2003/03/14 02:34:10 jimyonan Exp $
+$Id: ChangeLog,v 1.63.2.6 2003/03/22 16:20:16 jimyonan Exp $
 
 Upcoming Version 1.3.3
+
+Upcoming version 1.3.3
 
 * Added --replay-persist feature to allow replay
   protection across sessions.
@@ -44,6 +46,10 @@ Upcoming Version 1.3.3
   file for new CVS build commands.
 * Changed all internal _* symbols to x_*
   for C standards compliance.
+* Added TUN/TAP open code to cycle dynamically
+  through unit numbers until it finds a free
+  unit (based on code from Thomas Gielfeldt
+  and VTun).
 
 2002.10.23 -- Version 1.3.2
 

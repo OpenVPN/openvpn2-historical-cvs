@@ -30,10 +30,8 @@
   if (options->comp_lzo)
     lzo_compress (&buf, lzo_compress_buf, &lzo_compwork, &frame, current);
 #endif
-#ifdef FRAGMENT_ENABLE
   if (fragment)
     fragment_outgoing (fragment, &buf, &frame_fragment, current);
-#endif
 #endif
 
 #ifdef USE_CRYPTO

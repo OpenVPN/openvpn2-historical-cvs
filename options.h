@@ -91,9 +91,7 @@ struct options
   int mtu_discover_type; /* used if OS supports setting Path MTU discovery options on socket */
   bool mtu_test;
 
-#ifdef FRAGMENT_ENABLE
   int fragment;          /* internal fragmentation size */
-#endif
 
   bool mlock;
   int inactivity_timeout;
@@ -184,6 +182,9 @@ struct options
   bool test_crypto;
 
 #ifdef USE_SSL
+  /* dynamic forking server mode */
+  bool dynamic;
+
   /* TLS (control channel) parms */
   bool tls_server;
   bool tls_client;
@@ -219,6 +220,10 @@ struct options
 
   /* Allow only one session */
   bool single_session;
+
+#ifdef USE_PTHREAD
+  bool tls_thread;
+#endif
 
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */

@@ -487,6 +487,7 @@ signal_handler_exit (int signum)
  */
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 #define TLS_MODE (tls_multi != NULL)
+#define TLS_DYNAMIC (options->dynamic)
 #define PROTO_DUMP_FLAGS (check_debug_level (D_LINK_RW_VERBOSE) ? (PD_SHOW_DATA|PD_VERBOSE) : 0)
 #define PROTO_DUMP(buf) protocol_dump(buf, \
 				      PROTO_DUMP_FLAGS | \
@@ -495,6 +496,7 @@ signal_handler_exit (int signum)
 				      )
 #else
 #define TLS_MODE (false)
+#define TLS_DYNAMIC (false)
 #define PROTO_DUMP(buf) format_hex (BPTR (buf), BLEN (buf), 80)
 #endif
 
@@ -624,12 +626,10 @@ openvpn (const struct options *options,
   /* MTU frame parameters */
   struct frame frame;
 
-#ifdef FRAGMENT_ENABLE
   /* Object to handle advanced MTU negotiation and datagram fragmentation */
   struct fragment_master *fragment = NULL;
   struct frame frame_fragment;
   struct frame frame_fragment_omit;
-#endif
 
   /* Always set to current time. */
   time_t current;
@@ -704,13 +704,12 @@ openvpn (const struct options *options,
   /* did we open TLS thread? */
   bool thread_opened = false;
 
-#else
+#endif
 
   /* used to optimize calls to tls_multi_process
      in single-threaded mode */
   struct interval tmp_int;
 
-#endif
 #endif
 
   /* workspace buffers used by crypto routines */
@@ -794,9 +793,7 @@ openvpn (const struct options *options,
 
   CLEAR (frame);
 
-#ifdef FRAGMENT_ENABLE
   CLEAR (frame_fragment_omit);
-#endif
 
   /* should we disable paging? */
   if (first_time && options->mlock)
@@ -805,10 +802,8 @@ openvpn (const struct options *options,
   /*
    * Initialize advanced MTU negotiation and datagram fragmentation
    */
-#ifdef FRAGMENT_ENABLE
   if (options->fragment)
     fragment = fragment_init (&frame);
-#endif
 
 #ifdef USE_CRYPTO
   /* init PRNG used for IV generation */
@@ -893,7 +888,7 @@ openvpn (const struct options *options,
       if (options->test_crypto)
 	{
 #ifdef USE_PTHREAD
-	  if (first_time)
+	  if (first_time && options->tls_thread)
 	    {
 	      thread_init();
 	      work_thread_create(test_crypto_thread, (void*) options);
@@ -905,7 +900,7 @@ openvpn (const struct options *options,
 	  key_schedule_free (ks);
 	  signal_received = 0;
 #ifdef USE_PTHREAD
-	  if (first_time)
+	  if (first_time && options->tls_thread)
 	    work_thread_join ();
 #endif
 	  goto done;
@@ -1051,9 +1046,7 @@ openvpn (const struct options *options,
     {
       lzo_compress_init (&lzo_compwork, options->comp_lzo_adaptive);
       lzo_adjust_frame_parameters (&frame);
-#ifdef FRAGMENT_ENABLE
       lzo_adjust_frame_parameters (&frame_fragment_omit); /* omit LZO frame delta from final frame_fragment */
-#endif
     }
 #endif
 
@@ -1081,10 +1074,8 @@ openvpn (const struct options *options,
    * the fragmentation code deals with payloads which have already been
    * passed through the compression code.
    */
-#ifdef FRAGMENT_ENABLE
   frame_fragment = frame;
   frame_subtract_extra (&frame_fragment, &frame_fragment_omit);
-#endif
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   if (tls_multi)
@@ -1117,7 +1108,6 @@ openvpn (const struct options *options,
     }
 #endif
 
-#ifdef FRAGMENT_ENABLE
   /* fragmenting code has buffers to initialize
      once frame parameters are known */
   if (fragment)
@@ -1130,7 +1120,6 @@ openvpn (const struct options *options,
 			     );
       fragment_frame_init (fragment, &frame_fragment);
     }
-#endif
 
   /*
    * Set the dynamic MTU parameter, used by the --mssfix
@@ -1149,7 +1138,6 @@ openvpn (const struct options *options,
 	      SET_MTU_UPPER_BOUND
 	  );
 	}
-#ifdef FRAGMENT_ENABLE
       else if (fragment)
 	{
 	  frame_set_mtu_dynamic (
@@ -1158,7 +1146,6 @@ openvpn (const struct options *options,
 	      SET_MTU_UPPER_BOUND
 	  );
 	}
-#endif
     }
 
   /* bind the TCP/UDP socket */
@@ -1197,10 +1184,8 @@ openvpn (const struct options *options,
    * Print MTU INFO
    */
   frame_print (&frame, D_MTU_INFO, "Data Channel MTU parms");
-#ifdef FRAGMENT_ENABLE
   if (fragment)
     frame_print (&frame_fragment, D_MTU_INFO, "Fragmentation MTU parms");
-#endif
 
   /*
    * Get local and remote options compatibility strings.
@@ -1287,7 +1272,8 @@ openvpn (const struct options *options,
       write_pid (&pid_state);
 
       /* initialize threading if pthread configure option enabled */
-      thread_init();
+      if (options->tls_thread)
+	thread_init();
     }
 
   /* finalize the TCP/UDP socket */
@@ -1301,7 +1287,7 @@ openvpn (const struct options *options,
   
   /* start the TLS thread */
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-  if (tls_multi)
+  if (tls_multi && options->tls_thread)
     {
       tls_thread_create (&thread_parms, tls_multi, &link_socket,
 			 options->nice_work, options->mlock);
@@ -1358,7 +1344,14 @@ openvpn (const struct options *options,
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 #ifdef USE_PTHREAD
-  TLS_THREAD_SOCKET_SETMAXFD (thread_parms);
+  if (options->tls_thread)
+    {
+      TLS_THREAD_SOCKET_SETMAXFD (thread_parms);
+    }
+  else
+    {
+      interval_init (&tmp_int, TLS_MULTI_HORIZON, TLS_MULTI_REFRESH);
+    }
 #else
   /* initialize tmp_int optimization that limits the number of times we call
      tls_multi_process in the main event loop */
@@ -1388,7 +1381,7 @@ openvpn (const struct options *options,
       packet_id_persist_flush (pid_persist, current, 60);
 #endif
 
-#if defined(USE_CRYPTO) && defined(USE_SSL) && !defined(USE_PTHREAD)
+#if defined(USE_CRYPTO) && defined(USE_SSL)
       /*
        * In TLS mode, let TLS level respond to any control-channel
        * packets which were received, or prepare any packets for
@@ -1399,7 +1392,7 @@ openvpn (const struct options *options,
        * traffic on the control-channel.
        *
        */
-      if (tls_multi)
+      if (tls_multi && !options->tls_thread)
 	{
 	  interval_t wakeup = BIG_TIMEOUT;
 
@@ -1678,7 +1671,6 @@ openvpn (const struct options *options,
 	  occ_op = -1;
 	}
 
-#ifdef FRAGMENT_ENABLE
       /*
        * Should we deliver a datagram fragment to remote?
        */
@@ -1700,7 +1692,6 @@ openvpn (const struct options *options,
 	  fragment_housekeeping (fragment, &frame_fragment, current, &timeval);
 	  tv = &timeval;
 	}
-#endif /* FRAGMENT_ENABLE */
 
       /*
        * Should we ping the remote?
@@ -1775,15 +1766,14 @@ openvpn (const struct options *options,
 	  SOCKET_SET_WRITE (link_socket);
 #endif /* HAVE_GETTIMEOFDAY */
 	}
-#ifdef FRAGMENT_ENABLE
       else if (!fragment || !fragment_outgoing_defined (fragment))
-#else
-      else
-#endif
 	{
 	  TUNTAP_SET_READ (tuntap);
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-	  TLS_THREAD_SOCKET_SET (thread_parms, reads);
+	  if (options->tls_thread)
+	    {
+	      TLS_THREAD_SOCKET_SET (thread_parms, reads);
+	    }
 #endif
 	}
 
@@ -1950,6 +1940,40 @@ openvpn (const struct options *options,
 		  mutex_lock (L_TLS);
 		  if (tls_multi)
 		    {
+		      /* forking server mode? */
+		      if (options->dynamic)
+			{
+#if defined(HAVE_FORK) && 0
+			  if (tls_pre_decrypt_dynamic (tls_multi, &from, &buf, current))
+			    {
+			      pid_t child;
+			      child = fork ();
+			      if (child < 0)
+				{
+				  msg (M_WARN|M_ERRNO, "fork() failed");
+				  buf.len = 0;
+				}
+			      else
+				{
+				  if (child)
+				    {
+				      /* parent context */
+				      buf.len = 0;
+				    }
+				  else
+				    {
+				      /* child context */
+				      link_socket_post_fork (&link_socket, &from);
+				    }
+				}
+			    }
+			  else
+			    buf.len = 0;
+#else
+			  msg (M_FATAL, "ERROR: --dynamic cannot be used on an OS that lacks the fork() function");
+#endif
+			}
+
 		      /*
 		       * If tls_pre_decrypt returns true, it means the incoming
 		       * packet was a good TLS control channel packet.  If so, TLS code
@@ -1963,15 +1987,20 @@ openvpn (const struct options *options,
 		      if (tls_pre_decrypt (tls_multi, &from, &buf, &crypto_options, current))
 			{
 #ifdef USE_PTHREAD
-			  /* tell TLS thread a packet is waiting */
-			  if (tls_thread_process (&thread_parms) == -1)
+			  if (options->tls_thread)
 			    {
-			      msg (M_WARN, "TLS thread is not responding, exiting (1)");
-			      signal_received = 0;
-			      signal_text = "error";
-			      mutex_unlock (L_TLS);
-			      break;
+			      /* tell TLS thread a packet is waiting */
+			      if (tls_thread_process (&thread_parms) == -1)
+				{
+				  msg (M_WARN, "TLS thread is not responding, exiting (1)");
+				  signal_received = 0;
+				  signal_text = "error";
+				  mutex_unlock (L_TLS);
+				  break;
+				}
 			    }
+			  else
+			    interval_action (&tmp_int, current);
 #else
 			  interval_action (&tmp_int, current);
 #endif /* USE_PTHREAD */
@@ -1997,10 +2026,8 @@ openvpn (const struct options *options,
 		  mutex_unlock (L_TLS);
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
-#ifdef FRAGMENT_ENABLE
 		  if (fragment)
 		    fragment_incoming (fragment, &buf, &frame_fragment, current);
-#endif
 #ifdef USE_LZO
 		  /* decompress the incoming packet */
 		  if (options->comp_lzo)
@@ -2089,9 +2116,7 @@ openvpn (const struct options *options,
 				   max_send_size_remote,
 				   max_recv_size_local);
 			      if (!options->mssfix_defined
-#ifdef FRAGMENT_ENABLE
 				  && !options->fragment
-#endif
 				  && options->proto == PROTO_UDPv4
 				  && max_send_size_local > TUN_MTU_MIN
 				  && (max_recv_size_remote < max_send_size_local
@@ -2115,7 +2140,7 @@ openvpn (const struct options *options,
 
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
 	  /* Incoming data from TLS background thread */
-	  else if (TLS_THREAD_SOCKET_ISSET (thread_parms, reads))
+	  else if (options->tls_thread && TLS_THREAD_SOCKET_ISSET (thread_parms, reads))
 	    {
 	      int s;
 	      ASSERT (!to_link.len);
@@ -2548,10 +2573,8 @@ openvpn (const struct options *options,
   /*
    * Close fragmentation handler.
    */
-#ifdef FRAGMENT_ENABLE
   if (fragment)
     fragment_free (fragment);
-#endif
 
  done:
   /* pop our garbage collection level */
@@ -2793,10 +2816,8 @@ main (int argc, char *argv[])
        * Check that protocol options make sense.
        */
 
-#ifdef FRAGMENT_ENABLE
       if (options.proto != PROTO_UDPv4 && options.fragment)
 	msg (M_USAGE, "Options error: --fragment can only be used with --proto udp");
-#endif
       if (!options.remote && options.proto == PROTO_TCPv4_CLIENT)
 	msg (M_USAGE, "Options error: --remote MUST be used in TCP Client mode");
 
@@ -2871,6 +2892,7 @@ main (int argc, char *argv[])
 	  MUST_BE_UNDEF (single_session);
 	  MUST_BE_UNDEF (crl_file);
 	  MUST_BE_UNDEF (key_method);
+	  MUST_BE_UNDEF (dynamic);
 	}
 #undef MUST_BE_UNDEF
 #endif /* USE_CRYPTO */

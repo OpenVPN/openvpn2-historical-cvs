@@ -332,7 +332,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	    {
 	      if (!packet_id_read (&pin, &work, opt->packet_id_long_form))
 		CRYPT_ERROR ("error reading packet-id");
-	      have_pin = true;
+	      have_pin = !opt->ignore_packet_id;
 	    }
 	}
       

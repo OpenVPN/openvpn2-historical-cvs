@@ -152,11 +152,9 @@ static const char usage_message[] =
   "                  'maybe' -- Use per-route hints\n"
   "                  'yes'   -- Always DF (Don't Fragment)\n"
   "--mtu-test      : Empirically measure and report MTU.\n"
-#ifdef FRAGMENT_ENABLE
   "--fragment max  : Enable internal datagram fragmentation so that no UDP\n"
   "                  datagrams are sent which are larger than max bytes.\n"
   "                  Adds 4 bytes of overhead per datagram.\n"
-#endif
   "--mssfix [n]    : Set upper bound on TCP MSS, default = tun-mtu size\n"
   "                  or --fragment max value, whichever is lower.\n"
   "--mlock         : Disable Paging -- ensures key material and tunnel\n"
@@ -249,6 +247,9 @@ static const char usage_message[] =
   "(These options are meaningful only for TLS-mode)\n"
   "--tls-server    : Enable TLS and assume server role during TLS handshake.\n"
   "--tls-client    : Enable TLS and assume client role during TLS handshake.\n"
+  "--dynamic       : When used on a server, enter dynamic forking server mode.\n"
+  "                  When used on a client, indicates that we will be connecting\n"
+  "                  to a dynamic forking server.\n"
   "--key-method m  : Data channel key exchange method.  m should be a method\n"
   "                  number, such as 1 (default), 2, etc.\n"
   "--ca file       : Certificate authority file in .pem format containing\n"
@@ -435,9 +436,7 @@ show_settings (const struct options *o)
   SHOW_BOOL (link_mtu_defined);
   SHOW_INT (tun_mtu_extra);
   SHOW_BOOL (tun_mtu_extra_defined);
-#ifdef FRAGMENT_ENABLE
   SHOW_INT (fragment);
-#endif
   SHOW_INT (mtu_discover_type);
   SHOW_INT (mtu_test);
 
@@ -515,6 +514,7 @@ show_settings (const struct options *o)
   SHOW_BOOL (test_crypto);
 
 #ifdef USE_SSL
+  SHOW_BOOL (dynamic);
   SHOW_BOOL (tls_server);
   SHOW_BOOL (tls_client);
   SHOW_INT (key_method);
@@ -572,7 +572,7 @@ show_settings (const struct options *o)
  *                 the other end of the connection]
  *
  * --comp-lzo
- * --mtu-dynamic
+ * --fragment
  *
  * Crypto Options:
  *
@@ -622,10 +622,8 @@ options_string (const struct options *o,
     buf_printf (&out, ",comp-lzo");
 #endif
 
-#ifdef FRAGMENT_ENABLE
   if (o->fragment)
     buf_printf (&out, ",mtu-dynamic");
-#endif
 
 #ifdef USE_CRYPTO
 
@@ -678,6 +676,9 @@ options_string (const struct options *o,
    * SSL Options
    */
   {
+    if (o->dynamic)
+      buf_printf (&out, ",dynamic");
+
     if (o->tls_auth_file)
       buf_printf (&out, ",tls-auth");
 
@@ -1206,7 +1207,6 @@ add_option (struct options *options, int i, char *p[],
       options->tun_mtu_extra = positive (atoi (p[1]));
       options->tun_mtu_extra_defined = true;
     }
-#ifdef FRAGMENT_ENABLE
   else if (streq (p[0], "mtu-dynamic"))
     {
       msg (M_USAGE, "--mtu-dynamic has been replaced by --fragment");
@@ -1216,7 +1216,6 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       options->fragment = positive (atoi (p[1]));
     }
-#endif
   else if (streq (p[0], "mtu-disc") && p[1])
     {
       ++i;
@@ -1583,6 +1582,10 @@ add_option (struct options *options, int i, char *p[],
     }
 #endif
 #ifdef USE_SSL
+  else if (streq (p[0], "dynamic"))
+    {
+      options->dynamic = true;
+    }
   else if (streq (p[0], "show-tls"))
     {
       options->show_tls_ciphers = true;

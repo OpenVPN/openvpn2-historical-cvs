@@ -714,6 +714,28 @@ link_socket_init_phase2 (struct link_socket *sock,
   socket_frame_init (frame, sock);
 }
 
+#if 0
+/*
+ * Called on socket immediately after fork.
+ */
+void
+link_socket_post_fork (const struct link_socket *sock,
+		       const struct sockaddr_in *remote)
+{
+  if (sock->proto == PROTO_UDPv4)
+    {
+      const int status = connect (sock->sd, (struct sockaddr *) remote, sizeof (*remote));
+      if (status)
+	msg (M_SOCKERR, "ERROR: post-fork connect() on UDP socket failed");
+    }
+  else
+    {
+      // JYFIXME
+      ASSERT (0);
+    }
+}
+#endif
+
 /* for stream protocols, allow for packet length prefix */
 void
 socket_adjust_frame_parameters (struct frame *frame, int proto)

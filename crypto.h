@@ -240,6 +240,7 @@ struct crypto_options
   struct packet_id_persist *pid_persist;
   bool packet_id_long_form;
   bool use_iv;
+  bool ignore_packet_id;
 };
 
 void init_key_type (struct key_type *kt, const char *ciphername,

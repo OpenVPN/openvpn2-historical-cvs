@@ -89,6 +89,7 @@ struct pid_state {
 
 void get_pid_file (const char* filename, struct pid_state *state);
 void write_pid (const struct pid_state *state);
+int get_current_pid ();
 
 void do_mlockall (bool print_msg); /* Disable paging */
 

@@ -1330,9 +1330,9 @@ write_control_auth (struct tls_session *session,
  */
 static bool
 read_control_auth (struct buffer *buf,
-		   struct crypto_options *co,
-		   struct sockaddr_in *from,
-		   time_t current)
+		   const struct crypto_options *co,
+		   const struct sockaddr_in *from,
+		   const time_t current)
 {
   if (co->key_ctx_bi->decrypt.hmac)
     {
@@ -2696,8 +2696,10 @@ tls_pre_decrypt (struct tls_multi *multi,
 	  if (is_hard_reset (op, 0))
 	    {
 	      /* verify client -> server or server -> client connection */
-	      if (((op == P_CONTROL_HARD_RESET_CLIENT_V1 || op == P_CONTROL_HARD_RESET_CLIENT_V2) && !multi->opt.server) ||
-		  ((op == P_CONTROL_HARD_RESET_SERVER_V1 || op == P_CONTROL_HARD_RESET_SERVER_V2) && multi->opt.server))
+	      if (((op == P_CONTROL_HARD_RESET_CLIENT_V1
+		    || op == P_CONTROL_HARD_RESET_CLIENT_V2) && !multi->opt.server)
+		  || ((op == P_CONTROL_HARD_RESET_SERVER_V1
+		       || op == P_CONTROL_HARD_RESET_SERVER_V2) && multi->opt.server))
 		{
 		  msg (D_TLS_ERRORS,
 		       "TLS Error: client->client or server->server connection attempted from %s",
@@ -3003,6 +3005,105 @@ tls_pre_decrypt (struct tls_multi *multi,
  error:
   ++multi->n_errors;
   goto done;
+}
+
+/*
+ * This function is similar to tls_pre_decrypt, except it is called
+ * when we are in forking server mode.  Note that we don't modify
+ * any state in our parameter objects.  The purpose is solely to
+ * determine whether we should fork, in which case true is returned.
+ */
+bool
+tls_pre_decrypt_dynamic (const struct tls_multi *multi,
+			 const struct sockaddr_in *from,
+			 const struct buffer *buf,
+			 time_t current)
+{
+  bool ret = false;
+
+  if (buf->len > 0)
+    {
+      int op;
+      int key_id;
+
+      /* get opcode and key ID */
+      {
+	uint8_t c = *BPTR (buf);
+	op = c >> P_OPCODE_SHIFT;
+	key_id = c & P_KEY_ID_MASK;
+      }
+
+      /* this packet is from an as-yet untrusted source, so
+	 scrutinize carefully */
+
+      if (op != P_CONTROL_HARD_RESET_CLIENT_V2)
+	{
+	  msg (D_TLS_ERRORS,
+	       "TLS Error: Unknown opcode (%d) received from %s -- make sure the connecting client is using the --dynamic option",
+	       op,
+	       print_sockaddr (from));
+	  goto error;
+	}
+
+      if (key_id != 0)
+	{
+	  msg (D_TLS_ERRORS,
+	       "TLS Error: Unknown key ID (%d) received from %s -- 0 was expected",
+	       key_id,
+	       print_sockaddr (from));
+	  goto error;
+	}
+
+      if (buf->len > EXPANDED_SIZE_DYNAMIC (&multi->opt.frame))
+	{
+	  msg (D_TLS_ERRORS,
+	       "TLS Error: Large packet (size %d) received from %s -- a packet no larger than %d bytes was expected",
+	       buf->len,
+	       print_sockaddr (from),
+	       EXPANDED_SIZE_DYNAMIC (&multi->opt.frame));
+	  goto error;
+	}
+
+      {
+	struct buffer newbuf = clone_buf (buf);
+	const struct tls_session *session = &multi->session[TM_UNTRUSTED];
+	struct crypto_options co = session->tls_auth;
+	bool status;
+
+	/*
+	 * We are in read-only mode at this point with respect to TLS
+	 * control channel state.  After we fork, we will process this
+	 * session-initiating packet for real.
+	 */
+	co.ignore_packet_id = true;
+
+	/* HMAC test, if --tls-auth was specified */
+	status = read_control_auth (&newbuf, &co, from, current);
+	free_buf (&newbuf);
+	if (!status)
+	  goto error;
+
+	/*
+	 * At this point, if --tls-auth is being used, we know that
+	 * the packet has passed the HMAC test, but we don't know if
+	 * it is a replay yet.  We will attempt to defeat replays
+	 * by not advancing to the S_START state until we
+	 * receive an ACK from our first reply to the client
+	 * that includes an HMAC of our randomly generated 64 bit
+	 * session ID.
+	 *
+	 * On the other hand if --tls-auth is not being used, we
+	 * will fork and proceed to begin the TLS authentication
+	 * handshake with only cursory integrity checks having
+	 * been performed, since we will be leaving the task
+	 * of authentication solely up to TLS.
+	 */
+
+	ret = true;
+      }
+    }
+ error:
+  return ret;
 }
 
 /* Choose the key with which to encrypt a data packet */

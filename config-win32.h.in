@@ -45,8 +45,6 @@
 typedef unsigned int in_addr_t;
 typedef unsigned int ssize_t;
 
-#define FRAGMENT_ENABLE
-
 /* Define to 1 if you have the `chdir' function. */
 #define HAVE_CHDIR 1
 

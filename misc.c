@@ -249,10 +249,21 @@ write_pid (const struct pid_state *state)
   if (state->filename && state->fp)
     {
       const pid_t pid = getpid (); 
-      fprintf(state->fp, "%d\n", pid);
+      fprintf(state->fp, "%d\n", (int)pid);
       if (fclose (state->fp))
 	msg (M_ERR, "Close error on pid file %s", state->filename);
     }
+#endif
+}
+
+/* Get current PID */
+int
+get_current_pid ()
+{
+#ifdef HAVE_GETPID
+  return (int) getpid ();
+#else
+  return 0;
 #endif
 }
 

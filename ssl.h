@@ -415,6 +415,11 @@ bool tls_pre_decrypt (struct tls_multi *multi,
 		      struct crypto_options *opt,
 		      time_t current);
 
+bool tls_pre_decrypt_dynamic (const struct tls_multi *multi,
+			      const struct sockaddr_in *from,
+			      const struct buffer *buf,
+			      time_t current);
+
 void tls_pre_encrypt (struct tls_multi *multi,
 		      struct buffer *buf, struct crypto_options *opt);
 

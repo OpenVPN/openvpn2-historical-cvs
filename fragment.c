@@ -29,8 +29,6 @@
 #include "config.h"
 #endif
 
-#ifdef FRAGMENT_ENABLE
-
 #include "syshead.h"
 #include "misc.h"
 #include "fragment.h"
@@ -405,7 +403,3 @@ fragment_wakeup (struct fragment_master *f, struct frame *frame, time_t current)
   /* delete fragments with expired TTLs */
   fragment_ttl_reap (f, current);
 }
-
-#else
-static void dummy(void) {}
-#endif /* FRAGMENT_ENABLE */

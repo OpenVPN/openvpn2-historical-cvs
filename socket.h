@@ -199,6 +199,9 @@ void link_socket_init_phase2 (struct link_socket *sock,
 			      const struct frame *frame,
 			      volatile int *signal_received);
 
+void link_socket_post_fork (const struct link_socket *sock,
+			    const struct sockaddr_in *remote);
+
 void socket_adjust_frame_parameters (struct frame *frame, int proto);
 
 void frame_adjust_path_mtu (struct frame *frame, int pmtu, int proto);

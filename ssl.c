@@ -116,7 +116,7 @@ bio_debug_oc (const char *mode, BIO *bio)
 void
 tls_adjust_frame_parameters(struct frame *frame)
 {
-  frame->extra_frame += 1; /* space for opcode */
+  frame_add_to_extra_frame (frame, 1); /* space for opcode */
 }
 
 /*
@@ -133,22 +133,11 @@ tls_init_control_channel_frame_parameters(const struct frame *data_channel_frame
    */
 
   /* set extra_frame */
-  tls_adjust_frame_parameters(frame);
-  reliable_ack_adjust_frame_parameters(frame, CONTROL_SEND_ACK_MAX);
-  frame->extra_frame += SID_SIZE;
-  frame->extra_frame += sizeof (packet_id_type);
-
-  /* finalize parameters based on data_channel_frame */
-  frame->mtu = EXPANDED_SIZE (data_channel_frame) - frame->extra_frame;
-  frame->extra_buffer += frame->extra_frame;
-
-  /* finalize dynamic parameters */
-  {
-    const int mtu_delta = frame->mtu - data_channel_frame->mtu;
-    frame->mtu_dynamic = data_channel_frame->mtu_dynamic + mtu_delta;
-    frame->mtu_dynamic_min = data_channel_frame->mtu_dynamic_min + mtu_delta;
-    frame->mtu_dynamic_max = data_channel_frame->mtu_dynamic_max + mtu_delta;
-  }
+  tls_adjust_frame_parameters (frame);
+  reliable_ack_adjust_frame_parameters (frame, CONTROL_SEND_ACK_MAX);
+  frame_add_to_extra_frame (frame, SID_SIZE + sizeof (packet_id_type));
+  frame_set_mtu_dynamic (frame, MTU_SET_TO_MIN);
+  frame_finalize_derivative (frame, data_channel_frame);
 }
 
 void
@@ -1148,7 +1137,7 @@ static bool transmit_rate_limiter(struct tls_session* session, time_t* wakeup, t
   const int estimated_bytes = 20000;
 
   /* worst-case estimated finish at this rate */
-  time_t finish = current + ((freq * estimated_bytes) / PAYLOAD_SIZE_MIN (&session->opt->frame));
+  time_t finish = current + ((freq * estimated_bytes) / PAYLOAD_SIZE (&session->opt->frame));
 
   if (check_debug_level (D_TLS_DEBUG))
     {
@@ -1466,7 +1455,7 @@ tls_process (struct tls_multi *multi,
 	      int status;
 
 	      ASSERT (buf_init (buf, EXTRA_FRAME (&multi->opt.frame)));
-	      status = key_state_read_plaintext (ks, buf, PAYLOAD_SIZE_MIN (&multi->opt.frame));
+	      status = key_state_read_plaintext (ks, buf, PAYLOAD_SIZE (&multi->opt.frame));
 	      current = time (NULL);
 	      if (status == -1)
 		{
@@ -1575,7 +1564,7 @@ tls_process (struct tls_multi *multi,
 	      buf = reliable_get_buf (&ks->send_reliable);
 	      if (buf)
 		{
-		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE_MIN (&multi->opt.frame));
+		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE (&multi->opt.frame));
 		  if (status == -1)
 		    {
 		      msg (D_TLS_ERRORS,

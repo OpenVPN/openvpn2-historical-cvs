@@ -152,7 +152,7 @@ error:
 void
 reliable_ack_adjust_frame_parameters (struct frame* frame, int max)
 {
-  frame->extra_frame += ACK_SIZE (max);
+  frame_add_to_extra_frame (frame, ACK_SIZE (max));
 }
 
 /* print a reliable ACK record coming off the wire */

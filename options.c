@@ -250,8 +250,8 @@ init_options (struct options *o)
   o->local_port = o->remote_port = 5000;
   o->verbosity = 1;
   o->bind_local = true;
-  o->tun_mtu = DEFAULT_TUN_MTU;
-  o->udp_mtu = DEFAULT_UDP_MTU;
+  o->tun_mtu = TUN_MTU_DEFAULT;
+  o->udp_mtu = UDP_MTU_DEFAULT;
   o->mtu_discover_type = -1;
   o->mtu_icmp = true;
 #ifdef USE_LZO

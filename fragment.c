@@ -80,7 +80,7 @@ fragment_init (struct frame *frame)
   ret = (struct fragment_master *) malloc (sizeof (struct fragment_master));
   ASSERT (ret);
   CLEAR (*ret); /* code that initializes other parts of fragment_master assume an initial CLEAR */
-  frame->extra_frame += sizeof(fragment_header_type);
+  frame_add_to_extra_frame (frame, sizeof(fragment_header_type));
 
   /*
    * Outgoing sequence ID is randomized to reduce the probability of sequence number collisions

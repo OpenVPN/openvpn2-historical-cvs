@@ -336,10 +336,12 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	      packet_id_add (&opt->packet_id->rec, &pin);
 	      if (opt->pid_persist && opt->packet_id_long_form)
 		packet_id_persist_save_obj (opt->pid_persist, opt->packet_id);
-	    } else {
+	    }
+	  else
+	    {
 	      msg (D_CRYPT_ERRORS, "%s: bad packet ID (may be a replay): %s", error_prefix, packet_id_net_print (&pin));
 	      goto error_exit;
-	  }
+	    }
 	}
       *buf = work;
     }
@@ -362,11 +364,11 @@ crypto_adjust_frame_parameters(struct frame *frame,
 			       bool packet_id,
 			       bool packet_id_long_form)
 {
-  frame->extra_frame +=
-    (packet_id ? packet_id_size (packet_id_long_form) : 0) +
-    ((cipher_defined && iv) ? EVP_CIPHER_iv_length (kt->cipher) : 0) +
-    (cipher_defined ? EVP_CIPHER_block_size(kt->cipher) : 0) + /* worst case padding expansion */
-    kt->hmac_length;
+  frame_add_to_extra_frame (frame,
+			    (packet_id ? packet_id_size (packet_id_long_form) : 0) +
+			    ((cipher_defined && iv) ? EVP_CIPHER_iv_length (kt->cipher) : 0) +
+			    (cipher_defined ? EVP_CIPHER_block_size (kt->cipher) : 0) + /* worst case padding expansion */
+			    kt->hmac_length);
 }
 
 static const EVP_CIPHER *
@@ -718,7 +720,7 @@ void
 test_crypto (const struct crypto_options *co, struct frame* frame)
 {
   int i, j;
-  struct buffer src = alloc_buf_gc (MTU_SIZE (frame));
+  struct buffer src = alloc_buf_gc (TUN_MTU_SIZE (frame));
   struct buffer work = alloc_buf_gc (BUF_SIZE (frame));
   struct buffer encrypt_workspace = alloc_buf_gc (BUF_SIZE (frame));
   struct buffer decrypt_workspace = alloc_buf_gc (BUF_SIZE (frame));
@@ -728,7 +730,7 @@ test_crypto (const struct crypto_options *co, struct frame* frame)
   ASSERT (buf_init (&work, EXTRA_FRAME (frame)));
 
   msg (M_INFO, "Entering OpenVPN crypto self-test mode.");
-  for (i = 1; i <= MTU_SIZE (frame); ++i)
+  for (i = 1; i <= TUN_MTU_SIZE (frame); ++i)
     {
       const time_t current = time (NULL);
       uint8_t iv_save[EVP_MAX_IV_LENGTH];

@@ -81,62 +81,6 @@ signal_handler_exit (int signum)
 #define PROTO_DUMP(buf) format_hex (BPTR (buf), BLEN (buf), 80)
 #endif
 
-static void print_frame_parms(int level, const struct frame *frame, const char* prefix)
-{
-  msg (level, "%s: mtu=%d mtu_dynamic=[%d,%d,%d] extra_frame=%d extra_buffer=%d extra_tun=%d",
-       prefix,
-       frame->mtu,
-       frame->mtu_dynamic_min, frame->mtu_dynamic, frame->mtu_dynamic_max,
-       frame->extra_frame,
-       frame->extra_buffer,
-       frame->extra_tun);
-}
-
-/*
- * Finish initialization of the frame MTU parameters
- * based on command line options and buffering requirements.
- */
-static void
-frame_finalize(struct frame *frame, const struct options *options)
-{
-  if (options->tun_mtu_defined)
-    {
-      frame->mtu = options->tun_mtu;
-    }
-  else
-    {
-      ASSERT (options->udp_mtu_defined);
-      frame->mtu = options->udp_mtu - frame->extra_frame - options->tun_mtu_extra;
-    }
-
-  if (frame->mtu < MIN_TUN_MTU)
-    {
-      msg (M_WARN, "TUN MTU value must be at least %d", MIN_TUN_MTU);
-      print_frame_parms (M_FATAL, frame, "MTU is too small");
-    }
-
-  frame->extra_buffer += frame->extra_frame + frame->extra_tun;
-
-  /*
-   * Set dynamic MTU min and max.
-   */
-  if (options->mtu_min_defined)
-    frame->mtu_dynamic_min = options->mtu_min - TUN_UDP_DELTA(frame);
-  if (frame->mtu_dynamic_min < MIN_TUN_MTU)
-    frame->mtu_dynamic_min = MIN_TUN_MTU;
-
-  if (options->mtu_max_defined)
-    frame->mtu_dynamic_max = options->mtu_max - TUN_UDP_DELTA(frame);
-  if (!frame->mtu_dynamic_max || frame->mtu_dynamic_max > frame->mtu)
-    frame->mtu_dynamic_max = frame->mtu;
-
-  if (frame->mtu_dynamic_min > frame->mtu_dynamic_max)
-    print_frame_parms (M_FATAL, frame, "Dynamic MTU min is larger than dynamic MTU max");
-
-  /* Set initial dynamic MTU to min. */
-  frame->mtu_dynamic = frame->mtu_dynamic_min;
-}
-
 #if defined(USE_PTHREAD) && defined(USE_CRYPTO)
 static void *test_crypto_thread (void *arg);
 #endif
@@ -188,6 +132,24 @@ key_schedule_free(struct key_schedule* ks)
 struct packet_id_persist {};
 static inline void packet_id_persist_init (struct packet_id_persist *p) {}
 #endif
+
+/*
+ * Finalize MTU parameters based on command line or config file options.
+ */
+static void
+frame_finalize_options (struct frame *frame, const struct options *options)
+{
+
+  frame_finalize (frame,
+		  options->udp_mtu_defined,
+		  options->udp_mtu,
+		  options->tun_mtu_defined,
+		  options->tun_mtu,
+		  options->mtu_min_defined,
+		  options->mtu_min,
+		  options->mtu_max_defined,
+		  options->mtu_max);
+}
 
 /*
  * Do the work.  Initialize and enter main event loop.
@@ -247,6 +209,8 @@ openvpn (const struct options *options,
 
   /* Object to handle advanced MTU negotiation and datagram fragmentation */
   struct fragment_master *fragment = NULL;
+  struct frame frame_fragment;
+  struct frame frame_fragment_omit;
 
   /* Always set to current time. */
   time_t current;
@@ -364,6 +328,7 @@ openvpn (const struct options *options,
 
   CLEAR (udp_socket);
   CLEAR (frame);
+  CLEAR (frame_fragment_omit);
 
   if (first_time)
     {
@@ -489,7 +454,8 @@ openvpn (const struct options *options,
 	  if (first_time)
 	    work_thread_create(test_crypto_thread, (struct options*) options);
 #endif
-	  frame_finalize (&frame, options);
+	  frame_finalize_options (&frame, options);
+
 	  test_crypto (&crypto_options, &frame);
 	  key_schedule_free (ks);
 	  signal_received = 0;
@@ -625,6 +591,7 @@ openvpn (const struct options *options,
     {
       lzo_compress_init (&lzo_compwork, options->comp_lzo_adaptive);
       lzo_adjust_frame_parameters (&frame);
+      lzo_adjust_frame_parameters (&frame_fragment_omit); /* omit LZO frame delta from final frame_fragment */
     }
 #endif
 
@@ -637,9 +604,20 @@ openvpn (const struct options *options,
    * Fill in the blanks in the frame parameters structure,
    * make sure values are rational, etc.
    */
-  frame_finalize (&frame, options);
+  frame_finalize_options (&frame, options);
+
+  /*
+   * Set frame parameter for fragment code.  This is necessary because
+   * the fragmentation code deals with payloads which have already been
+   * passed through the compression code.
+   */
+  frame_fragment = frame;
+  frame_subtract_extra (&frame_fragment, &frame_fragment_omit);
+
   max_rw_size_udp = MAX_RW_SIZE_UDP (&frame);
-  print_frame_parms (D_SHOW_PARMS, &frame, "Data Channel MTU parms");
+  frame_print (&frame, D_SHOW_PARMS, "Data Channel MTU parms");
+  if (fragment)
+    frame_print (&frame_fragment, D_FRAG_DEBUG, "Fragmentation MTU parms");
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   if (tls_multi)
@@ -650,7 +628,7 @@ openvpn (const struct options *options,
       size = MAX_RW_SIZE_UDP (&tls_multi->opt.frame);
       if (size > max_rw_size_udp)
 	max_rw_size_udp = size;
-      print_frame_parms (D_SHOW_PARMS, &tls_multi->opt.frame, "Control Channel MTU parms");
+      frame_print (&tls_multi->opt.frame, D_SHOW_PARMS, "Control Channel MTU parms");
     }
 #endif
 
@@ -677,7 +655,7 @@ openvpn (const struct options *options,
 
   /* fragmenting code has buffers to initialize once frame parameters are known */
   if (fragment)
-    fragment_frame_init (fragment, &frame, (options->mtu_icmp && ipv4_tun));
+    fragment_frame_init (fragment, &frame_fragment, (options->mtu_icmp && ipv4_tun));
 
   if (!tuntap_defined (tuntap))
     {
@@ -685,7 +663,7 @@ openvpn (const struct options *options,
       if (ifconfig_order() == IFCONFIG_BEFORE_TUN_OPEN)
 	do_ifconfig (options->dev, options->dev_type,
 		     options->ifconfig_local, options->ifconfig_remote,
-		     MTU_SIZE (&frame));
+		     TUN_MTU_SIZE (&frame));
 
       /* open the tun device */
       open_tun (options->dev, options->dev_type, options->dev_node, options->dev_name, options->tun_ipv6, tuntap);
@@ -694,10 +672,10 @@ openvpn (const struct options *options,
       if (ifconfig_order() == IFCONFIG_AFTER_TUN_OPEN)
 	do_ifconfig (tuntap->actual, options->dev_type,
 		     options->ifconfig_local, options->ifconfig_remote,
-		     MTU_SIZE (&frame));
+		     TUN_MTU_SIZE (&frame));
 
       /* run the up script */
-      run_script (options->up_script, tuntap->actual, MTU_SIZE (&frame),
+      run_script (options->up_script, tuntap->actual, TUN_MTU_SIZE (&frame),
 		  max_rw_size_udp, options->ifconfig_local, options->ifconfig_remote);
     }
   else
@@ -880,16 +858,16 @@ openvpn (const struct options *options,
 	{
 	  if (ipv4_tun && udp_socket.mtu_changed)
 	    {
-	      frame_adjust_path_mtu (&frame, udp_socket.mtu);
+	      frame_adjust_path_mtu (&frame_fragment, udp_socket.mtu);
 	      udp_socket.mtu_changed = false;
 	    }
 	  fragment_housekeeping (fragment, current, &timeval);
 	  tv = &timeval;
-	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame, current))
+	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame_fragment, current))
 	    {
 	      to_tun = buf;
 	    }
-	  if (!to_udp.len && fragment_ready_to_send (fragment, &buf, &frame, current))
+	  if (!to_udp.len && fragment_ready_to_send (fragment, &buf, &frame_fragment, current))
 	    {
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
@@ -954,7 +932,7 @@ openvpn (const struct options *options,
 		    lzo_compress (&buf, lzo_compress_buf, &lzo_compwork, &frame, current);
 #endif
 		  if (fragment)
-		    fragment_outgoing (fragment, &buf, &frame, current);
+		    fragment_outgoing (fragment, &buf, &frame_fragment, current);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 		  mutex_lock (L_TLS);
@@ -1193,7 +1171,7 @@ openvpn (const struct options *options,
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
 		  if (fragment)
-		    fragment_incoming (fragment, &buf, &frame, current);
+		    fragment_incoming (fragment, &buf, &frame_fragment, current);
 #ifdef USE_LZO
 		  /* decompress the incoming packet */
 		  if (options->comp_lzo)
@@ -1306,7 +1284,7 @@ openvpn (const struct options *options,
 		    lzo_compress (&buf, lzo_compress_buf, &lzo_compwork, &frame, current);
 #endif
 		  if (fragment)
-		    fragment_outgoing (fragment, &buf, &frame, current);
+		    fragment_outgoing (fragment, &buf, &frame_fragment, current);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 		  /*
@@ -1562,7 +1540,7 @@ openvpn (const struct options *options,
 
       /* Run the down script -- note that it will run at reduced
 	 privilege if, for example, "--user nobody" was used. */
-      run_script (options->down_script, tuntap_actual, MTU_SIZE (&frame),
+      run_script (options->down_script, tuntap_actual, TUN_MTU_SIZE (&frame),
 		  max_rw_size_udp, options->ifconfig_local, options->ifconfig_remote);
     }
 
@@ -1741,7 +1719,7 @@ main (int argc, char *argv[])
        */
       if (options.tun_mtu_defined && options.udp_mtu_defined)
 	{
-	  msg (M_WARN, "Options error: only one of --tun-mtu or --udp-mtu may be defined (note that --ifconfig implies --udp-mtu %d)", DEFAULT_UDP_MTU);
+	  msg (M_WARN, "Options error: only one of --tun-mtu or --udp-mtu may be defined (note that --ifconfig implies --udp-mtu %d)", UDP_MTU_DEFAULT);
 	  usage_small ();
 	}
 

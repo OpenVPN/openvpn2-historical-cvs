@@ -75,7 +75,7 @@ tuntap_defined (const struct tuntap* tt)
 static inline void
 tun_adjust_frame_parameters (struct frame* frame, int size)
 {
-  frame->extra_tun += size;
+  frame_add_to_extra_tun (frame, size);
 }
 
 /*

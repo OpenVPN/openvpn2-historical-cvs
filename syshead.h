@@ -291,4 +291,14 @@
 #define OS_SPECIFIC_DIRSEP '/'
 #endif
 
+/*
+ * Define a boolean value based
+ * on Win32 status.
+ */
+#ifdef WIN32
+#define WIN32_0_1 1
+#else
+#define WIN32_0_1 0
+#endif
+
 #endif

@@ -393,7 +393,7 @@ netcmd_semaphore_close (void)
 void
 netcmd_semaphore_lock (void)
 {
-  const int timeout_seconds = 60;
+  const int timeout_seconds = 600;
   if (!semaphore_lock (&netcmd_semaphore, timeout_seconds * 1000))
     msg (M_FATAL, "Cannot lock net command semaphore"); 
 }

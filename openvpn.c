@@ -2267,7 +2267,7 @@ main (int argc, char *argv[])
 	const bool is_tap = is_dev_type (options.dev, options.dev_type, "tap");
 	if (!options.tun_mtu_defined && !options.link_mtu_defined)
 	  {
-	    if (is_tap)
+	    if (is_tap || WIN32_0_1)
 	      {
 		options.tun_mtu_defined = true;
 		options.tun_mtu = TAP_MTU_DEFAULT;

@@ -21,7 +21,9 @@ OpenVPN now supports the '--dev tun' option.
 The TAP-Win32 driver has been extended to allow tun
 device emulation.  This means that OpenVPN on
 Windows can now connect with OpenVPN running
-on any other platform.
+on any other platform.  For more information
+see the "Notes -- TAP vs. TUN devices" section
+below.
 
 A number of usability improvements have been
 made in this release.
@@ -707,7 +709,12 @@ Notes -- Ethernet bridging, with the bridge occurring
 on the Windows side.
 -----------------------------------------------------
 
-This configuration requires Windows XP or higher on the bridge side.
+This configuration requires Windows XP or higher on the
+bridge side.  To my knowledge, Windows 2000 does not
+support bridging, however a Windows 2000 machine can
+be a client on a bridged network, where the other
+end of the OpenVPN connection where the bridging is
+occurring is a Linux or Windows XP machine.
 
 * First make a TAP-Win32 adapter ("tap-bridge") without setting
   any TCP/IP properties.
@@ -880,7 +887,7 @@ both "tun or "tap" style devices.
 YOU CANNOT MIX --dev tun AND --dev tap ON DIFFERENT ENDS
 OF THE CONNECTION.  Use one or the other consistently.
 
-There is one caveat to be aware of when using "tun" style
+There are some caveats to be aware of when using "tun" style
 devices on Windows:  the --ifconfig endpoints chosen
 must be the two "middle" addresses in a 255.255.255.252
 subnet.
@@ -891,6 +898,27 @@ The command
 
 will show more information about how to choose VPN endpoints
 when --dev tun is used.
+
+The other caveat concerns MTU.  On most platforms, OpenVPN
+programatically sets the MTU of the tun or tap interface.
+Currently on Windows, the only way to change the TAP-Win32
+MTU is to go to the adapter advanced properties and do it
+manually.
+
+Because of this, the easiest choice is to leave the
+TAP-Win32 MTU setting at 1500 and tell OpenVPN on
+both sides of the connection to use an MTU of 1500 with
+the config option:
+
+  tun-mtu 1500
+
+If you then need to lower the MTU because of fragmentation
+or router problems, use something like
+
+  fragment 1300
+  mssfix
+
+to lower OpenVPN's tunnel carrier UDP packet size to 1300.
 
 Notes -- MTU
 ------------
@@ -916,13 +944,14 @@ Some notes:
 * The TAP-Win32 adapter MTU defaults to 1500 which is
   the required setting for ethernet bridging.
 
-* Using an MTU of 1500 can cause packet
-  fragmentation which is inefficient and can reduce
-  the performance of the VPN.
-
-* If you are running a routed rather than a bridged
-  tunnel, you may be able to increase performance by
-  reducing the MTU to 1400 or less.
+* For some time before the Windows port of OpenVPN
+  was completed, a default --link-mtu of 1300 has
+  been in place for "tun" interfaces.  Because the
+  Windows TAP-Win32 interface prefers an MTU of
+  1500, it is essential to not rely on the
+  default MTU value in this case, but to explicitly
+  include 'tun-mtu 1500' on both sides of the
+  connection.
 
 * The MTU on both sides of an OpenVPN connection must
   exactly match.  On non-windows systems, the MTU

@@ -61,9 +61,6 @@ const char title_string[] =
 #ifdef USE_PTHREAD
   " [PTHREAD]"
 #endif
-#ifdef FRAGMENT_ENABLE
-  " [MTU-DYNAMIC]"
-#endif
   " built on " __DATE__
 ;
 
@@ -279,6 +276,8 @@ static const char usage_message[] =
   "--ip-win32 method : When using --ifconfig on Windows, set TAP-Win32 adapter\n"
   "                    IP address using method = manual, netsh, ipapi, or\n"
   "                    dynamic (default = ipapi).\n"
+  "--tap-sleep n   : Sleep for n seconds after TAP adapter open before\n"
+  "                  attempting to set adapter properties.\n"
   "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n" 
   "--pause-exit    : When run from a console window, pause before exiting.\n"
 #endif
@@ -1387,6 +1386,11 @@ add_option (struct options *options, int i, char *p[],
 	  usage_small ();
 	}
 
+#if 1
+      if (index == IP_SET_DHCP)
+	msg (M_FATAL|M_NOPREFIX, "Sorry but '--ip-win32 dynamic' has not been implemented yet -- try one of the other three methods.");
+#endif
+
       options->tuntap_flags &= ~IP_SET_MASK;
       options->tuntap_flags |= (index & IP_SET_MASK);
     }
@@ -1394,6 +1398,16 @@ add_option (struct options *options, int i, char *p[],
     {
       show_tap_win32_adapters ();
       openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
+    }
+  else if (streq (p[0], "tap-sleep") && p[1])
+    {
+      int s;
+      ++i;
+      s = atoi (p[1]);
+      if (s < 0 || s >= 256)
+	msg (M_FATAL, "--tap-sleep parameter must be between 0 and 255");
+      options->tuntap_flags &= ~(TUNTAP_SLEEP_MASK << TUNTAP_SLEEP_SHIFT);
+      options->tuntap_flags |= (s << TUNTAP_SLEEP_SHIFT);
     }
   else if (streq (p[0], "show-valid-subnets"))
     {

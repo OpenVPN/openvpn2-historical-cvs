@@ -1,8 +1,16 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.16 2003/10/09 04:53:42 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.17 2003/10/10 12:49:35 jimyonan Exp $
 	
+2003.10.08 -- Version 1.5-beta11
+
+* Modified code in the Windows version which sets the IP address
+  and netmask of the TAP-Win32 adapter using the IP Helper API.
+  Most of the changes involve better error recovery when the
+  the IP Helper API returns an error status.  See the
+  manual page entry on --ip-win32 for more info.
+
 2003.10.08 -- Version 1.5-beta10
 
 * Added getpass() function for Windows version so that --askpass

@@ -1311,6 +1311,7 @@ openvpn (const struct options *options,
 		    {
 		      did_open_tun = do_open_tun (options, &frame, &link_socket, tuntap, route_list);
 		      TUNTAP_SETMAXFD(tuntap);
+		      current = time (NULL);
 		    }
 
 		  if (did_open_tun)
@@ -2113,9 +2114,12 @@ openvpn (const struct options *options,
 		    {
 		      struct buffer ipbuf = to_tun;
 
-		      /* possibly alter the TCP MSS */
 		      if (is_ipv4 (tuntap->type, &ipbuf))
-			  mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&frame)));
+			{
+			  /* possibly alter the TCP MSS */
+			  if (options->mssfix_defined)
+			    mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&frame)));
+			}
 		    }
 
 	      if (to_tun.len <= MAX_RW_SIZE_TUN(&frame))

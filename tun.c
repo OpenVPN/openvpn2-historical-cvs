@@ -1276,7 +1276,7 @@ tun_read_queue (struct tuntap *tt, int maxsize)
 	      ASSERT (SetEvent (tt->reads.overlapped.hEvent));
 	      tt->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      tt->reads.status = err;
-	      msg (D_WIN32_IO, "WIN32 I/O: TAP Read error [%d]: %s",
+	      msg (D_WIN32_IO, "WIN32 I/O: TAP Read error [%d] : %s",
 		   (int) len,
 		   strerror_win32 (status));
 	    }
@@ -1337,7 +1337,7 @@ tun_write_queue (struct tuntap *tt, struct buffer *buf)
 	      ASSERT (SetEvent (tt->writes.overlapped.hEvent));
 	      tt->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      tt->writes.status = err;
-	      msg (D_WIN32_IO, "WIN32 I/O: TAP Write error [%d]: %s",
+	      msg (D_WIN32_IO, "WIN32 I/O: TAP Write error [%d] : %s",
 		   BLEN (&tt->writes.buf),
 		   strerror_win32 (err));
 	    }
@@ -1758,43 +1758,102 @@ show_tap_win32_adapters (void)
 }
 
 /*
+ * Given an adapter index, return a pointer to the
+ * IP_ADAPTER_INFO structure for that adapter.
+ */
+static PIP_ADAPTER_INFO
+get_adapt_info (DWORD index)
+{
+  ULONG size = 0;
+  DWORD status;
+
+  if (index != ~0)
+    {
+      if ((status = GetAdaptersInfo (NULL, &size)) != ERROR_BUFFER_OVERFLOW)
+	{
+	  msg (M_INFO, "GetAdaptersInfo #1 failed [%u] (status=%u) : %s",
+	       (unsigned int)index,
+	       (unsigned int)status,
+	       strerror_win32 (status));
+	}
+      else
+	{
+	  PIP_ADAPTER_INFO pi = (PIP_ADAPTER_INFO) gc_malloc (size);
+	  ASSERT (pi);
+	  if ((status = GetAdaptersInfo (pi, &size)) != NO_ERROR)
+	    {
+	      msg (M_INFO, "GetAdaptersInfo #2 failed [%u] (status=%u) : %s",
+		   (unsigned int)index,
+		   (unsigned int)status,
+		   strerror_win32 (status));
+	      return NULL;
+	    }
+
+	  /* find index in the linked list */
+	  {
+	    PIP_ADAPTER_INFO a;
+	    for (a = pi; a != NULL; a = a->Next)
+	      {
+		if (a->Index == index)
+		  return a;
+	      }
+	  }
+	}
+    }
+  return NULL;
+}
+
+/*
+ * Given an adapter index, return whether the adapter
+ * is DHCP enabled (true) or fixed address (false).
+ */
+static bool
+dhcp_disabled (DWORD index)
+{
+  PIP_ADAPTER_INFO a = get_adapt_info (index);
+  if (a)
+    {
+      if (!a->DhcpEnabled)
+	return true;
+    }
+  return false;
+}
+
+/*
  * Delete all temporary address/netmask pairs which were added
  * to adapter (given by index) by previous calls to AddIPAddress.
  */
 static void
 delete_temp_addresses (DWORD index)
 {
-  PIP_ADAPTER_INFO pi;
-  PIP_ADAPTER_INFO a;
-  ULONG size = 0;
-
-  if (GetAdaptersInfo (NULL, &size) != ERROR_BUFFER_OVERFLOW)
-    msg (M_FATAL, "GetAdaptersInfo #1 failed");
-  pi = (PIP_ADAPTER_INFO) malloc (size);
-  ASSERT (pi);
-  if (GetAdaptersInfo (pi, &size) != NO_ERROR)
-    msg (M_FATAL, "GetAdaptersInfo #2 failed");
-
-  for (a = pi; a != NULL; a = a->Next)
+  PIP_ADAPTER_INFO a = get_adapt_info (index);
+  if (a)
     {
-      if (a->Index == index)
+      PIP_ADDR_STRING ip = &a->IpAddressList;
+      while (ip)
 	{
-	  PIP_ADDR_STRING ip = &a->IpAddressList;
-	  while (ip)
+	  DWORD status;
+	  const DWORD context = ip->Context;
+
+	  if ((status = DeleteIPAddress ((ULONG) context)) == NO_ERROR)
 	    {
-	      const DWORD context = ip->Context;
-	      if (DeleteIPAddress ((ULONG) context) == NO_ERROR)
-		{
-		  msg (M_INFO, "Successfully deleted previously set dynamic IP/netmask: %s/%s",
-		       ip->IpAddress.String,
-		       ip->IpMask.String);
-		}
-	      ip = ip->Next;
+	      msg (M_INFO, "Successfully deleted previously set dynamic IP/netmask: %s/%s",
+		   ip->IpAddress.String,
+		   ip->IpMask.String);
 	    }
+	  else
+	    {
+	      const char *empty = "0.0.0.0";
+	      if (strcmp (ip->IpAddress.String, empty)
+		  || strcmp (ip->IpMask.String, empty))
+		msg (M_INFO, "NOTE: could not delete previously set dynamic IP/netmask: %s/%s (status=%u)",
+		     ip->IpAddress.String,
+		     ip->IpMask.String,
+		     (unsigned int)status);
+	    }
+	  ip = ip->Next;
 	}
     }
-  
-  free (pi);
 }
 
 /*
@@ -1804,13 +1863,22 @@ static DWORD
 get_interface_index (const char *guid)
 {
   ULONG index;
+  DWORD status;
   wchar_t wbuf[256];
   snwprintf (wbuf, SIZE (wbuf), L"\\DEVICE\\TCPIP_%S", guid);
   wbuf [SIZE(wbuf) - 1] = 0;
-  if (GetAdapterIndex (wbuf, &index) != NO_ERROR)
-    return ~0;
+  if ((status = GetAdapterIndex (wbuf, &index)) != NO_ERROR)
+    {
+      msg (M_INFO, "NOTE: could not get adapter index for %S, status=%u : %s",
+	   wbuf,
+	   (unsigned int)status,
+	   strerror_win32 (status));
+      return ~0;
+    }
   else
-    return index;
+    {
+      return index;
+    }
 }
 
 void
@@ -1941,6 +2009,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	   );
     }
 
+#if 1
   /* set driver media status to 'connected' */
   {
     ULONG status = TRUE;
@@ -1949,9 +2018,17 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 			  &status, sizeof (status), &len, NULL))
       msg (M_WARN, "WARNING: The TAP-Win32 driver rejected a TAP_IOCTL_SET_MEDIA_STATUS DeviceIoControl call.");
   }
+#endif
 
-  /* give adapter time to get connected */
-  sleep (1);
+  /* possible wait for adapter to come up */
+  {
+    int s = ((tt->flags >> TUNTAP_SLEEP_SHIFT) & TUNTAP_SLEEP_MASK);
+    if (s)
+      {
+	msg (M_INFO, "Sleeping for %d seconds...", s);
+	sleep (s);
+      }
+  }
 
   /* possibly use IP Helper API to set IP address on adapter */
   {
@@ -1960,41 +2037,73 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
     /* flush arp cache */
     if (index != ~0)
       {
-	if (FlushIpNetTable (index) == NO_ERROR)
-	  msg (M_INFO, "Successful ARP Flush on interface %s", device_guid);
+	DWORD status;
+
+	if ((status = FlushIpNetTable (index)) == NO_ERROR)
+	  msg (M_INFO, "Successful ARP Flush on interface [%u] %s",
+	       (unsigned int)index,
+	       device_guid);
 	else
-	  msg (M_FATAL, "ERROR: FlushIpNetTable failed on interface %s", device_guid);
+	  msg (M_WARN, "NOTE: FlushIpNetTable failed on interface [%u] %s (status=%u) : %s",
+	       (unsigned int)index,
+	       device_guid,
+	       (unsigned int)status,
+	       strerror_win32 (status));
+      }
+
+    /*
+     * If the TAP-Win32 driver is masquerading as a DHCP server
+     * make sure the TCP/IP properties for the adapter are
+     * set correctly.
+     */
+    if (tt->did_ifconfig_setup && (tt->flags & IP_SET_MASK) == IP_SET_DHCP)
+      {
+	/* check dhcp enable status */
+	if (dhcp_disabled (index))
+	  msg (M_WARN, "WARNING: You have selected '--ip-win32 dynamic', which will not work unless the TAP-Win32 TCP/IP properties are set to 'Obtain an IP address automatically'");
       }
 
     if (tt->did_ifconfig_setup && (tt->flags & IP_SET_MASK) == IP_SET_IPAPI)
       {
+	DWORD status;
+	const char *error_suffix = "I am having trouble using the Windows 'IP helper API' to automatically set the IP address -- consider using other --ip-win32 methods (not 'ipapi')";
+
 	/* couldn't get adapter index */
 	if (index == ~0)
 	  {
-	    msg (M_FATAL, "ERROR: unable to get adapter index for interface %s", device_guid);
+	    msg (M_FATAL, "ERROR: unable to get adapter index for interface %s -- %s",
+		 device_guid,
+		 error_suffix);
 	  }
+
+	/* check dhcp enable status */
+	if (dhcp_disabled (index))
+	  msg (M_WARN, "NOTE: You have selected (explicitly or by default) '--ip-win32 ipapi', which has a better chance of working correctly if the TAP-Win32 TCP/IP properties are set to 'Obtain an IP address automatically'");
 
 	/* delete previously added IP addresses which were not
 	   correctly deleted */
 	delete_temp_addresses (index);
 
 	/* add a new IP address */
-	if (AddIPAddress (htonl(tt->local),
-			  htonl(tt->adapter_netmask),
-			  index,
-			  &tt->ipapi_context,
-			  &tt->ipapi_instance) == NO_ERROR)
+	if ((status = AddIPAddress (htonl(tt->local),
+				    htonl(tt->adapter_netmask),
+				    index,
+				    &tt->ipapi_context,
+				    &tt->ipapi_instance)) == NO_ERROR)
 	  msg (M_INFO, "Succeeded in adding a temporary IP/netmask of %s/%s to interface %s using the Win32 IP Helper API",
 	       print_in_addr_t (tt->local, false),
 	       print_in_addr_t (tt->adapter_netmask, false),
 	       device_guid
 	       );
 	else
-	  msg (M_FATAL, "ERROR: AddIPAddress %s/%s failed on interface %s, index=%u",
+	  msg (M_FATAL, "ERROR: AddIPAddress %s/%s failed on interface %s, index=%u, status=%u (windows error: '%s') -- %s",
 	       print_in_addr_t (tt->local, false),
 	       print_in_addr_t (tt->adapter_netmask, false),
 	       device_guid,
-	       (unsigned int) index);
+	       (unsigned int)index,
+	       (unsigned int)status,
+	       strerror_win32 (status),
+	       error_suffix);
 	tt->ipapi_context_defined = true;
       }
   }
@@ -2022,13 +2131,19 @@ tap_win32_getinfo (struct tuntap *tt)
 void
 close_tun (struct tuntap *tt)
 {
+#if 1
   if (tt->ipapi_context_defined)
     {
-      if (DeleteIPAddress (tt->ipapi_context) != NO_ERROR)
+      DWORD status;
+      if ((status = DeleteIPAddress (tt->ipapi_context)) != NO_ERROR)
 	{
-	  msg (M_WARN, "Warning: DeleteIPAddress[%u] failed on TAP-Win32 adapter", (unsigned int)tt->ipapi_context);
+	  msg (M_WARN, "Warning: DeleteIPAddress[%u] failed on TAP-Win32 adapter, status=%u : %s",
+	       (unsigned int)tt->ipapi_context,
+	       (unsigned int)status,
+	       strerror_win32 (status));
 	}
     }
+#endif
 
   if (tt->hand != NULL)
     {

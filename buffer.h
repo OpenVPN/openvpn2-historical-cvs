@@ -391,6 +391,24 @@ buf_read_u16 (struct buffer *buf)
   return ntohs (ret);
 }
 
+static inline uint32_t
+buf_read_u32 (struct buffer *buf, bool *good)
+{
+  uint32_t ret;
+  if (!buf_read (buf, &ret, sizeof (uint32_t)))
+    {
+      if (good)
+	*good = false;
+      return 0;
+    }
+  else
+    {
+      if (good)
+	*good = true;
+      return ntohl (ret);
+    }
+}
+
 static inline bool
 buf_string_match (struct buffer *src, const void *match, int size)
 {

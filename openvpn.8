@@ -2232,7 +2232,9 @@ TUN/TAP device
 .SS Windows-Specific Options:
 .TP
 .B --ip-win32 method
-When using --ifconfig on Windows, set the TAP-Win32 adapter
+When using
+.B --ifconfig
+on Windows, set the TAP-Win32 adapter
 IP address and netmask using
 .B method.
 
@@ -2253,7 +2255,10 @@ Windows XP but not Windows 2000.
 Set the IP address and netmask using the
 Windows IP Helper API (this is the default).  This approach
 does not have ideal semantics, though testing has indicated
-that it works well in practice.
+that it works well in practice.  If you use this option,
+it is best to leave the TCP/IP properties for the TAP-Win32
+adapter in their default state, i.e. "Obtain an IP address
+automatically."
 
 .B dynamic --
 This option is not yet implemented, and is reserved for

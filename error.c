@@ -432,7 +432,7 @@ openvpn_exit (int status)
 #ifdef WIN32
 
 const char *
-strerror_win32 (int errnum)
+strerror_win32 (DWORD errnum)
 {
   /*
    * This code can be omitted, though often the Windows
@@ -446,8 +446,7 @@ strerror_win32 (int errnum)
      * gets returned to user space.
      */
   case ERROR_GEN_FAILURE:
-    return "TAP-Win32 I/O failure (ERROR_GEN_FAILURE)";
-
+    return "General failure (ERROR_GEN_FAILURE)";
   case ERROR_IO_PENDING:
     return "I/O Operation in progress (ERROR_IO_PENDING)";
   case WSA_IO_INCOMPLETE:

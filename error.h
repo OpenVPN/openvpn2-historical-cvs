@@ -34,7 +34,7 @@
 # define openvpn_errno()         GetLastError()
 # define openvpn_errno_socket()  WSAGetLastError()
 # define openvpn_strerror(e)     strerror_win32(e)
-  const char *strerror_win32 (int errnum);
+  const char *strerror_win32 (DWORD errnum);
 #else
 # define openvpn_errno()         errno
 # define openvpn_errno_socket()  errno

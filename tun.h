@@ -124,6 +124,10 @@ struct tuntap
 
 #endif
 
+/*
+ * Function prototypes
+ */
+
 void clear_tuntap (struct tuntap *tuntap);
 
 void open_tun (const char *dev, const char *dev_type, const char *dev_node,
@@ -226,6 +230,9 @@ ifconfig_order(void)
 
 #define IP_SET_N           4
 #define IP_SET_MASK        3
+
+#define TUNTAP_SLEEP_SHIFT    2
+#define TUNTAP_SLEEP_MASK  0xFF
 
 int ascii2ipset (const char* name);
 const char *ipset2ascii (int index);

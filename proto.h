@@ -67,6 +67,7 @@ struct openvpn_iphdr {
 
   uint8_t    ttl;
 
+# define OPENVPN_IPPROTO_UDP 17 /* UDP protocol */
 # define OPENVPN_IPPROTO_TCP 6  /* TCP protocol */
   uint8_t    protocol;
 
@@ -74,6 +75,16 @@ struct openvpn_iphdr {
   uint32_t   saddr;
   uint32_t   daddr;
   /*The options start here. */
+};
+
+/*
+ * UDP header
+ */
+struct openvpn_udphdr {
+  uint16_t   source;
+  uint16_t   dest;
+  uint16_t   len;
+  uint16_t   check;
 };
 
 /*

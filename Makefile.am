@@ -46,7 +46,7 @@ openvpn_SOURCES = \
 	gremlin.c gremlin.h \
 	init.c init.h \
 	integer.h \
-        interval.h \
+        interval.c interval.h \
 	io.c io.h \
 	list.c list.h \
 	lzo.c lzo.h \

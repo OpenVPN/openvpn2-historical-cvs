@@ -82,6 +82,7 @@
 #define D_LOW                LOGLEV(4, 44, 0)        /* miscellaneous low-frequency debug info */
 #define D_DHCP_OPT           LOGLEV(4, 45, 0)        /* show DHCP options binary string */
 #define D_OSBUF              LOGLEV(4, 46, 0)        /* show socket/tun/tap buffer sizes */
+#define D_MBUF               LOGLEV(4, 47, 0)        /* mbuf.[ch] routines */
 
 #define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 
@@ -100,6 +101,7 @@
 #define D_MSS                LOGLEV(7, 70, M_DEBUG)  /* show MSS adjustments */
 #define D_COMP_LOW           LOGLEV(7, 70, M_DEBUG)  /* show adaptive compression state changes */
 #define D_REMOTE_LIST        LOGLEV(7, 70, M_DEBUG)  /* show --remote list */
+#define D_SETENV             LOGLEV(7, 70, M_DEBUG)  /* show environmental variable assignments */
 
 #define D_HANDSHAKE_VERBOSE  LOGLEV(8, 70, M_DEBUG)  /* show detailed description of each handshake */
 #define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* limited info from tls_session routines */

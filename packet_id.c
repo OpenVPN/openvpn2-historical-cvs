@@ -227,7 +227,62 @@ packet_id_test (const struct packet_id_rec *p,
     }
 }
 
-const char*
+/*
+ * Read/write a packet ID to/from the buffer.  Short form is sequence number
+ * only.  Long form is sequence number and timestamp.
+ */
+
+bool
+packet_id_read (struct packet_id_net *pin, struct buffer *buf, bool long_form)
+{
+  packet_id_type net_id;
+  net_time_t net_time;
+
+  pin->id = 0;
+  pin->time = 0;
+
+  if (!buf_read (buf, &net_id, sizeof (net_id)))
+    return false;
+  pin->id = ntohpid (net_id);
+  if (long_form)
+    {
+      if (!buf_read (buf, &net_time, sizeof (net_time)))
+	return false;
+      pin->time = ntohtime (net_time);
+    }
+  return true;
+}
+
+bool
+packet_id_write (const struct packet_id_net *pin, struct buffer *buf, bool long_form, bool prepend)
+{
+  packet_id_type net_id = htonpid (pin->id);
+  net_time_t net_time = htontime (pin->time);
+
+  if (prepend)
+    {
+      if (long_form)
+	{
+	  if (!buf_write_prepend (buf, &net_time, sizeof (net_time)))
+	    return false;
+	}
+      if (!buf_write_prepend (buf, &net_id, sizeof (net_id)))
+	return false;
+    }
+  else
+    {
+      if (!buf_write (buf, &net_id, sizeof (net_id)))
+	return false;
+      if (long_form)
+	{
+	  if (!buf_write (buf, &net_time, sizeof (net_time)))
+	    return false;
+	}
+    }
+  return true;
+}
+
+const char *
 packet_id_net_print (const struct packet_id_net *pin, bool print_timestamp, struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (256, gc);

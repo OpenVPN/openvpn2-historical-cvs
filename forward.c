@@ -144,6 +144,14 @@ check_incoming_control_channel_dowork (struct context *c)
 		  do_up (c, true, option_types_found); /* delay bringing tun/tap up until --push parms received from remote */
 		  event_timeout_clear (&c->c2.push_request_interval);
 		}
+	      else if (status == PUSH_MSG_REQUEST)
+		{
+		  //msg (D_PUSH, "PUSH: PUSH_MSG_REQUEST Replied");
+		}
+	      else if (status == PUSH_MSG_REQUEST_DEFERRED)
+		{
+		  //msg (D_PUSH, "PUSH: PUSH_MSG_REQUEST Deferred");
+		}
 	    }
 	  else
 	    {

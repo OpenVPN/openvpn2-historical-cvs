@@ -245,6 +245,14 @@ void packet_id_persist_load_obj (const struct packet_id_persist *p, struct packe
 const char *packet_id_persist_print (const struct packet_id_persist *p, struct gc_arena *gc);
 
 /*
+ * Read/write a packet ID to/from the buffer.  Short form is sequence number
+ * only.  Long form is sequence number and timestamp.
+ */
+
+bool packet_id_read (struct packet_id_net *pin, struct buffer *buf, bool long_form);
+bool packet_id_write (const struct packet_id_net *pin, struct buffer *buf, bool long_form, bool prepend);
+
+/*
  * Inline functions.
  */
 
@@ -302,61 +310,6 @@ packet_id_alloc_outgoing (struct packet_id_send *p, struct packet_id_net *pin, b
       pin->id = p->id = 1;
     }
   pin->time = p->time;
-}
-
-/*
- * Read/write a packet ID to/from the buffer.  Short form is sequence number
- * only.  Long form is sequence number and timestamp.
- */
-
-static inline bool
-packet_id_read (struct packet_id_net *pin, struct buffer *buf, bool long_form)
-{
-  packet_id_type net_id;
-  net_time_t net_time;
-
-  pin->id = 0;
-  pin->time = 0;
-
-  if (!buf_read (buf, &net_id, sizeof (net_id)))
-    return false;
-  pin->id = ntohpid (net_id);
-  if (long_form)
-    {
-      if (!buf_read (buf, &net_time, sizeof (net_time)))
-	return false;
-      pin->time = ntohtime (net_time);
-    }
-  return true;
-}
-
-static inline bool
-packet_id_write (const struct packet_id_net *pin, struct buffer *buf, bool long_form, bool prepend)
-{
-  packet_id_type net_id = htonpid (pin->id);
-  net_time_t net_time = htontime (pin->time);
-
-  if (prepend)
-    {
-      if (long_form)
-	{
-	  if (!buf_write_prepend (buf, &net_time, sizeof (net_time)))
-	    return false;
-	}
-      if (!buf_write_prepend (buf, &net_id, sizeof (net_id)))
-	return false;
-    }
-  else
-    {
-      if (!buf_write (buf, &net_id, sizeof (net_id)))
-	return false;
-      if (long_form)
-	{
-	  if (!buf_write (buf, &net_time, sizeof (net_time)))
-	    return false;
-	}
-    }
-  return true;
 }
 
 static inline bool

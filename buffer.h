@@ -59,6 +59,8 @@ struct gc_arena
 #define BSTR(buf)  ((char *)BPTR(buf))
 #define BCAP(buf)  (buf_forward_capacity (buf))
 
+void buf_clear (struct buffer *buf);
+
 struct buffer clear_buf (void);
 void free_buf (struct buffer *buf);
 
@@ -113,14 +115,6 @@ static inline bool
 buf_defined (struct buffer *buf)
 {
   return buf->data != NULL;
-}
-
-static inline void
-buf_clear (struct buffer *buf)
-{
-  memset (buf->data, 0, buf->capacity);
-  buf->len = 0;
-  buf->offset = 0;
 }
 
 static inline void

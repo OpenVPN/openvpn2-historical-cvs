@@ -1412,18 +1412,22 @@ See instructions below for installing the kernel driver.
 Notes -- Manual Install/Update/Uninstall of the TAP-Win32 kernel driver
 -----------------------------------------------------------------------
 
-This is best done using devcon.exe, a DDK sample which is distributed
+This is best done using tapinstall.exe, which is distributed
 with the self-installing form of OpenVPN on Windows.  Cd to the
 directory which contains OemWin2k.inf and tapdrvr.sys.
 
 To install:
-  devcon install OemWin2k.inf TAP
+  tapinstall install OemWin2k.inf TAP0801
 
 To update:
-  devcon update OemWin2k.inf TAP
+  tapinstall update OemWin2k.inf TAP0801
 
 To uninstall:
-  devcon remove TAP
+  tapinstall remove TAP0801
+
+Note that the TAP0801 is the hardware ID of the
+TAP-Win32 driver and may change with future
+releases.
 
 By installing multiple times, you will create
 additional TAP-Win32 adapter instances, which can

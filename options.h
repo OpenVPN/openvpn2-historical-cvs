@@ -64,6 +64,8 @@ struct options_pre_pull
 
   bool routes_defined;
   struct route_option_list routes;
+
+  int foreign_option_index;
 };
 
 #endif
@@ -231,6 +233,7 @@ struct options
   int virtual_hash_size;
   const char *client_connect_script;
   const char *client_disconnect_script;
+  const char *learn_address_script;
   const char *tmp_dir;
   const char *client_config_dir;
   int n_bcast_buf;
@@ -239,6 +242,7 @@ struct options
   in_addr_t push_ifconfig_local;
   in_addr_t push_ifconfig_remote_netmask;
   bool enable_c2c;
+  bool duplicate_cn;
   int cf_max;
   int cf_per;
 #endif
@@ -297,6 +301,9 @@ struct options
   bool single_session;
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
+
+  /* special state parms */
+  int foreign_option_index;
 };
 
 #define streq(x, y) (!strcmp((x), (y)))
@@ -327,8 +334,10 @@ struct options
 
 #if P2MP
 #define PULL_DEFINED(opt) ((opt)->pull)
+#define PUSH_DEFINED(opt) ((opt)->push_list)
 #else
 #define PULL_DEFINED(opt) (false)
+#define PUSH_DEFINED(opt) (false)
 #endif
 
 #ifdef HAVE_GETTIMEOFDAY
@@ -360,7 +369,7 @@ const char *options_string_version (const char* s, struct gc_arena *gc);
 
 char *options_string (const struct options *o,
 		      const struct frame *frame,
-		      const struct tuntap *tt,
+		      struct tuntap *tt,
 		      bool remote,
 		      struct gc_arena *gc);
 

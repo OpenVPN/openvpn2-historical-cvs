@@ -512,9 +512,8 @@ stream_buf_read_setup (struct link_socket* sock)
  * Socket Read Routines
  */
 
-int
-link_socket_read_tcp (struct link_socket *sock,
-		      struct buffer *buf);
+int link_socket_read_tcp (struct link_socket *sock,
+			  struct buffer *buf);
 
 #ifdef WIN32
 
@@ -528,21 +527,10 @@ link_socket_read_udp_win32 (struct link_socket *sock,
 
 #else
 
-static inline int
-link_socket_read_udp_posix (struct link_socket *sock,
-			    struct buffer *buf,
-			    int maxsize,
-			    struct sockaddr_in *from)
-{
-  socklen_t fromlen = sizeof (*from);
-  CLEAR (*from);
-  ASSERT (buf_safe (buf, maxsize));
-  buf->len = recvfrom (sock->sd, BPTR (buf), maxsize, 0,
-		       (struct sockaddr *) from, &fromlen);
-  if (fromlen != sizeof (*from))
-    bad_address_length (fromlen, sizeof (*from));
-  return buf->len;
-}
+int link_socket_read_udp_posix (struct link_socket *sock,
+				struct buffer *buf,
+				int maxsize,
+				struct sockaddr_in *from);
 
 #endif
 
@@ -581,8 +569,9 @@ link_socket_read (struct link_socket *sock,
  * Socket Write routines
  */
 
-int link_socket_read_tcp (struct link_socket *sock,
-			  struct buffer *buf);
+int link_socket_write_tcp (struct link_socket *sock,
+			   struct buffer *buf,
+			   struct sockaddr_in *to);
 
 #ifdef WIN32
 
@@ -640,23 +629,6 @@ link_socket_write_udp (struct link_socket *sock,
   return link_socket_write_win32 (sock, buf, to);
 #else
   return link_socket_write_udp_posix (sock, buf, to);
-#endif
-}
-
-static inline int
-link_socket_write_tcp (struct link_socket *sock,
-		       struct buffer *buf,
-		       struct sockaddr_in *to)
-{
-  packet_size_type len = BLEN (buf);
-  msg (D_STREAM_DEBUG, "STREAM: WRITE %d offset=%d", (int)len, buf->offset);
-  ASSERT (len <= sock->stream_buf.maxlen);
-  len = htonps (len);
-  ASSERT (buf_write_prepend (buf, &len, sizeof (len)));
-#ifdef WIN32
-  return link_socket_write_win32 (sock, buf, to);
-#else
-  return link_socket_write_tcp_posix (sock, buf, to);  
 #endif
 }
 

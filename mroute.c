@@ -42,6 +42,12 @@
 
 static const uint8_t ethernet_bcast_addr[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
+void
+mroute_addr_init (struct mroute_addr *addr)
+{
+  CLEAR (*addr);
+}
+
 /*
  * Don't learn certain addresses.
  */

@@ -1848,6 +1848,11 @@ client will only see the server.  Don't use this option
 if you want to firewall tunnel traffic using
 custom, per-client rules.
 .TP
+.B --duplicate-cn
+Allow multiple clients with the same common name to concurrently connect.
+In the absence of this option, OpenVPN will disconnect a client instance
+upon connection of a new client having the same common name.
+.TP
 .B --client-connect script
 Run
 .B script
@@ -1918,6 +1923,41 @@ will ultimately fail to authenticate.
 
 This is an imperfect solution however, because in a real
 DoS scenario, legitimate connections might also be refused.
+.TP
+.B --learn-address cmd
+Run script or shell command
+.B cmd
+to validate client virtual addresses.
+
+.B cmd
+will be executed with 3 parameters:
+
+.B [1] operation --
+"add", "update", or "delete" based on whether or not
+the address is being added to, modified, or deleted from
+OpenVPN's internal routing table.
+.br
+.B [2] address --
+The address being learned or unlearned.  This can be
+an IPv4 address such as "198.162.10.14", an IPv4 subnet
+such as "198.162.10.0/24", or an ethernet MAC address (when
+.B --dev tap
+is being used) such as "00:FF:01:02:03:04".
+.br
+.B [3] common name --
+The common name on the certificate associated with the
+client linked to this address.  Only present for "add"
+or "update" operations, not "delete".
+
+Normally, the
+.B cmd
+script will use the information provided above to set
+appropriate firewall entries on the VPN tun/tap interface.
+Since OpenVPN provides the association between virtual IP
+or MAC address and the client's authenticated common name,
+it allows a user-defined script to configure firewall access
+policies with regard to the client's high-level common name,
+rather than the low level client virtual addresses.
 .SS Data Channel Encryption Options:
 These options are meaningful for both Static & TLS-negotiated key modes
 (must be compatible between peers).
@@ -2856,7 +2896,15 @@ name. The NetBIOS scope ID on two hosts must match, or the two hosts
 will not be able to communicate. The NetBIOS Scope ID also allows
 computers to use the same computer name, as they have different
 scope IDs. The Scope ID becomes a part of the NetBIOS name, making the name unique.
-(This description of NetBIOS scopes courtesy of NeonSurge@abyss.com)  
+(This description of NetBIOS scopes courtesy of NeonSurge@abyss.com)
+
+Note that if
+.B --dhcp-option
+is pushed via
+.B --push
+to a non-windows client, the option will be saved in the client's
+environment before the up script is called, under
+the name "foreign_option_{n}".
 .TP
 .B --tap-sleep n
 Cause OpenVPN to sleep for
@@ -2974,6 +3022,17 @@ or
 .B --down
 script execution.
 .TP
+.B foreign_option_{n}
+An option pushed via
+.B --push
+to a client which does not natively support it,
+such as
+.B --dhcp-option
+on a non-Windows system, will be recorded to this
+environmental variable sequence prior to
+.B --up
+script execution.
+.TP
 .B ifconfig_broadcast
 The broadcast address for the virtual
 ethernet segment which is derived from the
@@ -3061,19 +3120,19 @@ The
 .B --proto
 parameter.
 Set on program initiation and reset on SIGHUP.
-.TP
-.B remote
-The
-.B --remote
-parameter.
-Set on program initiation and reset on SIGHUP.
-.TP
-.B remote_port
-The remote port number, specified by
-.B --port
-or
-.B --rport.
-Set on program initiation and reset on SIGHUP.
+.\" .TP
+.\" .B remote
+.\" The
+.\" .B --remote
+.\" parameter.
+.\" Set on program initiation and reset on SIGHUP.
+.\" .TP
+.\" .B remote_port
+.\" The remote port number, specified by
+.\" .B --port
+.\" or
+.\" .B --rport.
+.\" Set on program initiation and reset on SIGHUP.
 .TP
 .B route_net_gateway
 The pre-existing default IP gateway in the system routing
@@ -3355,7 +3414,7 @@ tunnel endpoints
 but make sure that they are private addresses
 (such as those that begin with 10 or 192.168) and that they are
 not part of any existing subnet on the networks of
-either peer.  If you use an address that is part of
+either peer, unless you are bridging.  If you use an address that is part of
 your local subnet for either of the tunnel endpoints,
 you will get a weird feedback loop.
 .SS Example 1: A simple tunnel without security

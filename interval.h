@@ -50,13 +50,7 @@ struct interval
   time_t last_test_true;
 };
 
-static inline void
-interval_init (struct interval *top, int horizon, int refresh)
-{
-  CLEAR (*top);
-  top->refresh = refresh;
-  top->horizon = horizon;
-}
+void interval_init (struct interval *top, int horizon, int refresh);
 
 /*
  * IF
@@ -197,45 +191,9 @@ event_timeout_reset (struct event_timeout* et)
 
 #define ETT_DEFAULT (-1)
 
-static inline bool
-event_timeout_trigger (struct event_timeout *et,
-		       struct timeval *tv,
-		       const int et_const_retry)
-{
-  bool ret = false;
-  const time_t local_now = now;
-
-  if (et->defined)
-    {
-      int wakeup = (int) et->last + et->n - local_now;
-      if (wakeup <= 0)
-	{
-#if INTERVAL_DEBUG
-	  msg (D_INTERVAL, "EVENT event_timeout_trigger (%d) etcr=%d", et->n, et_const_retry);
-#endif
-	  if (et_const_retry < 0)
-	    {
-	      et->last = local_now;
-	      wakeup = et->n;
-	      ret = true;
-	    }
-	  else
-	    {
-	      wakeup = et_const_retry;
-	    }
-	}
-
-      if (wakeup < tv->tv_sec)
-	{
-#if INTERVAL_DEBUG
-	  msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d) etcr=%d", wakeup, et->n, et_const_retry);
-#endif
-	  tv->tv_sec = wakeup;
-	  tv->tv_usec = 0;
-	}
-    }
-  return ret;
-}
+bool event_timeout_trigger (struct event_timeout *et,
+			    struct timeval *tv,
+			    const int et_const_retry);
 
 /*
  * Measure time intervals in microseconds

@@ -306,9 +306,25 @@ semaphore_clear (struct semaphore *s)
 void
 semaphore_open (struct semaphore *s, const char *name)
 {
+  SECURITY_ATTRIBUTES sa;
+  SECURITY_DESCRIPTOR sd;
+
   s->locked = false;
   s->name = name;
-  s->hand = CreateSemaphore(NULL, 1, 1, name);
+  s->hand = NULL;
+
+  /* Make security attributes struct for semaphore */
+  sa.nLength = sizeof (sa);
+  sa.lpSecurityDescriptor = &sd;
+  sa.bInheritHandle = TRUE;
+  if (!InitializeSecurityDescriptor (&sd, SECURITY_DESCRIPTOR_REVISION))
+    goto done;
+  if (!SetSecurityDescriptorDacl (&sd, TRUE, NULL, FALSE))
+    goto done;
+
+  s->hand = CreateSemaphore(&sa, 1, 1, name);
+
+ done:
   if (s->hand == NULL)
     msg (M_WARN|M_ERRNO, "WARNING: Cannot create Win32 semaphore '%s'", name);
   else

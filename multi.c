@@ -66,6 +66,35 @@
 static bool multi_process_post (struct multi_thread *mt, struct multi_instance *mi);
 
 static void
+learn_address_script (const struct multi_context *m,
+		      const struct multi_instance *mi,
+		      const char *op,
+		      const struct mroute_addr *addr)
+{
+  if (m->learn_address_script)
+    {
+      struct gc_arena gc = gc_new ();
+      struct buffer cmd = alloc_buf_gc (256, &gc);
+
+      mutex_lock_static (L_SCRIPT);
+
+      setenv_str ("script_type", "learn-address");
+
+      buf_printf (&cmd, "%s \"%s\" \"%s\"",
+		  m->learn_address_script,
+		  op,
+		  mroute_addr_print (addr, &gc));
+      if (mi)
+	buf_printf (&cmd, " \"%s\"", tls_common_name (mi->context.c2.tls_multi, true));
+
+      system_check (BSTR (&cmd), "learn-address command failed", false);
+
+      mutex_unlock_static (L_SCRIPT);
+      gc_free (&gc);
+    }
+}
+
+static void
 multi_reap_range (const struct multi_context *m,
 		  int start_bucket,
 		  int end_bucket)
@@ -89,6 +118,7 @@ multi_reap_range (const struct multi_context *m,
 	{
 	  msg (D_MULTI_DEBUG, "MULTI: REAP DEL %s",
 	       mroute_addr_print (&r->addr, &gc));
+	  learn_address_script (m, NULL, "delete", &r->addr);
 	  multi_route_del (r);
 	  hash_iterator_delete_element (&hi);
 	}
@@ -253,6 +283,11 @@ multi_init (struct multi_context *m, struct context *t)
   mroute_extract_in_addr_t (&m->local, t->c1.tuntap->local);
 
   /*
+   * Remember possible learn_address_script
+   */
+  m->learn_address_script = t->options.learn_address_script;
+
+  /*
    * Allow client <-> client communication, without going through
    * tun/tap interface and network stack?
    */
@@ -327,6 +362,7 @@ multi_close_instance (struct multi_context *m,
 		      struct multi_instance *mi,
 		      bool shutdown)
 {
+  ASSERT (!mi->halt);
   mi->halt = true;
 
   msg (D_MULTI_LOW, "MULTI: multi_close_instance called");
@@ -347,6 +383,8 @@ multi_close_instance (struct multi_context *m,
       ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle);
 
       multi_del_iroutes (m, mi);
+
+      mbuf_dereference_instance (m->mbuf, mi);
     }
 
   if (mi->context.options.client_disconnect_script)
@@ -457,6 +495,8 @@ multi_create_instance (struct multi_thread *mt, const struct mroute_addr *real)
   inherit_context_child (&mi->context, &mt->top);
   mi->did_open_context = true;
 
+  mi->context.c2.push_reply_deferred = true;
+
   if (!multi_process_post (mt, mi))
     {
       msg (D_MULTI_ERRORS, "MULTI: signal occurred during client instance initialization");
@@ -539,6 +579,7 @@ multi_get_create_instance (struct multi_thread *mt)
     }
 
   gc_free (&gc);
+  ASSERT (!(mi && mi->halt));
   return mi;
 }
 
@@ -668,11 +709,13 @@ multi_learn_addr (struct multi_context *m,
 	  /* modify hash table entry, replacing old route */
 	  he->key = &newroute->addr;
 	  he->value = newroute;
+	  learn_address_script (m, mi, "update", &newroute->addr);
 	}
       else
 	{
 	  /* add new route */
 	  hash_add_fast (m->vhash, bucket, &newroute->addr, hv, newroute);
+	  learn_address_script (m, mi, "add", &newroute->addr);
 	}
 
       msg (D_MULTI_LOW, "MULTI: Learn: %s -> %s",
@@ -762,6 +805,7 @@ multi_get_instance_by_virtual_addr (struct multi_context *m,
     }
 #endif
 
+  ASSERT (!(ret && ret->halt));
   return ret;
 }
 
@@ -819,6 +863,41 @@ multi_add_iroutes (struct multi_context *m,
 }
 
 /*
+ * Given an instance (new_mi), delete all other instances which use the
+ * same common name.
+ */
+static void
+multi_delete_dup (struct multi_context *m, struct multi_instance *new_mi)
+{
+  if (new_mi)
+    {
+      const char *new_cn = tls_common_name (new_mi->context.c2.tls_multi, true);
+      if (new_cn)
+	{
+	  struct hash_iterator hi;
+	  struct hash_element *he;
+
+	  hash_iterator_init (m->iter, &hi, true);
+	  while ((he = hash_iterator_next (&hi)))
+	    {
+	      struct multi_instance *mi = (struct multi_instance *) he->value;
+	      if (mi != new_mi)
+		{
+		  const char *cn = tls_common_name (mi->context.c2.tls_multi, true);
+		  if (cn && !strcmp (cn, new_cn))
+		    {
+		      mi->did_iter = false;
+		      multi_close_instance (m, mi, false);
+		      hash_iterator_delete_element (&hi);
+		    }
+		}
+	    }
+	  hash_iterator_free (&hi);
+	}
+    }
+}
+
+/*
  * Called as soon as the SSL/TLS connection authenticates.
  */
 static void
@@ -835,13 +914,17 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
   /* generate a msg() prefix for this client instance */
   generate_prefix (mi);
 
+  /* delete instances of previous clients with same common-name */
+  if (!mi->context.options.duplicate_cn)
+    multi_delete_dup (m, mi);
+
   /*
    * Get a pool address, which may be released before the end
    * of this function if it's not needed.
    */
   if (m->ifconfig_pool)
     {
-      mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote, tls_common_name (mi->context.c2.tls_multi, false));
+      mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote, tls_common_name (mi->context.c2.tls_multi, true));
       if (mi->vaddr_handle >= 0)
 	{
 	  if (local)
@@ -1005,6 +1088,11 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
 	   multi_instance_string (mi, false, &gc));
     }
 
+  /*
+   * Reply now to client's PUSH_REQUEST query
+   */
+  mi->context.c2.push_reply_deferred = false;
+
   mutex_unlock_static (L_SCRIPT);
   gc_free (&gc);
 }
@@ -1162,6 +1250,8 @@ multi_process_post (struct multi_thread *mt, struct multi_instance *mi)
 	mt->link_out = NULL;
       if (mt->tun_out == mi)
 	mt->tun_out = NULL;
+      if (mt->earliest_wakeup == mi)
+	mt->earliest_wakeup = NULL;
       multi_close_instance (mt->multi, mi, false);
       return false;
     }
@@ -1388,7 +1478,7 @@ multi_process_incoming_tun (struct multi_thread *mt)
  * Process a possible client-to-client/bcast/mcast message in the
  * queue.
  */
-static inline struct multi_instance *
+struct multi_instance *
 multi_bcast_instance (struct multi_context *m)
 {
   struct mbuf_item item;

@@ -23,30 +23,62 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef PUSH_H
-#define PUSH_H
-
-#if P2MP
-
-#include "forward.h"
-
-#define PUSH_MSG_ERROR            0
-#define PUSH_MSG_REQUEST          1
-#define PUSH_MSG_REPLY            2
-#define PUSH_MSG_REQUEST_DEFERRED 3
-
-int process_incoming_push_msg (struct context *c,
-			       const struct buffer *buffer,
-			       bool honor_received_options,
-			       unsigned int permission_mask,
-			       int *option_types_found);
-
-void push_option (struct options *o, const char *opt, int msglevel);
-
-void push_reset (struct options *o);
-
-bool send_push_request (struct context *c);
-bool send_push_reply (struct context *c);
-
+#ifdef WIN32
+#include "config-win32.h"
+#else
+#include "config.h"
 #endif
+
+#include "syshead.h"
+
+#include "interval.h"
+
+#include "memdbg.h"
+
+void
+interval_init (struct interval *top, int horizon, int refresh)
+{
+  CLEAR (*top);
+  top->refresh = refresh;
+  top->horizon = horizon;
+}
+
+bool
+event_timeout_trigger (struct event_timeout *et,
+		       struct timeval *tv,
+		       const int et_const_retry)
+{
+  bool ret = false;
+  const time_t local_now = now;
+
+  if (et->defined)
+    {
+      int wakeup = (int) et->last + et->n - local_now;
+      if (wakeup <= 0)
+	{
+#if INTERVAL_DEBUG
+	  msg (D_INTERVAL, "EVENT event_timeout_trigger (%d) etcr=%d", et->n, et_const_retry);
 #endif
+	  if (et_const_retry < 0)
+	    {
+	      et->last = local_now;
+	      wakeup = et->n;
+	      ret = true;
+	    }
+	  else
+	    {
+	      wakeup = et_const_retry;
+	    }
+	}
+
+      if (wakeup < tv->tv_sec)
+	{
+#if INTERVAL_DEBUG
+	  msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d) etcr=%d", wakeup, et->n, et_const_retry);
+#endif
+	  tv->tv_sec = wakeup;
+	  tv->tv_usec = 0;
+	}
+    }
+  return ret;
+}

@@ -248,6 +248,8 @@ static const char usage_message[] =
   "                  Sets up internal routes only, and must be\n"
   "                  associated with a specific client instance.\n"
   "--client-to-client : Internally route client-to-client traffic.\n"
+  "--duplicate-cn  : Allow multiple clients with the same common name to\n"
+  "                  concurrently connect.\n"
   "--client-connect cmd : Run script cmd on client connection.\n"
   "--client-disconnect cmd : Run script cmd on client disconnection.\n"
   "--client-config-dir dir : Directory for custom client config files.\n"
@@ -256,6 +258,7 @@ static const char usage_message[] =
   "                  virtual address table to v.\n"
   "--bcast-buffers n : Allocate n broadcast buffers.\n"
   "--connect-freq n s : Allow a maximum of n new connections per s seconds.\n"
+  "--learn-address cmd : Run script cmd to validate client virtual addresses.\n"
   "\n"
   "Client options (when connecting to a multi-client server):\n"
   "--pull          : Accept certain config file options from the peer as if they\n"
@@ -597,6 +600,7 @@ show_p2mp_parms (const struct options *o)
   SHOW_INT (real_hash_size);
   SHOW_INT (virtual_hash_size);
   SHOW_STR (client_connect_script);
+  SHOW_STR (learn_address_script);
   SHOW_STR (client_disconnect_script);
   SHOW_STR (client_config_dir);
   SHOW_STR (tmp_dir);
@@ -604,6 +608,7 @@ show_p2mp_parms (const struct options *o)
   msg (D_SHOW_PARMS, "  push_ifconfig_local = %s", print_in_addr_t (o->push_ifconfig_local, false, &gc));
   msg (D_SHOW_PARMS, "  push_ifconfig_remote_netmask = %s", print_in_addr_t (o->push_ifconfig_remote_netmask, false, &gc));
   SHOW_BOOL (enable_c2c);
+  SHOW_BOOL (duplicate_cn);
   SHOW_INT (cf_max);
   SHOW_INT (cf_per);
   gc_free (&gc);
@@ -1073,8 +1078,14 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --tun-ipv6 cannot be used with --mode server");
       if (options->shaper)
 	msg (M_USAGE, "Options error: --shaper cannot be used with --mode server");
+
+#if 0
       if (!(options->proto == PROTO_UDPv4 || options->proto == PROTO_TCPv4_SERVER))
 	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp or --proto tcp-server");
+#else
+      if (!(options->proto == PROTO_UDPv4))
+	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp");
+#endif
 
 #ifdef WIN32
       /*
@@ -1093,6 +1104,8 @@ options_postprocess (struct options *options, bool first_time)
       if (options->real_hash_size != defaults.real_hash_size
 	  || options->virtual_hash_size != defaults.virtual_hash_size)
 	msg (M_USAGE, "Options error: --hash-size requires --mode server");
+      if (options->learn_address_script)
+	msg (M_USAGE, "Options error: --learn-address requires --mode server");
       if (options->client_connect_script)
 	msg (M_USAGE, "Options error: --client-connect requires --mode server");
       if (options->client_disconnect_script)
@@ -1103,6 +1116,8 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --client-config-dir requires --mode server");
       if (options->enable_c2c)
 	msg (M_USAGE, "Options error: --client-to-client requires --mode server");
+      if (options->duplicate_cn)
+	msg (M_USAGE, "Options error: --duplicate-cn requires --mode server");
       if (options->cf_max || options->cf_per)
 	msg (M_USAGE, "Options error: --connect-freq requires --mode server");
     }
@@ -1200,6 +1215,7 @@ pre_pull_save (struct options *o)
       ALLOC_OBJ_CLEAR_GC (o->pre_pull, struct options_pre_pull, &o->gc);
       o->pre_pull->tuntap_options = o->tuntap_options;
       o->pre_pull->tuntap_options_defined = true;
+      o->pre_pull->foreign_option_index = o->foreign_option_index;
       if (o->routes)
 	{
 	  o->pre_pull->routes = *o->routes;
@@ -1223,6 +1239,7 @@ pre_pull_restore (struct options *o)
 	{
 	  *o->routes = pp->routes;
 	}
+      o->foreign_option_index = pp->foreign_option_index;
     }
 }
 
@@ -1275,11 +1292,12 @@ pre_pull_restore (struct options *o)
 char *
 options_string (const struct options *o,
 		const struct frame *frame,
-		const struct tuntap *tt,
+		struct tuntap *tt,
 		bool remote,
 		struct gc_arena *gc)
 {
   struct buffer out = alloc_buf (256);
+  bool tt_local = false;
 
   buf_printf (&out, "V3");
 
@@ -1293,10 +1311,33 @@ options_string (const struct options *o,
   buf_printf (&out, ",proto %s", proto2ascii (proto_remote (o->proto, remote), true));
   if (o->tun_ipv6)
     buf_printf (&out, ",tun-ipv6");
-  if (tt)
+
+  /*
+   * Try to get ifconfig parameters into the options string.
+   * If tt is undefined, make a temporary instantiation.
+   */
+  if (!tt)
+    {
+      tt = init_tun (o->dev,
+		     o->dev_type,
+		     o->ifconfig_local,
+		     o->ifconfig_remote_netmask,
+		     (in_addr_t)0,
+		     (in_addr_t)0);
+      if (tt)
+	tt_local = true;
+    }
+
+  if (tt && !PUSH_DEFINED(o) && !PULL_DEFINED(o))
     buf_printf (&out,
 		",ifconfig %s",
 		ifconfig_options_string (tt, remote, o->ifconfig_nowarn, gc));
+
+  if (tt_local)
+    {
+      free (tt);
+      tt = NULL;
+    }
 
 #ifdef USE_LZO
   if (o->comp_lzo)
@@ -1436,6 +1477,34 @@ options_string_version (const char* s, struct gc_arena *gc)
   struct buffer out = alloc_buf_gc (4, gc);
   strncpynt (BPTR (&out), s, 3);
   return BSTR (&out);
+}
+
+static void
+foreign_option (struct options *o, char *argv[], int len)
+{
+  if (len > 0)
+    {
+      struct gc_arena gc = gc_new();
+      struct buffer name = alloc_buf_gc (64, &gc);
+      struct buffer value = alloc_buf_gc (256, &gc);
+      int i;
+      bool first = true;
+
+      buf_printf (&name, "foreign_option_%d", o->foreign_option_index + 1);
+      ++o->foreign_option_index;
+      for (i = 0; i < len; ++i)
+	{
+	  if (argv[i])
+	    {
+	      if (!first)
+		buf_printf (&value, " ");
+	      buf_printf (&value, argv[i]);
+	      first = false;
+	    }
+	}
+      setenv_str (BSTR(&name), BSTR(&value));
+      gc_free (&gc);
+    }
 }
 
 static void
@@ -2527,6 +2596,12 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_SCRIPT);
       options->client_disconnect_script = p[1];
     }
+  else if (streq (p[0], "learn-address") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_SCRIPT);
+      options->learn_address_script = p[1];
+    }
   else if (streq (p[0], "tmp-dir") && p[1])
     {
       ++i;
@@ -2551,6 +2626,11 @@ add_option (struct options *options,
     {
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->enable_c2c = true;
+    }
+  else if (streq (p[0], "duplicate-cn"))
+    {
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->duplicate_cn = true;
     }
   else if (streq (p[0], "iroute") && p[1])
     {
@@ -2721,6 +2801,15 @@ add_option (struct options *options,
     {
       VERIFY_PERMISSION (OPT_P_GENERAL);
       set_pause_exit_win32 ();
+    }
+#else
+  else if (streq (p[0], "dhcp-option") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_IPWIN32);
+      if (p[2])
+	++i;
+      foreign_option (options, p, 3);
     }
 #endif
 #if PASSTOS_CAPABILITY

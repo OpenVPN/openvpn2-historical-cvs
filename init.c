@@ -514,9 +514,12 @@ do_init_tun (struct context *c)
 			   c->options.ifconfig_local,
 			   c->options.ifconfig_remote_netmask,
 			   addr_host (&c->c1.link_socket_addr.local),
-			   addr_host (&c->c1.link_socket_addr.remote),
-			   &c->c2.frame,
-			   &c->options.tuntap_options);
+			   addr_host (&c->c1.link_socket_addr.remote));
+
+  init_tun_post (c->c1.tuntap,
+		 &c->c2.frame,
+		 &c->options.tuntap_options);
+
   c->c1.tuntap_owned = true;
 }
 

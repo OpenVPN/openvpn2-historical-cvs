@@ -107,8 +107,15 @@ process_incoming_push_msg (struct context *c,
 
   if (buf_string_compare_advance (&buf, "PUSH_REQUEST"))
     {
-      if (send_push_reply (c))
-	ret = PUSH_MSG_REQUEST;
+      if (!c->c2.push_reply_deferred)
+	{
+	  if (send_push_reply (c))
+	    ret = PUSH_MSG_REQUEST;
+	}
+      else
+	{
+	  ret = PUSH_MSG_REQUEST_DEFERRED;
+	}
     }
   else if (honor_received_options && buf_string_compare_advance (&buf, "PUSH_REPLY"))
     {

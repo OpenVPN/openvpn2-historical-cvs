@@ -346,9 +346,7 @@ init_tun (const char *dev,       /* --dev option */
 	  const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
 	  const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
 	  in_addr_t local_public,
-	  in_addr_t remote_public,
-	  const struct frame *frame,
-	  const struct tuntap_options *options)
+	  in_addr_t remote_public)
 {
   struct gc_arena gc = gc_new ();
   struct tuntap *tt;
@@ -356,15 +354,7 @@ init_tun (const char *dev,       /* --dev option */
   ALLOC_OBJ (tt, struct tuntap);
   clear_tuntap (tt);
 
-#ifdef WIN32
-  overlapped_io_init (&tt->reads, frame, FALSE, true);
-  overlapped_io_init (&tt->writes, frame, TRUE, true);
-  tt->rw_handle.read = tt->reads.overlapped.hEvent;
-  tt->rw_handle.write = tt->writes.overlapped.hEvent;
-#endif
-
   tt->type = dev_type_enum (dev, dev_type);
-  tt->options = *options;
 
   if (ifconfig_local_parm && ifconfig_remote_netmask_parm)
     {
@@ -433,7 +423,7 @@ init_tun (const char *dev,       /* --dev option */
       ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, false, &gc);
 
       /*
-       * If TAP-style device, generate broadcast address.
+       * If TAP-style interface, generate broadcast address.
        */
       if (!tun)
 	{
@@ -461,6 +451,22 @@ init_tun (const char *dev,       /* --dev option */
   return tt;
 }
 
+/*
+ * Platform specific tun initializations
+ */
+void
+init_tun_post (struct tuntap *tt,
+	       const struct frame *frame,
+	       const struct tuntap_options *options)
+{
+  tt->options = *options;
+#ifdef WIN32
+  overlapped_io_init (&tt->reads, frame, FALSE, true);
+  overlapped_io_init (&tt->writes, frame, TRUE, true);
+  tt->rw_handle.read = tt->reads.overlapped.hEvent;
+  tt->rw_handle.write = tt->writes.overlapped.hEvent;
+#endif
+}
 
 /* execute the ifconfig command through the shell */
 void

@@ -104,6 +104,8 @@ bool mroute_learnable_address (const struct mroute_addr *addr);
 uint32_t mroute_addr_hash_function (const void *key, uint32_t iv);
 bool mroute_addr_compare_function (const void *key1, const void *key2);
 
+void mroute_addr_init (struct mroute_addr *addr);
+
 const char *mroute_addr_print (const struct mroute_addr *ma,
 			       struct gc_arena *gc);
 
@@ -124,12 +126,6 @@ static inline void
 mroute_helper_unlock (struct mroute_helper *mh)
 {
   //mutex_unlock (&mh->mutex);
-}
-
-static inline void
-mroute_addr_init (struct mroute_addr *addr)
-{
-  CLEAR (*addr);
 }
 
 static inline bool

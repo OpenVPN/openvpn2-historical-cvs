@@ -72,36 +72,14 @@ void mbuf_free_buf (struct mbuf_buffer *mb);
 
 void mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item);
 
+bool mbuf_extract_item_lock (struct mbuf_set *ms, struct mbuf_item *item, bool lock);
+
+void mbuf_dereference_instance (struct mbuf_set *ms, struct multi_instance *mi);
+
 static inline bool
 mbuf_defined (const struct mbuf_set *ms)
 {
   return ms && ms->len;
-}
-
-/* if true return, caller must unlock mutex
-   after it has processed return item */
-static inline bool
-mbuf_extract_item_lock (struct mbuf_set *ms, struct mbuf_item *item, bool lock)
-{
-  if (lock)
-    {
-      //mutex_lock (&ms->mutex);
-    }
-  if (ms->len)
-    {
-      *item = ms->array[ms->head];
-      ms->head = MBUF_INDEX(ms->head, 1, ms->capacity);
-      --ms->len;
-      return true;
-    }
-  else
-    {
-      if (lock)
-	{
-	  //mutex_unlock (&ms->mutex);
-	}
-      return false;
-    }
 }
 
 static inline void

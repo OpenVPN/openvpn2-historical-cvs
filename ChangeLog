@@ -1,7 +1,44 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.32 2004/06/08 07:22:20 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.33 2004/06/15 00:00:55 jimyonan Exp $
+
+2004.06.13 -- Version 2.0-beta5
+
+* Fixed rare --mode server crash that could occur
+  if data was being routed to a client at
+  high bandwidth at the precise moment that the
+  client instance object on the server was being
+  deleted.
+* Fixed issue on machines which have epoll.h and
+  the epoll_create glibc call defined, but which
+  don't actually implement epoll in the kernel.
+  OpenVPN will now gracefully fall back to the
+  poll API in this case.
+* Fixed Windows bug which would cause the following
+  error in a --mode server --dev tap configuration:
+  "resource limit WSA_MAXIMUM_WAIT_EVENTS has been
+  exceeded".
+* Added CRL (certificate revocation list) management
+  scripts to easy-rsa directory (Jon Bendtsen).
+* Do a better job of getting the ifconfig component
+  of the options consistency check to work correctly
+  when --up-delay is used.
+* De-inlined some functions which were too complex
+  to be inlined anyway with gcc.
+* If a --dhcp-option option is pushed to a non-windows
+  client, the option will be saved in the client's
+  environment before the --up script is called, under
+  the name "foreign_option_{n}".
+* Added --learn-address script (see man page) which
+  allows for firewall access through the VPN to be
+  controlled based on the client common name.
+* In mode --server mode, when a client connects to
+  the server, the server will disconnect any
+  still-active clients which use the same common
+  name.  Use --duplicate-cn flag to revert to
+  previous behavior of allowing multiple clients
+  to concurrently connect with the same common name.
 
 2004.06.08 -- Version 2.0-beta4
 

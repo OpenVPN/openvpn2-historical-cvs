@@ -617,6 +617,8 @@ setenv_str (const char *name, const char *value)
   if (!value)
     value = "";
 
+  msg (D_SETENV, "SETENV %s='%s'", name, value);
+
 #if defined(WIN32)
  {
    char buf[256];

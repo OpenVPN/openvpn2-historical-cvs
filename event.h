@@ -82,6 +82,12 @@ struct event_set
   struct event_set_functions func;
 };
 
+/*
+ * maxevents on input:  desired max number of event_t descriptors
+ *                      simultaneously set with event_ctl
+ * maxevents on output: may be modified down, depending on limitations
+ *                      of underlying API
+ */
 struct event_set *event_set_init (int *maxevents, unsigned int flags);
 
 static inline void

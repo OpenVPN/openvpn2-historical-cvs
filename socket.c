@@ -1254,7 +1254,7 @@ stream_buf_reset (struct stream_buf *sb)
   msg (D_STREAM_DEBUG, "STREAM: RESET");
   sb->residual_fully_formed = false;
   sb->buf = sb->buf_init;
-  CLEAR (sb->next);
+  buf_reset (&sb->next);
   sb->len = -1;
 }
 
@@ -1575,6 +1575,47 @@ link_socket_read_tcp (struct link_socket *sock,
     }
   else
     return buf->len = 0; /* no error, but packet is still incomplete */
+}
+
+#ifndef WIN32
+
+int
+link_socket_read_udp_posix (struct link_socket *sock,
+			    struct buffer *buf,
+			    int maxsize,
+			    struct sockaddr_in *from)
+{
+  socklen_t fromlen = sizeof (*from);
+  CLEAR (*from);
+  ASSERT (buf_safe (buf, maxsize));
+  buf->len = recvfrom (sock->sd, BPTR (buf), maxsize, 0,
+		       (struct sockaddr *) from, &fromlen);
+  if (fromlen != sizeof (*from))
+    bad_address_length (fromlen, sizeof (*from));
+  return buf->len;
+}
+
+#endif
+
+/*
+ * Socket Write Routines
+ */
+
+int
+link_socket_write_tcp (struct link_socket *sock,
+		       struct buffer *buf,
+		       struct sockaddr_in *to)
+{
+  packet_size_type len = BLEN (buf);
+  msg (D_STREAM_DEBUG, "STREAM: WRITE %d offset=%d", (int)len, buf->offset);
+  ASSERT (len <= sock->stream_buf.maxlen);
+  len = htonps (len);
+  ASSERT (buf_write_prepend (buf, &len, sizeof (len)));
+#ifdef WIN32
+  return link_socket_write_win32 (sock, buf, to);
+#else
+  return link_socket_write_tcp_posix (sock, buf, to);  
+#endif
 }
 
 /*

@@ -101,6 +101,14 @@ clone_buf (const struct buffer* buf)
   return ret;
 }
 
+void
+buf_clear (struct buffer *buf)
+{
+  memset (buf->data, 0, buf->capacity);
+  buf->len = 0;
+  buf->offset = 0;
+}
+
 struct buffer
 clear_buf ()
 {

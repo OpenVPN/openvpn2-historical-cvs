@@ -86,8 +86,11 @@ we_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
 {
   struct we_set *wes = (struct we_set *) es;
 
-  msg (D_EVENT_WAIT, "WE_CTL rwflags=0x%04x ev=0x%08x arg=0x%08x",
-       rwflags, (unsigned int)event, (unsigned int)arg);
+  msg (D_EVENT_WAIT, "WE_CTL n=%d rwflags=0x%04x ev=0x%08x arg=0x%08x",
+       wes->n_events,
+       rwflags,
+       (unsigned int)event,
+       (unsigned int)arg);
 
   if (wes->fast)
     {
@@ -170,13 +173,17 @@ we_init (int *maxevents, unsigned int flags)
 
   /* Figure our event capacity */
   ASSERT (*maxevents > 0);
-  wes->capacity = *maxevents = min_int (*maxevents, WSA_MAXIMUM_WAIT_EVENTS);
+  wes->capacity = min_int (*maxevents * 2, WSA_MAXIMUM_WAIT_EVENTS);
+  *maxevents = min_int (*maxevents, WSA_MAXIMUM_WAIT_EVENTS);
 
   /* Allocate space for Win32 event handles */
   ALLOC_ARRAY_CLEAR (wes->events, HANDLE, wes->capacity);
 
   /* Allocate space for event_set_return objects */
   ALLOC_ARRAY_CLEAR (wes->esr, struct event_set_return, wes->capacity);
+
+  msg (D_EVENT_WAIT, "WE_INIT maxevents=%d capacity=%d",
+       *maxevents, wes->capacity);
 
   return (struct event_set *) wes;
 }
@@ -283,6 +290,13 @@ static struct event_set *
 ep_init (int *maxevents, unsigned int flags)
 {
   struct ep_set *eps;
+  int fd;
+
+  /* open epoll file descriptor */
+  fd = epoll_create (*maxevents);
+  if (fd < 0)
+    return NULL;
+
   ALLOC_OBJ_CLEAR (eps, struct ep_set);
 
   /* set dispatch functions */
@@ -301,10 +315,8 @@ ep_init (int *maxevents, unsigned int flags)
   eps->maxevents = *maxevents;
   ALLOC_ARRAY_CLEAR (eps->events, struct epoll_event, eps->maxevents);
 
-  /* open epoll file descriptor */
-  eps->epfd = epoll_create (eps->maxevents);
-  if (eps->epfd < 0)
-    msg (M_ERR, "EVENT: epoll_create failed");
+  /* set epoll control fd */
+  eps->epfd = fd;
 
   return (struct event_set *) eps;
 }
@@ -449,20 +461,30 @@ po_init (int *maxevents, unsigned int flags)
 
   return (struct event_set *) pos;
 }
-#endif
+#endif /* POLL */
 
 struct event_set *
 event_set_init (int *maxevents, unsigned int flags)
 {
+  struct event_set *ret = NULL;
+
 #ifdef WIN32
-  return we_init (maxevents, flags);
+  ret = we_init (maxevents, flags);
 #else
 #if EPOLL
-  return ep_init (maxevents, flags);
+  ret = ep_init (maxevents, flags);
+  if (!ret)
+    {
+      msg (M_WARN, "Note: sys_epoll API is unavailable, falling back to poll API");
+      ret = po_init (maxevents, flags);
+    }
 #elif POLL
-  return po_init (maxevents, flags);
+  ret = po_init (maxevents, flags);
 #else
 #error At least one of epoll, poll, or WSAWaitForMultipleEvents must be supported by the kernel
 #endif
 #endif
+
+  ASSERT (ret);
+  return ret;
 }

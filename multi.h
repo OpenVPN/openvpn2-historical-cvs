@@ -75,8 +75,8 @@ struct multi_instance {
  * One multi_context object per server daemon.
  */
 struct multi_context {
-  struct hash *hash;   /* indexed by real address */
-  struct hash *vhash;  /* indexed by virtual address */
+  struct hash *hash;   /* client instances indexed by real address */
+  struct hash *vhash;  /* client instances indexed by virtual address */
   struct hash *iter;   /* like real address hash but optimized for iteration */
   struct schedule *schedule;
   struct mbuf_set *mbuf;
@@ -85,6 +85,7 @@ struct multi_context {
   struct mroute_helper *route_helper;
   struct multi_reap *reaper;
   struct mroute_addr local;
+  const char *learn_address_script;
 
   bool enable_c2c;
 };
@@ -95,7 +96,6 @@ struct multi_context {
 struct multi_thread {
   struct multi_context *multi; /* shared between all threads */
   struct multi_instance *link_out;
-  struct multi_instance *link_out_bcast;
   struct multi_instance *tun_out;
   struct multi_instance *earliest_wakeup;  
   struct context_buffers *context_buffers;

@@ -319,6 +319,7 @@ struct context_2
 #if P2MP
 
   /* --ifconfig endpoints to be pushed to client */
+  bool push_reply_deferred;
   bool push_ifconfig_defined;
   in_addr_t push_ifconfig_local;
   in_addr_t push_ifconfig_remote_netmask;
@@ -340,7 +341,7 @@ struct context
   bool first_time;
 
   /* used by multi-client code to lock the context */
-  //MUTEX_DEFINE (mutex); // JYFIXME -- init/uninit me
+  //MUTEX_DEFINE (mutex);
 
   /* context modes */
 # define CM_P2P         0 /* standalone point-to-point session */

@@ -58,7 +58,6 @@ void close_instance (struct context *c);
 
 bool do_test_crypto (const struct options *o);
 
-void context_gc_detach (struct context *c, bool options_only);
 void context_gc_free (struct context *c);
 
 void do_up (struct context *c,
@@ -68,5 +67,9 @@ void do_up (struct context *c,
 unsigned int pull_permission_mask (void);
 
 const char *format_common_name (struct context *c, struct gc_arena *gc);
+
+void reset_coarse_timers (struct context *c);
+
+void do_deferred_options (struct context *c, const unsigned int found);
 
 #endif

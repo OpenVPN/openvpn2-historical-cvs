@@ -31,11 +31,11 @@
 
 #include "syshead.h"
 
-#include "interval.h"
-#include "misc.h"
-#include "thread.h"
+#include "otime.h"
 
 #include "memdbg.h"
+
+volatile time_t now; /* GLOBAL */
 
 /* 
  * Return a numerical string describing a struct timeval.
@@ -62,6 +62,41 @@ tv_string_abs (const struct timeval *tv, struct gc_arena *gc)
 		      (int) tv->tv_usec,
 		      true,
 		      gc);
+}
+
+/* format a time_t as ascii, or use current time if 0 */
+
+const char *
+time_string (time_t t, int usec, bool show_usec, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (64, gc);
+  struct timeval tv;
+
+  if (t)
+    {
+      tv.tv_sec = t;
+      tv.tv_usec = usec;
+    }
+  else
+    {
+#ifdef HAVE_GETTIMEOFDAY
+      if (gettimeofday (&tv, NULL))
+#endif
+	{
+	  tv.tv_sec = time (NULL);
+	  tv.tv_usec = 0;
+	}
+    }
+
+  mutex_lock_static (L_CTIME);
+  buf_printf (&out, "%s", ctime ((const time_t *)&tv.tv_sec));
+  mutex_unlock_static (L_CTIME);
+  buf_rmtail (&out, '\n');
+
+  if (show_usec && tv.tv_usec)
+    buf_printf (&out, " us=%d", (int)tv.tv_usec);
+
+  return BSTR (&out);
 }
 
 #ifdef WIN32

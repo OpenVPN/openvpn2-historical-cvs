@@ -95,8 +95,7 @@ void lzo_compress_uninit (struct lzo_compress_workspace *lzowork);
 
 void lzo_compress (struct buffer *buf, struct buffer work,
 		   struct lzo_compress_workspace *lzowork,
-		   const struct frame* frame,
-		   const time_t current);
+		   const struct frame* frame);
 
 void lzo_decompress (struct buffer *buf, struct buffer work,
 		     struct lzo_compress_workspace *lzowork,

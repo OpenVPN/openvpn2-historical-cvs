@@ -95,22 +95,27 @@ openvpn \- secure IP tunnel daemon.
 .B openvpn
 [\ \fB\-\-askpass\fR\ ]
 [\ \fB\-\-auth\fR\ \fIalg\fR\ ]
+[\ \fB\-\-bcast\-delay\fR\ \fIn\fR\ ]
 [\ \fB\-\-ca\fR\ \fIfile\fR\ ]
 [\ \fB\-\-cd\fR\ \fIdir\fR\ ]
 [\ \fB\-\-cert\fR\ \fIfile\fR\ ]
 [\ \fB\-\-chroot\fR\ \fIdir\fR\ ]
 [\ \fB\-\-cipher\fR\ \fIalg\fR\ ]
+[\ \fB\-\-client\-config\-dir\fR\ \fIdir\fR\ ]
+[\ \fB\-\-client\-connect\fR\ \fIscript\fR\ ]
+[\ \fB\-\-client\-disconnect\fR\ ]
+[\ \fB\-\-client\-to\-client\fR\ ]
 [\ \fB\-\-comp\-lzo\fR\ ]
 [\ \fB\-\-comp\-noadapt\fR\ ]
 [\ \fB\-\-config\fR\ \fIfile\fR\ ]
 [\ \fB\-\-connect\-retry\fR\ \fIn\fR\ ]
 [\ \fB\-\-crl\-verify\fR\ \fIcrl\fR\ ]
-[\ \fB\-\-daemon\fR\ ]
-[\ \fB\-\-dev\-name\fR\ \fIname\fR\ ]
+[\ \fB\-\-daemon\fR\ \fI[progname]\fR\ ]
 [\ \fB\-\-dev\-node\fR\ \fInode\fR\ ]
 [\ \fB\-\-dev\-type\fR\ \fIdevice\-type\fR\ ]
 [\ \fB\-\-dev\fR\ \fItunX\ |\ tapX\ |\ null\fR\ ]
 [\ \fB\-\-dh\fR\ \fIfile\fR\ ]
+[\ \fB\-\-dhcp\-option\fR\ \fItype\ [parm]\fR\ ]
 [\ \fB\-\-disable\-occ\fR\ ]
 [\ \fB\-\-down\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-float\fR\ ]
@@ -118,18 +123,22 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-gremlin\fR\ ]
 [\ \fB\-\-group\fR\ \fIgroup\fR\ ]
 [\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
-[\ \fB\-\-http\-proxy\fR\ \fIserver\ port\ [authfile]\fR\ ]
+[\ \fB\-\-hash\-size\fR\ \fIr\ v\fR\ ]
+[\ \fB\-\-help\fR\ ]
 [\ \fB\-\-http\-proxy\-retry\fR\ ]
-[\ \fB\-\-socks\-proxy\fR\ \fIserver\ [port]\fR\ ]
-[\ \fB\-\-socks\-proxy\-retry\fR\ ]
-[\ \fB\-\-ifconfig\fR\ \fIl\ r\fR\ ]
+[\ \fB\-\-http\-proxy\fR\ \fIserver\ port\ [authfile]\fR\ ]
 [\ \fB\-\-ifconfig\-noexec\fR\ ]
 [\ \fB\-\-ifconfig\-nowarn\fR\ ]
+[\ \fB\-\-ifconfig\-pool\fR\ \fIstart\-IP\ end\-IP\fR\ ]
+[\ \fB\-\-ifconfig\-push\fR\ \fIlocal\ remote\-netmask\fR\ ]
+[\ \fB\-\-ifconfig\fR\ \fIl\ rn\fR\ ]
 [\ \fB\-\-inactive\fR\ \fIn\fR\ ]
 [\ \fB\-\-inetd\fR\ \fI[wait|nowait]\ [progname]\fR\ ]
+[\ \fB\-\-ip\-win32\fR\ \fImethod\fR\ ]
 [\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
-[\ \fB\-\-key\fR\ \fIfile\fR\ ]
+[\ \fB\-\-iroute\fR\ \fIstart\-IP\ end\-IP\fR\ ]
 [\ \fB\-\-key\-method\fR\ \fIm\fR\ ]
+[\ \fB\-\-key\fR\ \fIfile\fR\ ]
 [\ \fB\-\-keysize\fR\ \fIn\fR\ ]
 [\ \fB\-\-link\-mtu\fR\ \fIn\fR\ ]
 [\ \fB\-\-local\fR\ \fIhost\fR\ ]
@@ -137,6 +146,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-log\fR\ \fIfile\fR\ ]
 [\ \fB\-\-lport\fR\ \fIport\fR\ ]
 [\ \fB\-\-mlock\fR\ ]
+[\ \fB\-\-mode\fR\ \fIm\fR\ ]
 [\ \fB\-\-mssfix\fR\ \fImax\fR\ ]
 [\ \fB\-\-mtu\-disc\fR\ \fItype\fR\ ]
 [\ \fB\-\-mtu\-test\fR\ ]
@@ -147,6 +157,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-no\-replay\fR\ ]
 [\ \fB\-\-nobind\fR\ ]
 [\ \fB\-\-passtos\fR\ ]
+[\ \fB\-\-pause\-exit\fR\ ]
 [\ \fB\-\-persist\-key\fR\ ]
 [\ \fB\-\-persist\-local\-ip\fR\ ]
 [\ \fB\-\-persist\-remote\-ip\fR\ ]
@@ -157,6 +168,9 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-ping\fR\ \fIn\fR\ ]
 [\ \fB\-\-port\fR\ \fIport\fR\ ]
 [\ \fB\-\-proto\fR\ \fIp\fR\ ]
+[\ \fB\-\-pull\fR\ ]
+[\ \fB\-\-push\-reset\fR\ ]
+[\ \fB\-\-push\fR\ \fI"option"\fR\ ]
 [\ \fB\-\-redirect\-gateway\fR\ ]
 [\ \fB\-\-remote\fR\ \fIhost\fR\ ]
 [\ \fB\-\-reneg\-bytes\fR\ \fIn\fR\ ]
@@ -165,30 +179,37 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-replay\-persist\fR\ \fIfile\fR\ ]
 [\ \fB\-\-replay\-window\fR\ \fIn\ [t]\fR\ ]
 [\ \fB\-\-resolv\-retry\fR\ \fIn\fR\ ]
-[\ \fB\-\-route\fR\ \fInetwork\ [netmask]\ [gateway]\ [metric]\fR\ ]
-[\ \fB\-\-route\-delay\fR\ \fIn\fR\ ]
+[\ \fB\-\-route\-delay\fR\ \fI[n]\fR\ ]
 [\ \fB\-\-route\-gateway\fR\ \fIgw\fR\ ]
 [\ \fB\-\-route\-noexec\fR\ ]
 [\ \fB\-\-route\-up\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-route\fR\ \fInetwork\ [netmask]\ [gateway]\ [metric]\fR\ ]
 [\ \fB\-\-rport\fR\ \fIport\fR\ ]
-[\ \fB\-\-secret\fR\ \fIfile\fR\ ]
+[\ \fB\-\-secret\fR\ \fIfile\ [direction]\fR\ ]
 [\ \fB\-\-setenv\fR\ \fIname\ value\fR\ ]
 [\ \fB\-\-shaper\fR\ \fIn\fR\ ]
+[\ \fB\-\-show\-adapters\fR\ ]
+[\ \fB\-\-show\-valid\-subnets\fR\ ]
 [\ \fB\-\-single\-session\fR\ ]
-[\ \fB\-\-tls\-auth\fR\ \fIf\fR\ ]
+[\ \fB\-\-socks\-proxy\-retry\fR\ ]
+[\ \fB\-\-socks\-proxy\fR\ \fIserver\ [port]\fR\ ]
+[\ \fB\-\-tap\-sleep\fR\ \fIn\fR\ ]
+[\ \fB\-\-test\-crypto\fR\ ]
+[\ \fB\-\-tls\-auth\fR\ \fIfile\ [direction]\fR\ ]
 [\ \fB\-\-tls\-cipher\fR\ \fIl\fR\ ]
 [\ \fB\-\-tls\-client\fR\ ]
 [\ \fB\-\-tls\-remote\fR\ \fIx509name\fR\ ]
 [\ \fB\-\-tls\-server\fR\ ]
 [\ \fB\-\-tls\-timeout\fR\ \fIn\fR\ ]
 [\ \fB\-\-tls\-verify\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-tmp\-dir\fR\ \fIdir\fR\ ]
 [\ \fB\-\-tran\-window\fR\ \fIn\fR\ ]
 [\ \fB\-\-tun\-ipv6\fR\ ]
 [\ \fB\-\-tun\-mtu\-extra\fR\ \fIn\fR\ ]
 [\ \fB\-\-tun\-mtu\fR\ \fIn\fR\ ]
-[\ \fB\-\-up\fR\ \fIcmd\fR\ ]
-[\ \fB\-\-up\-restart\fR\ ]
 [\ \fB\-\-up\-delay\fR\ ]
+[\ \fB\-\-up\-restart\fR\ ]
+[\ \fB\-\-up\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-user\fR\ \fIuser\fR\ ]
 [\ \fB\-\-verb\fR\ \fIn\fR\ ]
 [\ \fB\-\-writepid\fR\ \fIfile\fR\ ]
@@ -280,6 +301,12 @@ secret static.key
 .RE
 .fi
 .SS Tunnel Options:
+.TP
+.B --mode m
+Set OpenVPN major mode.  By default, OpenVPN runs in
+point-to-point mode ("p2p").  OpenVPN 2.0 introduces
+a new mode ("server") which implements a multi-client
+server capability.
 .TP
 .B --local host
 Local host name or IP address.
@@ -1625,7 +1652,159 @@ OpenVPN will periodically sample the compression process to measure its
 efficiency.  If the data being sent over the tunnel is already compressed,
 the compression efficiency will be very low, triggering openvpn to disable
 compression for a period of time until the next re-sample test.
-.B 
+.SS Multi-Client Server options
+Starting with OpenVPN 2.0, a multi-client UDP server mode
+is supported, and can be enabled with the
+.B --mode server
+option.  In server mode, OpenVPN will listen on a single
+UDP port for incoming client connections.  All client
+connections will be routed through a single tun or tap
+interface.  This mode is designed for scalability and should
+be able to support hundreds or even thousands of clients
+on sufficiently fast hardware.  SSL/TLS authentication must
+be used in this mode.
+.TP
+.B --push "option"
+Push a config file option back to the client for remote
+execution.  The client must specify
+.B --pull
+in its config file.  The set of options which can be
+pushed is limited by both feasibility and security.
+Some options such as those which would execute scripts
+are banned, since they would effectively allow a compromised
+server to execute arbitrary code on the client.
+Other options such as TLS or MTU parameters
+cannot be pushed because the client needs to know
+them before the connection to the server can be initiated.
+
+This is a partial list of options which can currently be pushed:
+.B --route, --route-gateway, --route-delay, --redirect-gateway,
+.B --ip-win32, --dhcp-option,
+.B --inactive, --ping, --ping-exit, --ping-restart,
+.B --setenv
+.TP
+.B --push-reset
+Don't inherit the global push list for a specific client instance.
+Specify this option in a client-specific context such
+as with a
+.B --client-config-dir
+configuration file.  This option will ignore
+.B --push
+options at the global config file level.
+.TP
+.B --pull
+This option must be used on a client which is connecting
+to a multi-client server.  It indicates to OpenVPN that it
+should accept options pushed by the server, provided they
+are part of the legal set of pushable options.
+.TP
+.B --ifconfig-pool start-IP end-IP
+Set aside a pool of subnets to be
+dynamically allocated to connecting clients.  For tun-style
+tunnels, each client will be given a /30 subnet (for
+interoperability with Windows clients).  For tap-style
+tunnels, individual addresses will be allocated.
+.TP
+.B --ifconfig-push local remote-netmask
+Push a tunnel ifconfig command to remote client,
+overriding the --ifconfig-pool dynamic allocation.
+Must be associated with a specific client instance,
+which means that it must be specified either in a client
+instance config file using
+.B --client-config-dir
+or dynamically generated using a
+.B --client-connect
+script.
+.TP
+.B --iroute start-IP end-IP
+Generate an internal route, so that all IP addresses
+inclusively between
+.B start-IP
+and
+.B end-IP
+will be routed to a specific client instance.
+This option will insert addresses into OpenVPN's
+master virtual address hash table to be associated
+with a specific client common name (the common name
+is taken from the SSL/TLS certificate).  Bear in mind
+that each address in the range must be inserted
+into the hash table, and very large ranges will not
+be accepted.
+This option must be specified either in a client
+instance config file using
+.B --client-config-dir
+or dynamically generated using a
+.B --client-connect
+script.
+.TP
+.B --client-to-client
+Because the OpenVPN server mode handles multiple clients
+through a single tun or tap interface, it is effectively
+a router.  The
+.B --client-to-client
+flag tells OpenVPN to internally route client-to-client
+traffic rather than pushing all client-originating traffic
+to the tun/tap interface.
+
+When this option is used, each client will "see" the other
+clients which are currently connected.  Otherwise, each
+client will only see the server.  Don't use this option
+if you want to firewall tunnel traffic using
+custom, per-client rules.
+.TP
+.B --client-connect script
+Run
+.B script
+on client connection.  The script is passed the common name
+and IP address of the just-authenticated client
+as environmental variables.  The script is also passed
+a single argument which is the filename of a temporary file.
+If the script wants to generate client-instance-specific
+options, it can write them to this file.  The following
+options are legal in a client-instance context:
+.B --push, --push-reset, --iroute, --ifconfig-push,
+and
+.B --config.
+.TP
+.B --client-disconnect
+Like
+.B --client-connect
+but called on client instance shutdown.
+.TP
+.B --client-config-dir dir
+Specify a directory
+.B dir
+for custom client config files.  After
+a connecting client has been authenticated, OpenVPN will
+look in this directory for a file having the same name
+as the client's X509 common name.  If a matching file
+exists, it will be opened and processed for client-specific
+configuration options.
+
+One of the useful properties of this option is that it
+allows client configuration files to be conveniently
+created, edited, or removed while the server is live,
+without needing to restart the server.
+.TP
+.B --tmp-dir dir
+Specific a directory
+.B dir
+for temporary files.  This directory will be used by
+.B --client-connect
+scripts to dynamically generate client-specific
+configuration files.
+.TP
+.B --hash-size r v
+Set the size of the real address hash table to
+.B r
+and the virtual address table to
+.B v.
+By default, both tables are sized at 256 buckets.
+.TP
+.B --bcast-delay n
+Delay for
+.B n
+microseconds between broadcast or multicast packet sends.
 .SS Data Channel Encryption Options:
 These options are meaningful for both Static & TLS-negotiated key modes
 (must be compatible between peers).
@@ -2622,12 +2801,22 @@ Executed when we have a still untrusted remote peer.
 .B --ipchange
 Executed after connection authentication, or remote IP address change.
 .TP
+.B --client-connect
+Executed in
+.B --mode server
+mode immediately after client authentication.
+.TP
 .B --route-up
 Executed after connection authentication, either
 immediately after, or some number of seconds after
 as defined by the
 .B --route-delay
 option.
+.TP
+.B --client-disconnect
+Executed in
+.B --mode server
+mode on client instance shutdown.
 .TP
 .B --down
 Executed after TCP/UDP and TUN/TAP close.
@@ -2642,6 +2831,21 @@ script executing.  This could be done even if there is no
 .B --up
 script since all variables are set whether or not the script
 they are connected with is enabled.
+
+Note that when
+.B --mode server
+is used, environmental variables may be set based on incoming
+client connections at unpredictable times, therefore only the
+environmental variables explicitly set before a script
+is run should be considered valid.
+.TP
+.B common_name
+The X509 common name of an authenticated client.
+Set prior to execution of
+.B --client-connect
+and
+.B --client-disconnect
+scripts.
 .TP
 .B config
 Name of first
@@ -2862,14 +3066,18 @@ script execution.
 .B trusted_ip
 Actual IP address of connecting client or peer which has been authenticated.
 Set prior to execution of
-.B --ipchange
-script.
+.B --ipchange, --client-connect,
+and
+.B --client-disconnect
+scripts.
 .TP
 .B trusted_port
 Actual port number of connecting client or peer which has been authenticated.
 Set prior to execution of
-.B --ipchange
-script.
+.B --ipchange, --client-connect,
+and
+.B --client-disconnect
+scripts.
 .TP
 .B untrusted_ip
 Actual IP address of connecting client or peer which has not been authenticated

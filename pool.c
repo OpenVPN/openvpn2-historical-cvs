@@ -41,15 +41,29 @@
 #if P2MP
 
 struct ifconfig_pool *
-ifconfig_pool_init (in_addr_t start, in_addr_t end)
+ifconfig_pool_init (int type, in_addr_t start, in_addr_t end)
 {
   struct gc_arena gc = gc_new ();
   struct ifconfig_pool *pool = NULL;
-  ASSERT (start < end && end - start < IFCONFIG_POOL_MAX);
+  ASSERT (start <= end && end - start < IFCONFIG_POOL_MAX);
 
   ALLOC_OBJ (pool, struct ifconfig_pool);
-  pool->base = start & ~3;
-  pool->size = (((end | 3) + 1) - pool->base) >> 2;
+
+  pool->type = type;
+
+  switch (type)
+    {
+    case IFCONFIG_POOL_30NET:
+      pool->base = start & ~3;
+      pool->size = (((end | 3) + 1) - pool->base) >> 2;
+      break;
+    case IFCONFIG_POOL_INDIV:
+      pool->base = start;
+      pool->size = end - start + 1;
+      break;
+    default:
+      ASSERT (0);
+    }
 
   ALLOC_ARRAY_CLEAR (pool->in_use, uint8_t, pool->size);
 
@@ -64,21 +78,40 @@ ifconfig_pool_init (in_addr_t start, in_addr_t end)
 void
 ifconfig_pool_free (struct ifconfig_pool *pool)
 {
-  free (pool->in_use);
-  free (pool);
+  if (pool)
+    {
+      free (pool->in_use);
+      free (pool);
+    }
 }
 
 ifconfig_pool_handle
-ifconfig_pool_acquire_30_net (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *remote)
+ifconfig_pool_acquire (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *remote)
 {
   ifconfig_pool_handle i;
   for (i = 0; i < pool->size; ++i)
     {
       if (!pool->in_use[i])
 	{
-	  in_addr_t b = pool->base + (i << 2);
-	  *local = b + 1;
-	  *remote = b + 2;
+	  switch (pool->type)
+	    {
+	    case IFCONFIG_POOL_30NET:
+	      {
+		in_addr_t b = pool->base + (i << 2);
+		*local = b + 1;
+		*remote = b + 2;
+		break;
+	      }
+	    case IFCONFIG_POOL_INDIV:
+	      {
+		in_addr_t b = pool->base + i;
+		*local = 0;
+		*remote = b;
+		break;
+	      }
+	    default:
+	      ASSERT (0);
+	    }
 	  pool->in_use[i] = true;
 	  return i;
 	}
@@ -89,7 +122,7 @@ ifconfig_pool_acquire_30_net (struct ifconfig_pool *pool, in_addr_t *local, in_a
 bool
 ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand)
 {
-  if (hand >= 0 && hand < pool->size)
+  if (pool && hand >= 0 && hand < pool->size)
     {
       pool->in_use[hand] = false;
       return true;

@@ -38,6 +38,7 @@ void process_io (struct context *c);
 
 void encrypt_sign (struct context *c, bool comp_frag);
 
+const char *select_status_string (struct context *c, struct gc_arena *gc);
 void show_select_status (struct context *c);
 
 void read_incoming_link (struct context *c);

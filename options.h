@@ -53,6 +53,14 @@ struct push_list {
   /* newline delimited options, like config file */
   char options[MAX_PUSH_LIST_LEN];
 };
+
+/* internal OpenVPN route */
+struct iroute {
+  in_addr_t start;
+  in_addr_t end;
+  struct iroute *next;
+};
+
 #endif
 
 /* Command line options */
@@ -207,6 +215,16 @@ struct options
   in_addr_t ifconfig_pool_end;
   int real_hash_size;
   int virtual_hash_size;
+  const char *client_connect_script;
+  const char *client_disconnect_script;
+  const char *tmp_dir;
+  const char *client_config_dir;
+  int bcast_delay;
+  struct iroute *iroutes;
+  bool push_ifconfig_defined;
+  in_addr_t push_ifconfig_local;
+  in_addr_t push_ifconfig_remote_netmask;
+  bool enable_c2c;
 #endif
 
 #ifdef USE_CRYPTO
@@ -285,8 +303,11 @@ struct options
 #define OPT_P_TLS_PARMS (1<<12) /* TODO */
 #define OPT_P_MTU       (1<<13) /* TODO */
 #define OPT_P_NICE      (1<<14)
+#define OPT_P_PUSH      (1<<15)
+#define OPT_P_INSTANCE  (1<<16)
+#define OPT_P_CONFIG    (1<<17)
 
-#define OPT_P_ALL       (~0)
+#define OPT_P_DEFAULT   (~OPT_P_INSTANCE)
 
 #if P2MP
 #define PULL_DEFINED(opt) ((opt)->pull)
@@ -298,7 +319,8 @@ void parse_argv (struct options* options,
 		 int argc,
 		 char *argv[],
 		 int msglevel,
-		 unsigned int permission_mask);
+		 unsigned int permission_mask,
+		 unsigned int *option_types_found);
 
 void notnull (const char *arg, const char *description);
 
@@ -333,5 +355,12 @@ bool apply_push_options (struct options *options,
 
 bool is_persist_option (const struct options *o);
 
+void options_detach (struct options *o);
+
+void options_server_import (struct options *o,
+			    const char *filename,
+			    int msglevel,
+			    unsigned int permission_mask,
+			    unsigned int *option_types_found);
 
 #endif

@@ -41,6 +41,7 @@
 #include "socks.h"
 #include "sig.h"
 #include "misc.h"
+#include "mcast.h"
 
 /*
  * Our global key schedules, packaged thusly
@@ -136,7 +137,7 @@ struct context_2
   /* garbage collection arena for context_2 scope */
   struct gc_arena gc;
 
-  /* our global wait event */
+  /* our global wait events */
   struct event_wait event_wait;
 
 #if PASSTOS_CAPABILITY
@@ -282,10 +283,7 @@ struct context_2
    * Event loop info
    */
 
-  /* Always set to current time. */
-  time_t current;
-
-  /* how long to wait before we will need to be serviced */
+  /* how long to wait on link/tun read before we will need to be serviced */
   struct timeval timeval;
 
   /* next wakeup for processing coarse timers (>1 sec resolution) */
@@ -305,9 +303,15 @@ struct context_2
 #if P2MP
 
   /* --ifconfig endpoints to be pushed to client */
+  bool push_ifconfig_defined;
   in_addr_t push_ifconfig_local;
-  in_addr_t push_ifconfig_remote;
+  in_addr_t push_ifconfig_remote_netmask;
 
+  struct event_timeout push_request_interval;
+
+  /* buffers that need to be encrypted and forwarded
+     to remote */
+  struct mcast_set *mcast;
 #endif
 };
 
@@ -321,6 +325,9 @@ struct context
 
   /* true on initial VPN iteration */
   bool first_time;
+
+  /* used by multi-client code to lock the context */
+  MUTEX_DEFINE (mutex); // JYFIXME -- init/uninit me
 
   /* context modes */
 # define CM_P2P     0 /* standalone point-to-point session */

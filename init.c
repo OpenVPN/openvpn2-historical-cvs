@@ -37,6 +37,7 @@
 #include "occ.h"
 #include "schedule.h"
 #include "list.h"
+#include "otime.h"
 
 #include "memdbg.h"
 
@@ -99,17 +100,6 @@ context_init_1 (struct context *c)
 }
 
 void
-context_gc_detach (struct context *c, bool options_only)
-{
-  if (!options_only)
-    {
-      gc_detach (&c->c2.gc);
-      gc_detach (&c->gc);
-    }
-  gc_detach (&c->options.gc);
-}
-
-void
 context_gc_free (struct context *c)
 {
   gc_free (&c->c2.gc);
@@ -136,6 +126,8 @@ init_static (void)
       msg (M_INFO, "argv[%d] = '%s'", i, argv[i]);
   }
 #endif
+
+  update_time ();
 
   del_env_nonparm (0);
 
@@ -339,57 +331,52 @@ pre_setup (const struct options *options)
   msg (M_INFO, "%s", title_string);
 }
 
-static inline void
+void
 reset_coarse_timers (struct context *c)
 {
   c->c2.coarse_timer_wakeup = 0;
 }
 
 /*
- * initialize timers
+ * Initialize timers
  */
 static void
 do_init_timers (struct context *c, bool deferred)
 {
-  c->c2.current = time (NULL);
+  update_time ();
   reset_coarse_timers (c);
 
   /* initialize inactivity timeout */
   if (c->options.inactivity_timeout)
-    event_timeout_init (&c->c2.inactivity_interval, c->c2.current,
-			c->options.inactivity_timeout);
+    event_timeout_init (&c->c2.inactivity_interval, c->options.inactivity_timeout, now);
 
   /* initialize pings */
 
   if (c->options.ping_send_timeout)
-    event_timeout_init (&c->c2.ping_send_interval, 0,
-			c->options.ping_send_timeout);
+    event_timeout_init (&c->c2.ping_send_interval, c->options.ping_send_timeout, 0);
 
   if (c->options.ping_rec_timeout)
-    event_timeout_init (&c->c2.ping_rec_interval, c->c2.current,
-			c->options.ping_rec_timeout);
+    event_timeout_init (&c->c2.ping_rec_interval, c->options.ping_rec_timeout, now);
 
   if (!deferred)
     {
       /* initialize connection establishment timer */
-      event_timeout_init (&c->c2.wait_for_connect, c->c2.current, 5);
+      event_timeout_init (&c->c2.wait_for_connect, 2, now);
 
       /* initialize occ timers */
 
       if (c->options.occ
 	  && !TLS_MODE
 	  && c->c2.options_string_local && c->c2.options_string_remote)
-	event_timeout_init (&c->c2.occ_interval, c->c2.current,
-			    OCC_INTERVAL_SECONDS);
+	event_timeout_init (&c->c2.occ_interval, OCC_INTERVAL_SECONDS, now);
 
       if (c->options.mtu_test)
-	event_timeout_init (&c->c2.occ_mtu_load_test_interval, c->c2.current,
-			    OCC_MTU_LOAD_INTERVAL_SECONDS);
+	event_timeout_init (&c->c2.occ_mtu_load_test_interval, OCC_MTU_LOAD_INTERVAL_SECONDS, now);
 
       /* initialize packet_id persistence timer */
 #ifdef USE_CRYPTO
       if (c->options.packet_id_file)
-	event_timeout_init (&c->c2.packet_id_persist_interval, c->c2.current, 60);
+	event_timeout_init (&c->c2.packet_id_persist_interval, 60, now);
 #endif
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
@@ -600,35 +587,35 @@ pull_permission_mask (void)
 	  | OPT_P_MESSAGES);
 }
 
-static void
+void
 do_deferred_options (struct context *c, const unsigned int found)
 {
   if (found & OPT_P_MESSAGES)
     {
       init_verb_mute (&c->options);
-      msg (D_PUSH, "PULL: --verb and/or --mute level changed");
+      msg (D_PUSH, "OPTIONS IMPORT: --verb and/or --mute level changed");
     }
   if (found & OPT_P_TIMER)
     {
       do_init_timers (c, true);
-      msg (D_PUSH, "PULL: timers and/or timeouts modified");
+      msg (D_PUSH, "OPTIONS IMPORT: timers and/or timeouts modified");
     }
   if (found & OPT_P_SHAPER)
     {
-      msg (D_PUSH, "PULL: traffic shaper enabled");
+      msg (D_PUSH, "OPTIONS IMPORT: traffic shaper enabled");
       do_init_traffic_shaper (c);
     }
 
   if (found & OPT_P_PERSIST)
-    msg (D_PUSH, "PULL: --persist options modified");
+    msg (D_PUSH, "OPTIONS IMPORT: --persist options modified");
   if (found & OPT_P_UP)
-    msg (D_PUSH, "PULL: --ifconfig/up options modified");
+    msg (D_PUSH, "OPTIONS IMPORT: --ifconfig/up options modified");
   if (found & OPT_P_ROUTE)
-    msg (D_PUSH, "PULL: route options modified");
+    msg (D_PUSH, "OPTIONS IMPORT: route options modified");
   if (found & OPT_P_IPWIN32)
-    msg (D_PUSH, "PULL: --ip-win32 and/or --dhcp-option options modified");
+    msg (D_PUSH, "OPTIONS IMPORT: --ip-win32 and/or --dhcp-option options modified");
   if (found & OPT_P_SETENV)
-    msg (D_PUSH, "PULL: environment modified");
+    msg (D_PUSH, "OPTIONS IMPORT: environment modified");
 }
 
 void
@@ -645,16 +632,14 @@ do_up (struct context *c, bool pulled_options, unsigned int option_types_found)
       if (c->options.up_delay || PULL_DEFINED (&c->options))
 	{
 	  c->c2.did_open_tun = do_open_tun (c);
-	  TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
-	  c->c2.current = time (NULL);
+	  update_time ();
 	}
 
       if (c->c2.did_open_tun)
 	{
 	  /* if --route-delay was specified, start timer */
 	  if (c->options.route_delay_defined)
-	    event_timeout_init (&c->c2.route_wakeup, c->c2.current,
-				c->options.route_delay);
+	    event_timeout_init (&c->c2.route_wakeup, c->options.route_delay, now);
 	}
       else if (pulled_options && (option_types_found & (OPT_P_UP|OPT_P_ROUTE|OPT_P_IPWIN32)))
 	{
@@ -1263,16 +1248,6 @@ do_init_first_time_2 (struct context *c)
 }
 
 /*
- * set maximum fd + 1 for select()
- */
-static void
-do_init_maxfd (struct context *c)
-{
-  SOCKET_SETMAXFD (&c->c2.event_wait, &c->c2.link_socket);
-  TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
-}
-
-/*
  * If xinetd/inetd mode, don't allow restart.
  */
 static void
@@ -1448,6 +1423,21 @@ do_close_syslog (struct context *c)
     close_syslog ();
 }
 
+static void
+do_close_event_wait (struct context *c)
+{
+  wait_free (&c->c2.event_wait);
+}
+
+#if P2MP
+static void
+do_close_mcast (struct context *c)
+{
+  if (c->c2.mcast)
+    mcast_free (c->c2.mcast);
+}
+#endif
+
 /*
  * Initialize a tunnel instance.
  */
@@ -1485,8 +1475,9 @@ init_instance (struct context *c, bool init_buffers)
   if (c->mode == CM_P2P || c->mode == CM_CHILD)
     c->c2.occ_op = occ_reset_op ();
 
-  /* our wait-for-i/o object, different for posix vs. win32 */
-  wait_init (&c->c2.event_wait);
+  /* our wait-for-i/o objects, different for posix vs. win32 */
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    wait_init (&c->c2.event_wait, WAIT_READ|WAIT_WRITE);
 
   /* reset our transport layer socket object */
   link_socket_reset (&c->c2.link_socket);
@@ -1542,6 +1533,12 @@ init_instance (struct context *c, bool init_buffers)
   if (c->mode == CM_P2P)
     do_init_traffic_shaper (c);
 
+#if P2MP
+  /* initialize mcast output buffers */
+  if (c->mode == CM_CHILD)
+    c->c2.mcast = mcast_init ();
+#endif
+
   /* do one-time inits, and possibily become a daemon here */
   do_init_first_time_1 (c);
 
@@ -1565,9 +1562,6 @@ init_instance (struct context *c, bool init_buffers)
 	}
     }
 
-  /* set maximum fd + 1 for select() */
-  do_init_maxfd (c);
-
   /* initialize timers */
   if (c->mode == CM_P2P || c->mode == CM_CHILD)
     do_init_timers (c, false);
@@ -1587,6 +1581,9 @@ close_instance (struct context *c)
     lzo_compress_uninit (&c->c2.lzo_compwork);
 #endif
 
+  /* close event objects used for select() */
+  do_close_event_wait (c);
+
   /* free buffers */
   do_close_free_buf (c);
 
@@ -1603,13 +1600,19 @@ close_instance (struct context *c)
   do_close_tuntap (c);
 
   /* remove non-parameter environmental vars except for signal */
-  do_close_remove_env (c);
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_close_remove_env (c);
 
   /* close packet-id persistance file */
   do_close_packet_id (c);
 
   /* close fragmentation handler */
   do_close_fragment (c);
+
+#if P2MP
+  /* close mcast buffer list */
+  do_close_mcast (c);
+#endif
 
   /* close syslog */
   do_close_syslog (c);
@@ -1665,7 +1668,7 @@ test_crypto_thread (void *arg)
 	ALLOC_OBJ (child, struct context);
 	context_clear (child);
 	child->options = *options;
-	context_gc_detach (child, true);
+	options_detach (&child->options);
 	child->first_time = false;
 	child_id = openvpn_thread_create (test_crypto_thread, (void *) child);
       }
@@ -1702,7 +1705,7 @@ do_test_crypto (const struct options *o)
       struct context c;
       context_clear (&c);
       c.options = *o;
-      context_gc_detach (&c, true);
+      options_detach (&c.options);
       c.first_time = true;
       test_crypto_thread ((void *) &c);
       return true;

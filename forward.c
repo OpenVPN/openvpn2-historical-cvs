@@ -45,16 +45,24 @@
 
 /* show pre-select debugging info */
 
+const char *
+select_status_string (struct context *c, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (64, gc);
+  buf_printf (&out, "SELECT %s|%s|%s|%s %d/%d",
+	      TUNTAP_READ_STAT (&c->c2.event_wait, &c->c1.tuntap, gc),
+	      TUNTAP_WRITE_STAT (&c->c2.event_wait, &c->c1.tuntap, gc),
+	      SOCKET_READ_STAT (&c->c2.event_wait, &c->c2.link_socket, gc),
+	      SOCKET_WRITE_STAT (&c->c2.event_wait, &c->c2.link_socket, gc),
+	      (int) c->c2.timeval.tv_sec, (int) c->c2.timeval.tv_usec);
+  return BSTR (&out);
+}
+
 void
 show_select_status (struct context *c)
 {
   struct gc_arena gc = gc_new ();
-  msg (D_SELECT, "SELECT %s|%s|%s|%s %d/%d",
-       TUNTAP_READ_STAT (&c->c2.event_wait, &c->c1.tuntap, &gc),
-       TUNTAP_WRITE_STAT (&c->c2.event_wait, &c->c1.tuntap, &gc),
-       SOCKET_READ_STAT (&c->c2.event_wait, &c->c2.link_socket, &gc),
-       SOCKET_WRITE_STAT (&c->c2.event_wait, &c->c2.link_socket, &gc),
-       (int) c->c2.timeval.tv_sec, (int) c->c2.timeval.tv_usec);
+  msg (D_SELECT, "%s", select_status_string (c, &gc));
   gc_free (&gc);
 }
 
@@ -74,20 +82,20 @@ check_tls_dowork (struct context *c)
 {
   interval_t wakeup = BIG_TIMEOUT;
 
-  if (interval_test (&c->c2.tmp_int, c->c2.current))
+  if (interval_test (&c->c2.tmp_int))
     {
       if (tls_multi_process
 	  (c->c2.tls_multi, &c->c2.to_link, &c->c2.to_link_addr,
-	   &c->c2.link_socket, &wakeup, c->c2.current))
+	   &c->c2.link_socket, &wakeup))
 	{
-	  c->c2.current = time (NULL);
-	  interval_action (&c->c2.tmp_int, c->c2.current);
+	  update_time ();
+	  interval_action (&c->c2.tmp_int);
 	}
 
-      interval_future_trigger (&c->c2.tmp_int, wakeup, c->c2.current);
+      interval_future_trigger (&c->c2.tmp_int, wakeup);
     }
 
-  interval_schedule_wakeup (&c->c2.tmp_int, c->c2.current, &wakeup);
+  interval_schedule_wakeup (&c->c2.tmp_int, &wakeup);
 
   if (wakeup)
     context_reschedule_sec (c, wakeup);
@@ -132,7 +140,10 @@ check_incoming_control_channel_dowork (struct context *c)
 	      if (status == PUSH_MSG_ERROR)
 		msg (D_PUSH_ERRORS, "WARNING: Received bad push/pull message: %s", BSTR (&buf));
 	      else if (status == PUSH_MSG_REPLY)
-		do_up (c, true, option_types_found); /* delay bringing tun/tap up until --push parms received from remote */
+		{
+		  do_up (c, true, option_types_found); /* delay bringing tun/tap up until --push parms received from remote */
+		  event_timeout_clear (&c->c2.push_request_interval);
+		}
 	    }
 	  else
 	    {
@@ -146,6 +157,16 @@ check_incoming_control_channel_dowork (struct context *c)
       gc_free (&gc);
     }
 }
+
+/*
+ * Periodically resend PUSH_REQUEST until PUSH message received
+ */
+void
+check_push_request_dowork (struct context *c)
+{
+  send_push_request (c);
+}
+
 #endif
 
 /*
@@ -154,15 +175,20 @@ check_incoming_control_channel_dowork (struct context *c)
 void
 check_connection_established_dowork (struct context *c)
 {
-  if (event_timeout_trigger
-      (&c->c2.wait_for_connect, c->c2.current, &c->c2.timeval))
+  if (event_timeout_trigger (&c->c2.wait_for_connect, &c->c2.timeval))
     {
       if (CONNECTION_ESTABLISHED (&c->c2.link_socket))
 	{
 #if P2MP
 	  /* if --pull was specified, send a push request to server */
 	  if (c->c2.tls_multi && c->options.pull)
-	    send_push_request (c);
+	    {
+	      send_push_request (c);
+
+	      /* if no reply, try again in 3 sec */
+	      event_timeout_init (&c->c2.push_request_interval, 3, now);
+	      reset_coarse_timers (c);
+	    }
 	  else
 #endif
 	    {
@@ -183,7 +209,7 @@ send_control_channel_string (struct context *c, char *str)
     bool stat;
     buf_set_read (&buf, str, strlen (str) + 1);
     stat = tls_send_payload (c->c2.tls_multi, &buf);
-    interval_action (&c->c2.tmp_int, c->c2.current);
+    interval_action (&c->c2.tmp_int);
     context_immediate_reschedule (c);
     msg (D_PUSH, "SENT CONTROL [%s]: '%s' (status=%d)",
 	 tls_common_name (c->c2.tls_multi),
@@ -204,7 +230,7 @@ check_add_routes_dowork (struct context *c)
   if (c->c1.route_list)
     {
       do_route (&c->options, c->c1.route_list);
-      c->c2.current = time (NULL);
+      update_time ();
     }
   event_timeout_clear (&c->c2.route_wakeup);
 }
@@ -243,9 +269,26 @@ check_fragment_dowork (struct context *c)
 				 &c->c2.frame_fragment))
     encrypt_sign (c, false);
 
-  fragment_housekeeping (c->c2.fragment, &c->c2.frame_fragment, c->c2.current,
-			 &c->c2.timeval);
+  fragment_housekeeping (c->c2.fragment, &c->c2.frame_fragment, &c->c2.timeval);
 }
+
+#if P2MP
+/*
+ * Should we send a buffered multicast datagram to remote?
+ */
+void
+check_send_mcast_dowork (struct context *c)
+{
+  struct mcast_buffer *mbuf = mcast_extract_buf (c->c2.mcast);
+  if (mbuf)
+    {
+      c->c2.buf = mbuf->buf;
+      encrypt_sign (c, true);
+      mcast_free_buf (mbuf);
+      msg (D_PACKET_CONTENT, "SENT MCAST");
+    }
+}
+#endif
 
 /*
  * Compress, fragment, encrypt and HMAC-sign an outgoing packet.
@@ -259,12 +302,10 @@ encrypt_sign (struct context *c, bool comp_frag)
 #ifdef USE_LZO
       /* Compress the packet. */
       if (c->options.comp_lzo)
-	lzo_compress (&c->c2.buf, b->lzo_compress_buf, &c->c2.lzo_compwork,
-		      &c->c2.frame, c->c2.current);
+	lzo_compress (&c->c2.buf, b->lzo_compress_buf, &c->c2.lzo_compwork, &c->c2.frame);
 #endif
       if (c->c2.fragment)
-	fragment_outgoing (c->c2.fragment, &c->c2.buf, &c->c2.frame_fragment,
-			   c->c2.current);
+	fragment_outgoing (c->c2.fragment, &c->c2.buf, &c->c2.frame_fragment);
     }
 
 #ifdef USE_CRYPTO
@@ -284,8 +325,7 @@ encrypt_sign (struct context *c, bool comp_frag)
    * Encrypt the packet and write an optional
    * HMAC signature.
    */
-  openvpn_encrypt (&c->c2.buf, b->encrypt_buf, &c->c2.crypto_options,
-		   &c->c2.frame, c->c2.current);
+  openvpn_encrypt (&c->c2.buf, b->encrypt_buf, &c->c2.crypto_options, &c->c2.frame);
 #endif
   /*
    * Get the address we will be sending the packet to.
@@ -326,6 +366,11 @@ process_coarse_timers (struct context *c)
   /* process connection establishment items */
   check_connection_established (c);
 
+#if P2MP
+  /* see if we should send a push_request in response to --pull */
+  check_push_request (c);
+#endif
+
   /* process --route options */
   check_add_routes (c);
 
@@ -356,7 +401,7 @@ check_coarse_timers_dowork (struct context *c)
   c->c2.timeval.tv_sec = BIG_TIMEOUT;
   c->c2.timeval.tv_usec = 0;
   process_coarse_timers (c);
-  c->c2.coarse_timer_wakeup = c->c2.current + c->c2.timeval.tv_sec; 
+  c->c2.coarse_timer_wakeup = now + c->c2.timeval.tv_sec; 
 
   msg (D_INTERVAL, "TIMER: coarse timer wakeup %d seconds", (int) c->c2.timeval.tv_sec);
 
@@ -368,17 +413,18 @@ check_coarse_timers_dowork (struct context *c)
 static inline void
 check_coarse_timers (struct context *c)
 {
-  if (c->c2.current >= c->c2.coarse_timer_wakeup)
+  const time_t local_now = now;
+  if (local_now >= c->c2.coarse_timer_wakeup)
     check_coarse_timers_dowork (c);
   else
-    context_reschedule_sec (c, c->c2.coarse_timer_wakeup - c->c2.current);
+    context_reschedule_sec (c, c->c2.coarse_timer_wakeup - local_now);
 }
 
 static void
 check_timeout_random_component_dowork (struct context *c)
 {
   const int update_interval = 10; /* seconds */
-  c->c2.update_timeout_random_component = c->c2.current + update_interval;
+  c->c2.update_timeout_random_component = now + update_interval;
   c->c2.timeout_random_component.tv_usec = (time_t) get_random () & 0x000FFFFF;
   c->c2.timeout_random_component.tv_sec = 0;
 
@@ -388,10 +434,10 @@ check_timeout_random_component_dowork (struct context *c)
 static inline void
 check_timeout_random_component (struct context *c)
 {
-  if (c->c2.current >= c->c2.update_timeout_random_component)
+  if (now >= c->c2.update_timeout_random_component)
     check_timeout_random_component_dowork (c);
   if (c->c2.timeval.tv_sec >= 1)
-    tv_add_approx (&c->c2.timeval, &c->c2.timeout_random_component);
+    tv_add (&c->c2.timeval, &c->c2.timeout_random_component);
 }
 
 /*
@@ -530,19 +576,19 @@ process_incoming_link (struct context *c)
 	   * and return false.
 	   */
 	  //tls_mutex_lock (c->c2.tls_multi);
-	  if (tls_pre_decrypt (c->c2.tls_multi, &c->c2.from, &c->c2.buf, &c->c2.crypto_options, c->c2.current))
+	  if (tls_pre_decrypt (c->c2.tls_multi, &c->c2.from, &c->c2.buf, &c->c2.crypto_options))
 	    {
-	      interval_action (&c->c2.tmp_int, c->c2.current);
+	      interval_action (&c->c2.tmp_int);
 
 	      /* reset packet received timer if TLS packet */
 	      if (c->options.ping_rec_timeout)
-		event_timeout_reset (&c->c2.ping_rec_interval, c->c2.current);
+		event_timeout_reset (&c->c2.ping_rec_interval);
 	    }
 	}
 #endif /* USE_SSL */
 
       /* authenticate and decrypt the incoming packet */
-      decrypt_status = openvpn_decrypt (&c->c2.buf, c->c2.buffers->decrypt_buf, &c->c2.crypto_options, &c->c2.frame, c->c2.current);
+      decrypt_status = openvpn_decrypt (&c->c2.buf, c->c2.buffers->decrypt_buf, &c->c2.crypto_options, &c->c2.frame);
 
 #ifdef USE_SSL
       if (c->c2.tls_multi)
@@ -563,7 +609,7 @@ process_incoming_link (struct context *c)
 #endif /* USE_CRYPTO */
 
       if (c->c2.fragment)
-	fragment_incoming (c->c2.fragment, &c->c2.buf, &c->c2.frame_fragment, c->c2.current);
+	fragment_incoming (c->c2.fragment, &c->c2.buf, &c->c2.frame_fragment);
 
 #ifdef USE_LZO
       /* decompress the incoming packet */
@@ -584,7 +630,7 @@ process_incoming_link (struct context *c)
 
       /* reset packet received timer */
       if (c->options.ping_rec_timeout && c->c2.buf.len > 0)
-	event_timeout_reset (&c->c2.ping_rec_interval, c->c2.current);
+	event_timeout_reset (&c->c2.ping_rec_interval);
 
       /* increment authenticated receive byte count */
       if (c->c2.buf.len > 0)
@@ -733,7 +779,7 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
 	   * Let the pinger know that we sent a packet.
 	   */
 	  if (c->options.ping_send_timeout)
-	    event_timeout_reset (&c->c2.ping_send_interval, c->c2.current);
+	    event_timeout_reset (&c->c2.ping_send_interval);
 
 #if PASSTOS_CAPABILITY
 	  /* Set TOS */
@@ -885,7 +931,7 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
    * remote and failing.
    */
   if (c->options.inactivity_timeout)
-    event_timeout_reset (&c->c2.inactivity_interval, c->c2.current);
+    event_timeout_reset (&c->c2.inactivity_interval);
 
   buf_reset (&c->c2.to_tun);
 
@@ -895,7 +941,7 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
 void
 pre_select (struct context *c)
 {
-  /* make sure current time (c->c2.current) is updated on function entry */
+  /* make sure current time (now) is updated on function entry */
 
   /*
    * Start with an effectively infinite timeout, then let it
@@ -929,6 +975,11 @@ pre_select (struct context *c)
 
   /* Should we send an OCC message? */
   check_send_occ_msg (c);
+
+#if P2MP
+  /* Should we send a buffered multicast datagram to remote? */
+  check_send_mcast (c);
+#endif
 
   /* Should we deliver a datagram fragment to remote? */
   check_fragment (c);
@@ -1024,12 +1075,13 @@ single_select (struct context *c)
     {
       if (check_debug_level (D_SELECT))
 	show_select_status (c);
+
       c->c2.select_status = SELECT (&c->c2.event_wait, &c->c2.timeval);
       check_status (c->c2.select_status, "select", NULL, NULL);
     }
 
-  /* current should always be a reasonably up-to-date timestamp */
-  c->c2.current = time (NULL);
+  /* 'now' should always be a reasonably up-to-date timestamp */
+  update_time ();
 
   /* set signal_received if a signal was received */
   SELECT_SIGNAL_RECEIVED (&c->c2.event_wait, c->sig->signal_received);

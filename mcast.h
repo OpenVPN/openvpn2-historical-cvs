@@ -23,29 +23,46 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef PUSH_H
-#define PUSH_H
+#ifndef MCAST_H
+#define MCAST_H
+
+/*
+ * Handle both multicast and broadcast functions.
+ */
 
 #if P2MP
 
-#include "forward.h"
+/* define this to enable special test mode */
+/*#define MCAST_TEST*/
 
-#define PUSH_MSG_ERROR     0
-#define PUSH_MSG_REQUEST   1
-#define PUSH_MSG_REPLY     2
+#include "basic.h"
+#include "buffer.h"
 
-int process_incoming_push_msg (struct context *c,
-			       const struct buffer *buffer,
-			       bool honor_received_options,
-			       unsigned int permission_mask,
-			       int *option_types_found);
+struct mcast_buffer
+{
+  struct buffer buf;
+  int refcount;
+};
 
-void push_option (struct options *o, const char *opt, int msglevel);
+struct mcast_set
+{
+  struct mcast_buffer *buf;
+};
 
-void push_reset (struct options *o);
+struct mcast_set *mcast_init (void);
+void mcast_free (struct mcast_set *ms);
 
-bool send_push_request (struct context *c);
-bool send_push_reply (struct context *c);
+struct mcast_buffer *mcast_alloc_buf (const struct buffer *buf);
+void mcast_free_buf (struct mcast_buffer *mb);
+
+bool mcast_add_buf (struct mcast_set *ms, struct mcast_buffer* mb);
+struct mcast_buffer *mcast_extract_buf (struct mcast_set *ms);
+
+static inline bool
+mcast_defined (const struct mcast_set *ms)
+{
+  return ms && ms->buf;
+}
 
 #endif
 #endif

@@ -91,7 +91,7 @@ check_add_routes (struct context *c)
 {
   void check_add_routes_dowork (struct context *c);
   if (event_timeout_trigger
-      (&c->c2.route_wakeup, c->c2.current, &c->c2.timeval))
+      (&c->c2.route_wakeup, &c->c2.timeval))
     check_add_routes_dowork (c);
 }
 
@@ -103,8 +103,7 @@ check_inactivity_timeout (struct context *c)
 {
   void check_inactivity_timeout_dowork (struct context *c);
   if (c->options.inactivity_timeout
-      && event_timeout_trigger (&c->c2.inactivity_interval, c->c2.current,
-				&c->c2.timeval))
+      && event_timeout_trigger (&c->c2.inactivity_interval, &c->c2.timeval))
     check_inactivity_timeout_dowork (c);
 }
 
@@ -119,6 +118,31 @@ check_fragment (struct context *c)
     check_fragment_dowork (c);
 }
 
+#if P2MP
+/*
+ * Should we send a buffered multicast datagram to remote?
+ */
+static inline void
+check_send_mcast (struct context *c)
+{
+  void check_send_mcast_dowork (struct context *c);
+  if (mcast_defined (c->c2.mcast) && !c->c2.to_link.len)
+    check_send_mcast_dowork (c);
+}
+
+/*
+ * see if we should send a push_request in response to --pull
+ */
+static inline void
+check_push_request (struct context *c)
+{
+  void check_push_request_dowork (struct context *c);
+  if (event_timeout_trigger (&c->c2.push_request_interval, &c->c2.timeval))
+    check_push_request_dowork (c);
+}
+
+#endif
+
 #ifdef USE_CRYPTO
 /*
  * Should we persist our anti-replay packet ID state to disk?
@@ -127,8 +151,7 @@ static inline void
 check_packet_id_persist_flush (struct context *c)
 {
   if (packet_id_persist_enabled (&c->c1.pid_persist)
-      && event_timeout_trigger (&c->c2.packet_id_persist_interval, c->c2.current,
-				&c->c2.timeval))
+      && event_timeout_trigger (&c->c2.packet_id_persist_interval, &c->c2.timeval))
     packet_id_persist_save (&c->c1.pid_persist);
 }
 #endif

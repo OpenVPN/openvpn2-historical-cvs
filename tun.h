@@ -163,8 +163,6 @@ struct tuntap
   ((tt)->hand != NULL \
   && wait_trigger ((w), (tt)->set.overlapped.hEvent))
 
-#define TUNTAP_SETMAXFD(w, tt)
-
 #define TUNTAP_READ_STAT(w, tt, gc) \
    ((tt)->hand != NULL \
    ? overlapped_io_state_ascii (&((tt)->reads),  "tr", (gc)) : "trX")
@@ -175,12 +173,11 @@ struct tuntap
 
 #else
 
-#define TUNTAP_SET_READ(w, tt)   { if ((tt)->fd >= 0)   FD_SET   ((tt)->fd, &((w)->reads)); }
-#define TUNTAP_SET_WRITE(w, tt)  { if ((tt)->fd >= 0)   FD_SET   ((tt)->fd, &((w)->writes)); }
-#define TUNTAP_ISSET(w, tt, set)      ((tt)->fd >= 0 && FD_ISSET ((tt)->fd, &((w)->set)))
-#define TUNTAP_SETMAXFD(w, tt)   { if ((tt)->fd >= 0)   wait_update_maxfd ((w), (tt)->fd); }
-#define TUNTAP_READ_STAT(w, tt, gc)  (TUNTAP_ISSET ((w), (tt), reads) ?  "TR" : "tr")
-#define TUNTAP_WRITE_STAT(w, tt, gc) (TUNTAP_ISSET ((w), (tt), writes) ? "TW" : "tw")
+#define TUNTAP_SET_READ(w, tt)      { wait_add_reads  ((w), (tt)->fd); }
+#define TUNTAP_SET_WRITE(w, tt)     { wait_add_writes ((w), (tt)->fd); }
+#define TUNTAP_ISSET(w, tt, set)    ( wait_test_##set ((w), (tt)->fd))
+#define TUNTAP_READ_STAT(w, tt, gc)     (TUNTAP_ISSET ((w), (tt), reads)  ? "TR" : "tr")
+#define TUNTAP_WRITE_STAT(w, tt, gc)    (TUNTAP_ISSET ((w), (tt), writes) ? "TW" : "tw")
 
 #endif
 

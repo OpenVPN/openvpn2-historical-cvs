@@ -49,22 +49,25 @@ send_push_reply (struct context *c)
 {
   struct gc_arena gc = gc_new ();
   struct buffer buf = alloc_buf_gc (MAX_PUSH_LIST_LEN + 256, &gc);
-  bool ret;
+  bool ret = false;
 
-  buf_printf (&buf, "PUSH_REPLY");
+  if (c->c2.push_ifconfig_defined)
+    {
+      buf_printf (&buf, "PUSH_REPLY");
 
-  if (c->options.push_list && strlen (c->options.push_list->options))
-    buf_printf (&buf, ",%s", c->options.push_list->options);
+      if (c->options.push_list && strlen (c->options.push_list->options))
+	buf_printf (&buf, ",%s", c->options.push_list->options);
 
-  if (c->c2.push_ifconfig_local && c->c2.push_ifconfig_remote)
-    buf_printf (&buf, ",ifconfig %s %s",
-		print_in_addr_t (c->c2.push_ifconfig_local, true, &gc),
-		print_in_addr_t (c->c2.push_ifconfig_remote, true, &gc));
+      if (c->c2.push_ifconfig_local && c->c2.push_ifconfig_remote_netmask)
+	buf_printf (&buf, ",ifconfig %s %s",
+		    print_in_addr_t (c->c2.push_ifconfig_local, true, &gc),
+		    print_in_addr_t (c->c2.push_ifconfig_remote_netmask, true, &gc));
 
-  if (strlen (BSTR (&buf)) >= MAX_PUSH_LIST_LEN)
-    msg (M_FATAL, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
+      if (strlen (BSTR (&buf)) >= MAX_PUSH_LIST_LEN)
+	msg (M_FATAL, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
 
-  ret = send_control_channel_string (c, BSTR (&buf));
+      ret = send_control_channel_string (c, BSTR (&buf));
+    }
 
   gc_free (&gc);
   return ret;
@@ -89,23 +92,31 @@ push_option (struct options *o, const char *opt, int msglevel)
   strcat (o->push_list->options, opt);
 }
 
+void
+push_reset (struct options *o)
+{
+  o->push_list = NULL;
+}
+
 int
 process_incoming_push_msg (struct context *c,
-			   struct buffer *buf,
+			   const struct buffer *buffer,
 			   bool honor_received_options,
 			   unsigned int permission_mask,
 			   int *option_types_found)
 {
   int ret = PUSH_MSG_ERROR;
-  if (buf_string_compare_advance (buf, "PUSH_REQUEST"))
+  struct buffer buf = *buffer;
+
+  if (buf_string_compare_advance (&buf, "PUSH_REQUEST"))
     {
       if (send_push_reply (c))
 	ret = PUSH_MSG_REQUEST;
     }
-  else if (honor_received_options && buf_string_compare_advance (buf, "PUSH_REPLY,"))
+  else if (honor_received_options && buf_string_compare_advance (&buf, "PUSH_REPLY,"))
     {
       if (apply_push_options (&c->options,
-			      buf,
+			      &buf,
 			      permission_mask,
 			      option_types_found))
 	ret = PUSH_MSG_REPLY;

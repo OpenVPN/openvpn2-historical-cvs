@@ -45,10 +45,11 @@ openvpn_SOURCES = \
 	gremlin.c gremlin.h \
 	init.c init.h \
 	integer.h \
-        interval.c interval.h \
+        interval.h \
 	io.c io.h \
 	list.c list.h \
 	lzo.c lzo.h \
+	mcast.c mcast.h \
         memdbg.h \
 	misc.c misc.h \
 	mroute.c mroute.h \
@@ -58,6 +59,7 @@ openvpn_SOURCES = \
 	occ.c occ.h occ-inline.h \
 	openvpn.c openvpn.h \
 	options.c options.h \
+	otime.c otime.h \
 	packet_id.c packet_id.h \
 	ping.c ping.h ping-inline.h \
 	pool.c pool.h \

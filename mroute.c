@@ -40,9 +40,33 @@
 
 #include "memdbg.h"
 
+static const uint8_t ethernet_bcast_addr[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
 bool
-mroute_extract_addr_from_packet (struct mroute_addr *addr, const struct buffer *buf, int tunnel_type, bool dest)
+mroute_learnable_address (const struct mroute_addr *addr)
 {
+  int i;
+  bool not_all_zeros = false;
+  bool not_all_ones = false;
+
+  for (i = 0; i < addr->len; ++i)
+    {
+      int b = addr->addr[i];
+      if (b != 0x00)
+	not_all_zeros = true;
+      if (b != 0xFF)
+	not_all_ones = true;
+    }
+  return not_all_zeros && not_all_ones;
+}
+
+unsigned int
+mroute_extract_addr_from_packet (struct mroute_addr *src,
+				 struct mroute_addr *dest,
+				 const struct buffer *buf,
+				 int tunnel_type)
+{
+  unsigned int ret = 0;
   if (tunnel_type == DEV_TYPE_TUN)
     {
       if (BLEN (buf) >= 1)
@@ -53,10 +77,24 @@ mroute_extract_addr_from_packet (struct mroute_addr *addr, const struct buffer *
 	      if (BLEN (buf) >= (int) sizeof (struct openvpn_iphdr))
 		{
 		  const struct openvpn_iphdr *ip = (const struct openvpn_iphdr *) BPTR (buf);
-		  addr->type = MR_ADDR_IPV4;
-		  addr->len = 4;
-		  memcpy (addr->addr, dest ? &ip->daddr : &ip->saddr, 4);
-		  return true;
+		  if (src)
+		    {
+		      src->type = MR_ADDR_IPV4;
+		      src->len = 4;
+		      memcpy (src->addr, &ip->saddr, 4);
+		    }
+		  if (dest)
+		    {
+		      dest->type = MR_ADDR_IPV4;
+		      dest->len = 4;
+		      memcpy (dest->addr, &ip->daddr, 4);
+
+		      /* mcast address? */
+		      if ((ntohl (ip->daddr) & IP_MCAST_SUBNET_MASK) == (unsigned long) IP_MCAST_NETWORK)
+			ret |= MROUTE_EXTRACT_MCAST;
+		    }
+		  
+		  ret |= MROUTE_EXTRACT_SUCCEEDED;
 		}
 	      break;
 	    case 6:
@@ -72,13 +110,27 @@ mroute_extract_addr_from_packet (struct mroute_addr *addr, const struct buffer *
       if (BLEN (buf) >= (int) sizeof (struct openvpn_ethhdr))
 	{
 	  const struct openvpn_ethhdr *eth = (const struct openvpn_ethhdr *) BPTR (buf);
-	  addr->type = MR_ADDR_ETHER;
-	  addr->len = 6;
-	  memcpy (addr->addr, dest ? eth->dest : eth->source, 6);
-	  return true;
+	  if (src)
+	    {
+	      src->type = MR_ADDR_ETHER;
+	      src->len = 6;
+	      memcpy (src->addr, eth->source, 6);
+	    }
+	  if (dest)
+	    {
+	      dest->type = MR_ADDR_ETHER;
+	      dest->len = 6;
+	      memcpy (dest->addr, eth->dest, 6);
+
+	      /* broadcast packet? */
+	      if (memcmp (eth->dest, ethernet_bcast_addr, 6) == 0)
+		ret |= MROUTE_EXTRACT_BCAST;
+	    }
+	  
+	  ret |= MROUTE_EXTRACT_SUCCEEDED;
 	}
     }
-  return false;
+  return ret;
 }
 
 bool
@@ -104,30 +156,6 @@ mroute_extract_sockaddr_in (struct mroute_addr *addr, const struct sockaddr_in *
   return false;
 }
 
-static inline void
-mroute_addr_init (struct mroute_addr *addr)
-{
-  CLEAR (*addr);
-}
-
-static inline void
-mroute_addr_free (struct mroute_addr *addr)
-{
-  CLEAR (*addr);
-}
-
-void
-mroute_list_init (struct mroute_list *list)
-{
-  mroute_addr_init (&list->addr);
-}
-
-void
-mroute_list_free (struct mroute_list *list)
-{
-  mroute_addr_free (&list->addr);
-}
-
 uint32_t
 mroute_addr_hash_function (const void *key, uint32_t iv)
 {
@@ -143,30 +171,6 @@ mroute_addr_compare_function (const void *key1, const void *key2)
 			    (const struct mroute_addr *) key2);
 }
 
-#if 0
-static const char *
-mroute_addr_type_print (int type)
-{
-  switch (type)
-    {
-    case MR_ADDR_NONE:
-      return "MR_ADDR_NONE";
-    case MR_ADDR_ETHER:
-      return "MR_ADDR_ETHER";
-    case MR_ADDR_IPV4:
-      return "MR_ADDR_IPV4";
-    case MR_ADDR_IPV6:
-      return "MR_ADDR_IPV6";
-    case MR_ADDR_IPV4|MR_WITH_PORT:
-      return "MR_ADDR_IPV4|MR_WITH_PORT";
-    case MR_ADDR_IPV6|MR_WITH_PORT:
-      return "MR_ADDR_IPV6|MR_WITH_PORT";
-    default:
-      return "UNKNOWN";
-    }
-}
-#endif
-
 const char *
 mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc)
 {
@@ -177,11 +181,8 @@ mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc)
   // JYFIXME -- print addresses for all types
   switch (maddr.type)
     {
-    case MR_ADDR_NONE:
-      buf_printf (&out, "UNKNOWN");
-      break;
     case MR_ADDR_ETHER:
-      buf_printf (&out, "ETHERNET"); 
+      buf_printf (&out, "Ether %s", format_hex_ex (ma->addr, 6, 0, 1, ":", gc)); 
       break;
     case MR_ADDR_IPV4|MR_WITH_PORT:
       with_port = true;
@@ -194,7 +195,7 @@ mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc)
 	buf_set_read (&buf, maddr.addr, maddr.len);
 	addr = buf_read_u32 (&buf, &status);
 	if (status)
-	  buf_printf (&out, "%s", print_in_addr_t (addr, true, gc));
+	  buf_printf (&out, "IPv4 %s", print_in_addr_t (addr, true, gc));
 	if (with_port)
 	  {
 	    port = buf_read_u16 (&buf);

@@ -182,7 +182,7 @@ main (int argc, char *argv[])
 	  init_options (&c.options);
 
 	  /* parse command line options, and read configuration file */
-	  parse_argv (&c.options, argc, argv, M_USAGE, OPT_P_ALL);
+	  parse_argv (&c.options, argc, argv, M_USAGE, OPT_P_DEFAULT, NULL);
 
 	  /* init verbosity and mute levels */
 	  init_verb_mute (&c.options);

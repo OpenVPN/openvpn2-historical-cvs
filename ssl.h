@@ -346,6 +346,9 @@ struct tls_session
 
   char *common_name;
 
+  /* not-yet-authenticated incoming client */
+  struct sockaddr_in untrusted_sockaddr;
+
   struct key_state key[KS_SIZE];
 };
 
@@ -434,21 +437,18 @@ bool tls_multi_process (struct tls_multi *multi,
 			struct buffer *to_link,
 			struct sockaddr_in *to_link_addr,
 			struct link_socket *to_link_socket,
-			interval_t *wakeup,
-			time_t current);
+			interval_t *wakeup);
 
 void tls_multi_free (struct tls_multi *multi, bool clear);
 
 bool tls_pre_decrypt (struct tls_multi *multi,
 		      struct sockaddr_in *from,
 		      struct buffer *buf,
-		      struct crypto_options *opt,
-		      time_t current);
+		      struct crypto_options *opt);
 
 bool tls_pre_decrypt_dynamic (const struct tls_multi *multi,
 			      const struct sockaddr_in *from,
-			      const struct buffer *buf,
-			      time_t current);
+			      const struct buffer *buf);
 
 void tls_pre_encrypt (struct tls_multi *multi,
 		      struct buffer *buf, struct crypto_options *opt);

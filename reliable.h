@@ -115,7 +115,7 @@ void reliable_free (struct reliable *rel);
 bool reliable_empty (const struct reliable *rel);
 
 /* in how many seconds should we wake up to check for timeout */
-interval_t reliable_send_timeout (const struct reliable *rel, time_t current);
+interval_t reliable_send_timeout (const struct reliable *rel);
 
 /* del acknowledged items from send buf */
 void reliable_send_purge (struct reliable *rel, struct reliable_ack *ack);
@@ -139,13 +139,13 @@ struct buffer *reliable_get_buf_output_sequenced (struct reliable *rel);
 struct buffer *reliable_get_buf_sequenced (struct reliable *rel);
 
 /* return true if reliable_send would return a non-NULL result */
-bool reliable_can_send (const struct reliable *rel, time_t current);
+bool reliable_can_send (const struct reliable *rel);
 
 /* return next buffer to send to remote */
-struct buffer *reliable_send (struct reliable *rel, int *opcode, time_t current);
+struct buffer *reliable_send (struct reliable *rel, int *opcode);
 
 /* schedule all pending packets for immediate retransmit */
-void reliable_schedule_now (struct reliable *rel, time_t current);
+void reliable_schedule_now (struct reliable *rel);
 
 /* enable an incoming buffer previously returned by a get function as active */
 void reliable_mark_active_incoming (struct reliable *rel, struct buffer *buf,

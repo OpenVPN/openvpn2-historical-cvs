@@ -888,23 +888,6 @@ get_default_gateway (in_addr_t *ret)
 #define RTF_UP      0x1
 #define RTF_GATEWAY 0x2
 
-#elif defined(TARGET_DARWUB)
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-
-/* all of this is taken from <net/route.h> in Darwin */
-#define RTA_DST     0x1
-#define RTA_GATEWAY 0x2
-#define RTA_NETMASK 0x4
-
-#define RTM_GET     0x4
-#define RTM_VERSION 5
-
-#define RTF_UP      0x1
-#define RTF_GATEWAY 0x2
-
 /*
  * These numbers are used by reliable protocols for determining
  * retransmission behavior and are included in the routing structure.
@@ -922,7 +905,6 @@ struct rt_metrics {
         u_long  rmx_pksent;     /* packets sent using this route */
         u_long  rmx_filler[4];  /* will be used for T/TCP later */
 };
-
 
 /*
  * Structures for routing messages.

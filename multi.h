@@ -30,6 +30,7 @@
 
 #include "openvpn.h"
 #include "mroute.h"
+#include "mcast.h"
 #include "list.h"
 #include "schedule.h"
 #include "pool.h"
@@ -39,15 +40,14 @@ struct multi_instance {
   bool defined;
   time_t created;
   struct timeval wakeup;       /* absolute time */
-  struct mroute_list real;
-  struct mroute_list virtual;
+  struct mroute_addr real;
   ifconfig_pool_handle vaddr_handle;
+  struct gc_arena gc;
 
-  bool did_routes;
-  bool did_ifconfig;
   bool did_open_context;
   bool did_real_hash;
-  bool did_virtual_hash;
+  bool did_iter;
+  bool connection_established_flag;
 
   struct context context;
 };
@@ -58,8 +58,12 @@ struct multi_context {
   struct multi_instance *earliest_wakeup;
   struct hash *hash;   /* indexed by real address */
   struct hash *vhash;  /* indexed by virtual address */
+  struct hash *iter;   /* like real address hash but optimized for iteration */
   struct schedule *schedule;
   struct ifconfig_pool *ifconfig_pool;
+
+  int bcast_delay;
+  bool enable_c2c;
 };
 
 void multi_init (struct multi_context *m, struct context *t);

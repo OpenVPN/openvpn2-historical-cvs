@@ -46,8 +46,7 @@ check_send_occ_req (struct context *c)
   if (event_timeout_defined (&c->c2.occ_interval)
       && !c->c2.to_link.len
       && c->c2.occ_op < 0
-      && event_timeout_trigger (&c->c2.occ_interval, c->c2.current,
-				&c->c2.timeval))
+      && event_timeout_trigger (&c->c2.occ_interval, &c->c2.timeval))
     check_send_occ_req_dowork (c);
 }
 
@@ -62,7 +61,7 @@ check_send_occ_load_test (struct context *c)
       && !c->c2.to_link.len
       && c->c2.occ_op < 0
       && event_timeout_trigger (&c->c2.occ_mtu_load_test_interval,
-				c->c2.current, &c->c2.timeval))
+				&c->c2.timeval))
     check_send_occ_load_test_dowork (c);
 }
 

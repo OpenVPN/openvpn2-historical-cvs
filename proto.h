@@ -46,12 +46,13 @@
 #define OPENVPN_ETH_ALEN 6            /* ethernet address length */
 struct openvpn_ethhdr 
 {
-  uint8_t dest[OPENVPN_ETH_ALEN];     /* destination ethernet addr	*/
+  uint8_t dest[OPENVPN_ETH_ALEN];     /* destination ethernet addr */
   uint8_t source[OPENVPN_ETH_ALEN];   /* source ethernet addr	*/
 
 # define OPENVPN_ETH_P_IPV4   0x0800  /* IPv4 protocol */
 # define OPENVPN_ETH_P_IPV6   0x86DD  /* IPv6 protocol */
-  uint16_t proto;                     /* packet type ID field	*/
+# define OPENVPN_ETH_P_ARP    0x0806  /* ARP protocol */
+  uint16_t proto;                     /* packet type ID field */
 };
 
 struct openvpn_iphdr {

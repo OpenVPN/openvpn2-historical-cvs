@@ -34,20 +34,24 @@
 
 #define IFCONFIG_POOL_MAX 65536
 
+#define IFCONFIG_POOL_30NET   0
+#define IFCONFIG_POOL_INDIV   1
+
 struct ifconfig_pool
 {
   in_addr_t base;
   int size;
+  int type;
   uint8_t *in_use;
 };
 
 typedef int ifconfig_pool_handle;
 
-struct ifconfig_pool *ifconfig_pool_init (in_addr_t start, in_addr_t end);
+struct ifconfig_pool *ifconfig_pool_init (int type, in_addr_t start, in_addr_t end);
 
 void ifconfig_pool_free (struct ifconfig_pool *pool);
 
-ifconfig_pool_handle ifconfig_pool_acquire_30_net (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *remote);
+ifconfig_pool_handle ifconfig_pool_acquire (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *remote);
 
 bool ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand);
 

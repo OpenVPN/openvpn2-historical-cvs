@@ -99,13 +99,12 @@ struct link_socket
   struct overlapped_io writes;
 #else
   /* these macros are called in the context of the openvpn() function */
-# define SOCKET_SET_READ(w, s)  { if (stream_buf_read_setup (s)) \
-                                   FD_SET   ((s)->sd, &((w)->reads)); }
-# define SOCKET_SET_WRITE(w, s) {  FD_SET   ((s)->sd, &((w)->writes)); }
-# define SOCKET_ISSET(w, s, set)   (FD_ISSET ((s)->sd, &((w)->set)))
-# define SOCKET_SETMAXFD(w, s)  {  wait_update_maxfd ((w), (s)->sd); }
-# define SOCKET_READ_STAT(w, s, gc)    (SOCKET_ISSET ((w), (s), reads) ?  "SR" : "sr")
-# define SOCKET_WRITE_STAT(w, s, gc)   (SOCKET_ISSET ((w), (s), writes) ? "SW" : "sw")
+# define SOCKET_SET_READ(w, s)  { if (stream_buf_read_setup (s)) wait_add_reads  ((w), (s)->sd); }
+# define SOCKET_SET_WRITE(w, s) {                                wait_add_writes ((w), (s)->sd); }
+
+# define SOCKET_ISSET(w, s, set)      (wait_test_##set ((w), (s)->sd))
+# define SOCKET_READ_STAT(w, s, gc)   (   SOCKET_ISSET ((w), (s), reads)  ? "SR" : "sr")
+# define SOCKET_WRITE_STAT(w, s, gc)  (   SOCKET_ISSET ((w), (s), writes) ? "SW" : "sw")
 #endif
 
   socket_descriptor_t sd;
@@ -237,6 +236,8 @@ const char *print_in_addr_t (in_addr_t addr,
 void setenv_sockaddr (const char *name_prefix,
 		      const struct sockaddr_in *addr);
 
+void setenv_in_addr_t (const char *name_prefix, in_addr_t addr);
+
 void bad_address_length (int actual, int expected);
 
 in_addr_t link_socket_current_remote (const struct link_socket *sock);
@@ -253,6 +254,8 @@ void link_socket_bad_incoming_addr (struct buffer *buf,
 				    const struct sockaddr_in *from_addr);
 
 void link_socket_bad_outgoing_addr (void);
+
+void setenv_trusted (struct link_socket *sock);
 
 /*
  * DNS resolution

@@ -37,6 +37,7 @@
 #include "circ_list.h"
 #include "buffer.h"
 #include "error.h"
+#include "otime.h"
 
 /*
  * Enables OpenVPN to be compiled in special packet_id test mode.
@@ -216,12 +217,10 @@ bool packet_id_test (const struct packet_id_rec *p,
 
 /* change our current state to reflect an accepted packet id */
 void packet_id_add (struct packet_id_rec *p,
-		    const struct packet_id_net *pin,
-		    time_t current);
+		    const struct packet_id_net *pin);
 
 /* expire TIME_BACKTRACK sequence numbers */ 
-void packet_id_reap (struct packet_id_rec *p,
-		     time_t current);
+void packet_id_reap (struct packet_id_rec *p);
 
 /*
  * packet ID persistence
@@ -294,12 +293,12 @@ static inline void
 packet_id_alloc_outgoing (struct packet_id_send *p, struct packet_id_net *pin, bool long_form)
 {
   if (!p->time)
-    p->time = time (NULL);
+    p->time = now;
   pin->id = ++p->id;
   if (!pin->id)
     {
       ASSERT (long_form);
-      p->time = time (NULL);
+      p->time = now;
       pin->id = p->id = 1;
     }
   pin->time = p->time;
@@ -361,21 +360,23 @@ packet_id_write (const struct packet_id_net *pin, struct buffer *buf, bool long_
 }
 
 static inline bool
-check_timestamp_delta (time_t current, time_t remote, unsigned int max_delta)
+check_timestamp_delta (time_t remote, unsigned int max_delta)
 {
   unsigned int abs;
-  if (current >= remote)
-    abs = current - remote;
+  const time_t local_now = now;
+
+  if (local_now >= remote)
+    abs = local_now - remote;
   else
-    abs = remote - current;
+    abs = remote - local_now;
   return abs <= max_delta;
 }
 
 static inline void
-packet_id_reap_test (struct packet_id_rec *p, time_t current)
+packet_id_reap_test (struct packet_id_rec *p)
 {
-  if (p->last_reap + SEQ_REAP_INTERVAL <= current)
-    packet_id_reap (p, current);
+  if (p->last_reap + SEQ_REAP_INTERVAL <= now)
+    packet_id_reap (p);
 }
 
 #endif /* PACKET_ID_H */

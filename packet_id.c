@@ -87,8 +87,9 @@ packet_id_free (struct packet_id *p)
 }
 
 void
-packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin, time_t current)
+packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin)
 {
+  const time_t local_now = now;
   if (p->seq_list)
     {
       packet_id_type diff;
@@ -117,8 +118,8 @@ packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin, time_t 
 
       diff = p->id - pin->id;
       if (diff < (packet_id_type) CIRC_LIST_SIZE (p->seq_list)
-	  && current > SEQ_EXPIRED)
-	CIRC_LIST_ITEM (p->seq_list, diff) = current;
+	  && local_now > SEQ_EXPIRED)
+	CIRC_LIST_ITEM (p->seq_list, diff) = local_now;
     }
   else
     {
@@ -133,8 +134,9 @@ packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin, time_t 
  * time_backtrack.
  */
 void
-packet_id_reap (struct packet_id_rec *p, time_t current)
+packet_id_reap (struct packet_id_rec *p)
 {
+  const time_t local_now = now;
   if (p->time_backtrack)
     {
       int i;
@@ -144,13 +146,13 @@ packet_id_reap (struct packet_id_rec *p, time_t current)
 	  const time_t t = CIRC_LIST_ITEM (p->seq_list, i);
 	  if (t == SEQ_EXPIRED)
 	    break;
-	  if (!expire && t && t + p->time_backtrack < current)
+	  if (!expire && t && t + p->time_backtrack < local_now)
 	    expire = true;
 	  if (expire)
 	    CIRC_LIST_ITEM (p->seq_list, i) = SEQ_EXPIRED;
 	}
     }
-  p->last_reap = current;
+  p->last_reap = local_now;
 }
 
 /*
@@ -382,7 +384,7 @@ packet_id_persist_print (const struct packet_id_persist *p, struct gc_arena *gc)
   return (char *)out.data;
 }
 
-#ifdef PID_TEST
+#if 1 // JYFIXME was: #ifdef PID_TEST
 
 void
 packet_id_interactive_test ()
@@ -402,16 +404,17 @@ packet_id_interactive_test ()
     char buf[80];
     if (!fgets(buf, sizeof(buf), stdin))
       break;
+    update_time ();
     if (sscanf (buf, "%lu,%u", &pin.time, &pin.id) == 2)
       {
-	packet_id_reap_test (&pid.rec, time (NULL));
+	packet_id_reap_test (&pid.rec);
 	test = packet_id_test (&pid.rec, &pin);
 	printf ("packet_id_test (" time_format ", " packet_id_format ") returned %d\n",
 		(time_type)pin.time,
 		(packet_id_print_type)pin.id,
 		test);
 	if (test)
-	  packet_id_add (&pid.rec, &pin, time (NULL));
+	  packet_id_add (&pid.rec, &pin);
       }
     else
       {

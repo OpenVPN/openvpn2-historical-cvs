@@ -40,6 +40,7 @@
 #include "common.h"
 #include "misc.h"
 #include "gremlin.h"
+#include "otime.h"
 
 #include "memdbg.h"
 
@@ -107,10 +108,8 @@ static time_t next;      /* GLOBAL */
  * Return false if we should drop a packet.
  */
 bool
-ask_gremlin(void)
+ask_gremlin (void)
 {
-  const time_t current = time (NULL);
-
   if (!initialized)
     {
       initialized = true;
@@ -119,12 +118,12 @@ ask_gremlin(void)
 #else
       up = true;
 #endif
-      next = current;
+      next = now;
     }
 
 #ifdef UP_DOWN_ENABLE
 /* change up/down state? */
-  if (current >= next)
+  if (now >= next)
     {
       int delta;
       if (up)
@@ -142,7 +141,7 @@ ask_gremlin(void)
 	   "GREMLIN: CONNECTION GOING %s FOR %d SECONDS",
 	   (up ? "UP" : "DOWN"),
 	   delta);
-      next = current + delta;
+      next = now + delta;
     }
 #endif
 

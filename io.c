@@ -64,6 +64,12 @@ profile_select(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, stru
 #ifdef WIN32
 
 void
+wait_init (struct event_wait *ew, unsigned int rwflags)
+{
+  CLEAR (*ew);
+}
+
+void
 overlapped_io_init (struct overlapped_io *o,
 		    const struct frame *frame,
 		    BOOL event_state,
@@ -466,6 +472,40 @@ getpass (const char *prompt)
     }
 
   return NULL;
+}
+
+#else
+
+void
+wait_init (struct event_wait *ew, unsigned int rwflags)
+{
+  CLEAR (*ew);
+  ew->max_fd_plus_one = -1;
+  if (rwflags & WAIT_READ)
+    {
+      ALLOC_OBJ (ew->reads, fd_set);
+      FD_ZERO (ew->reads);
+    }
+  if (rwflags & WAIT_WRITE)
+    {
+      ALLOC_OBJ (ew->writes, fd_set);
+      FD_ZERO (ew->writes);
+    }
+}
+
+void
+wait_free (struct event_wait *ew)
+{
+  if (ew->reads)
+    {
+      free (ew->reads);
+      ew->reads = NULL;
+    }
+  if (ew->writes)
+    {
+      free (ew->writes);
+      ew->writes = NULL;
+    }
 }
 
 #endif

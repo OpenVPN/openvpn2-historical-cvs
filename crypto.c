@@ -81,8 +81,7 @@
 void
 openvpn_encrypt (struct buffer *buf, struct buffer work,
 		 const struct crypto_options *opt,
-		 const struct frame* frame,
-		 const time_t current)
+		 const struct frame* frame)
 {
   struct gc_arena gc;
   gc_init (&gc);
@@ -211,8 +210,7 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 bool
 openvpn_decrypt (struct buffer *buf, struct buffer work,
 		 const struct crypto_options *opt,
-		 const struct frame* frame,
-		 const time_t current)
+		 const struct frame* frame)
 {
   static const char error_prefix[] = "Authenticate/Decrypt packet error";
   struct gc_arena gc;
@@ -344,10 +342,10 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
       
       if (have_pin)
 	{
-	  packet_id_reap_test (&opt->packet_id->rec, current);
+	  packet_id_reap_test (&opt->packet_id->rec);
 	  if (packet_id_test (&opt->packet_id->rec, &pin))
 	    {
-	      packet_id_add (&opt->packet_id->rec, &pin, current);
+	      packet_id_add (&opt->packet_id->rec, &pin);
 	      if (opt->pid_persist && opt->packet_id_long_form)
 		packet_id_persist_save_obj (opt->pid_persist, opt->packet_id);
 	    }
@@ -777,8 +775,9 @@ generate_key_random (struct key *key, const struct key_type *kt)
 	if (kt->digest && kt->hmac_length > 0 && kt->hmac_length <= hmac_len)
 	  hmac_len = kt->hmac_length;
       }
-    ASSERT (RAND_bytes (key->cipher, cipher_len));
-    ASSERT (RAND_bytes (key->hmac, hmac_len));
+    if (!RAND_bytes (key->cipher, cipher_len)
+	|| !RAND_bytes (key->hmac, hmac_len))
+      msg (M_FATAL, "ERROR: Random number generator cannot obtain entropy for key generation");
 
     msg (D_SHOW_KEY_SOURCE, "Cipher source entropy: %s", format_hex (key->cipher, cipher_len, 0, &gc));
     msg (D_SHOW_KEY_SOURCE, "HMAC source entropy: %s", format_hex (key->hmac, hmac_len, 0, &gc));
@@ -833,7 +832,7 @@ test_crypto (const struct crypto_options *co, struct frame* frame)
   msg (M_INFO, "Entering " PACKAGE_NAME " crypto self-test mode.");
   for (i = 1; i <= TUN_MTU_SIZE (frame); ++i)
     {
-      const time_t current = time (NULL);
+      update_time ();
 
       msg (M_INFO, "TESTING ENCRYPT/DECRYPT of packet length=%d", i);
 
@@ -850,10 +849,10 @@ test_crypto (const struct crypto_options *co, struct frame* frame)
       memcpy (buf_write_alloc (&buf, BLEN (&src)), BPTR (&src), BLEN (&src));
 
       /* encrypt */
-      openvpn_encrypt (&buf, encrypt_workspace, co, frame, current);
+      openvpn_encrypt (&buf, encrypt_workspace, co, frame);
 
       /* decrypt */
-      openvpn_decrypt (&buf, decrypt_workspace, co, frame, current);
+      openvpn_decrypt (&buf, decrypt_workspace, co, frame);
 
       /* compare */
       if (buf.len != src.len)
@@ -1458,7 +1457,8 @@ static uint8_t nonce_data [SHA_DIGEST_LENGTH + NONCE_SECRET_LEN]; /* GLOBAL */
 void
 prng_init (void)
 {
-  ASSERT (RAND_bytes (nonce_data, sizeof(nonce_data)));
+  if (!RAND_bytes (nonce_data, sizeof(nonce_data)))
+    msg (M_FATAL, "ERROR: Random number generator cannot obtain entropy for PRNG");
 }
 
 void

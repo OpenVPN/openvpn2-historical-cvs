@@ -176,7 +176,7 @@ check_send_occ_req_dowork (struct context *c)
        * If we don't hear back from peer, send another
        * OCC_REQUEST in OCC_INTERVAL_SECONDS.
        */
-      event_timeout_reset (&c->c2.occ_interval, c->c2.current);
+      event_timeout_reset (&c->c2.occ_interval);
     }
 }
 

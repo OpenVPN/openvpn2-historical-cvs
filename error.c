@@ -38,6 +38,7 @@
 #include "win32.h"
 #include "socket.h"
 #include "tun.h"
+#include "otime.h"
 
 #ifdef USE_CRYPTO
 #include <openssl/err.h>

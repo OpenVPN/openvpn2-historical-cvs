@@ -35,30 +35,32 @@
 
 #include "lzo.h"
 #include "error.h"
+#include "otime.h"
 
 #include "memdbg.h"
 
 static bool
-lzo_adaptive_compress_test (struct lzo_adaptive_compress *ac, const time_t time)
+lzo_adaptive_compress_test (struct lzo_adaptive_compress *ac)
 {
   const bool save = ac->compress_state;
+  const time_t local_now = now;
 
   if (!ac->enabled)
     return true;
 
   if (!ac->compress_state)
     {
-      if (time >= ac->next)
+      if (local_now >= ac->next)
 	{
 	  if (ac->n_total > AC_MIN_BYTES
 	      && (ac->n_total - ac->n_comp) < (ac->n_total / (100 / AC_SAVE_PCT)))
 	    {
 	      ac->compress_state = true;
-	      ac->next = time + AC_OFF_SEC;
+	      ac->next = local_now + AC_OFF_SEC;
 	    }
 	  else
 	    {
-	      ac->next = time + AC_SAMP_SEC;
+	      ac->next = local_now + AC_SAMP_SEC;
 	    }
 	  msg (D_COMP, "lzo_adaptive_compress_test: comp=%d total=%d", ac->n_comp, ac->n_total);
 	  ac->n_total = ac->n_comp = 0;
@@ -66,9 +68,9 @@ lzo_adaptive_compress_test (struct lzo_adaptive_compress *ac, const time_t time)
     }
   else 
     {
-      if (time >= ac->next)
+      if (local_now >= ac->next)
 	{
-	  ac->next = time + AC_SAMP_SEC;
+	  ac->next = local_now + AC_SAMP_SEC;
 	  ac->n_total = ac->n_comp = 0;
 	  ac->compress_state = false;
 	}
@@ -129,8 +131,7 @@ lzo_compress_uninit (struct lzo_compress_workspace *lzowork)
 void
 lzo_compress (struct buffer *buf, struct buffer work,
 	      struct lzo_compress_workspace *lzowork,
-	      const struct frame* frame,
-	      const time_t current)
+	      const struct frame* frame)
 {
   int zlen = 0;
   int err;
@@ -143,7 +144,7 @@ lzo_compress (struct buffer *buf, struct buffer work,
    * In order to attempt compression, length must be at least COMPRESS_THRESHOLD,
    * and our adaptive level must give the OK.
    */
-  if (buf->len >= COMPRESS_THRESHOLD && lzo_adaptive_compress_test(&lzowork->ac, current))
+  if (buf->len >= COMPRESS_THRESHOLD && lzo_adaptive_compress_test (&lzowork->ac))
     {
       ASSERT (buf_init (&work, FRAME_HEADROOM (frame)));
       ASSERT (buf_safe (&work, LZO_EXTRA_BUFFER (PAYLOAD_SIZE (frame))));

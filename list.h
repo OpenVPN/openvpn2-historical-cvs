@@ -56,14 +56,14 @@ struct hash_element
 
 struct hash_bucket
 {
-  struct hash_element *list;
+  MUTEX_DEFINE (mutex);
+  struct hash_element * volatile list;
 };
 
 struct hash
 {
-  MUTEX_DEFINE (mutex);
   int n_buckets;
-  int n_elements;
+  int mask;
   bool auto_grow; /* not implemented yet */
   uint32_t iv;
   uint32_t (*hash_function)(const void *key, uint32_t iv);
@@ -75,35 +75,35 @@ struct hash_iterator
 {
   struct hash *hash;
   int bucket_index;
+  struct hash_bucket *bucket;
   struct hash_element *elem;
 };
 
-struct hash *hash_init (int n_buckets,
-			bool auto_grow,
+struct hash *hash_init (const int n_buckets,
+			const bool auto_grow,
 			uint32_t (*hash_function)(const void *key, uint32_t iv),
 			bool (*compare_function)(const void *key1, const void *key2));
 
 void hash_free (struct hash *hash);
 
-void *hash_lookup_dowork (struct hash *hash, const void *key, uint32_t hv);
+struct hash_element *hash_lookup_dowork (struct hash *hash,
+					 struct hash_bucket *bucket,
+					 const void *key,
+					 uint32_t hv);
+
 bool hash_remove (struct hash *hash, const void *key);
-bool hash_add (struct hash *hash, const void *key, void *value);
+void hash_remove_by_value (struct hash *hash, void *value);
+bool hash_add (struct hash *hash, const void *key, void *value, bool replace);
 
 void hash_iterator_init (struct hash *hash, struct hash_iterator *iter);
-void *hash_iterator_next (struct hash_iterator *hi);
-void hash_iterator_free (struct hash *hash, struct hash_iterator *hi);
+struct hash_element *hash_iterator_next (struct hash_iterator *hi);
+void hash_iterator_free (struct hash_iterator *hi);
 
 uint32_t hash_func (const uint8_t *k, uint32_t length, uint32_t initval);
 
 #ifdef LIST_TEST
 void list_test (void);
 #endif
-
-static inline int
-hash_n_elements (const struct hash *hash)
-{
-  return hash->n_elements;
-}
 
 static inline uint32_t
 hash_value (const struct hash *hash, const void *key)
@@ -114,10 +114,16 @@ hash_value (const struct hash *hash, const void *key)
 static inline void *
 hash_lookup_lock (struct hash *hash, const void *key, uint32_t hv)
 {
-  void *ret;
-  mutex_lock (&hash->mutex);
-  ret = hash_lookup_dowork (hash, key, hv);
-  mutex_unlock (&hash->mutex);
+  void *ret = NULL;
+  struct hash_element *he;
+  struct hash_bucket *bucket = &hash->buckets[hv & hash->mask];
+
+  mutex_lock (&bucket->mutex);
+  he = hash_lookup_dowork (hash, bucket, key, hv);
+  if (he)
+    ret = he->value;
+  mutex_unlock (&bucket->mutex);
+
   return ret;
 }
 

@@ -42,7 +42,7 @@
 /* define to enable a special test mode */
 /*#define SCHEDULE_TEST*/
 
-#include "interval.h"
+#include "otime.h"
 #include "thread.h"
 #include "error.h"
 

@@ -276,7 +276,7 @@ format_hex_ex (const uint8_t *data, int size, int maxoutput,
 	       struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (maxoutput ? maxoutput :
-				    ((size * 2) + (size / space_break) + 2),
+				    ((size * 2) + (size / space_break) * (int) strlen (separator) + 2),
 				    gc);
   int i;
   for (i = 0; i < size; ++i)

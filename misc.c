@@ -36,7 +36,7 @@
 #include "tun.h"
 #include "error.h"
 #include "thread.h"
-#include "interval.h"
+#include "otime.h"
 
 #include "memdbg.h"
 
@@ -507,41 +507,6 @@ init_random_seed(void)
 #endif /* HAVE_GETTIMEOFDAY */
 }
 
-/* format a time_t as ascii, or use current time if 0 */
-
-const char *
-time_string (time_t t, int usec, bool show_usec, struct gc_arena *gc)
-{
-  struct buffer out = alloc_buf_gc (64, gc);
-  struct timeval tv;
-
-  if (t)
-    {
-      tv.tv_sec = t;
-      tv.tv_usec = usec;
-    }
-  else
-    {
-#ifdef HAVE_GETTIMEOFDAY
-      if (gettimeofday (&tv, NULL))
-#endif
-	{
-	  tv.tv_sec = time (NULL);
-	  tv.tv_usec = 0;
-	}
-    }
-
-  mutex_lock_static (L_CTIME);
-  buf_printf (&out, "%s", ctime ((const time_t *)&tv.tv_sec));
-  mutex_unlock_static (L_CTIME);
-  buf_rmtail (&out, '\n');
-
-  if (show_usec && tv.tv_usec)
-    buf_printf (&out, " us=%d", (int)tv.tv_usec);
-
-  return BSTR (&out);
-}
-
 /* thread-safe strerror */
 
 const char *
@@ -747,5 +712,64 @@ sleep_milliseconds (unsigned int n)
   tv.tv_sec = n / 1000;
   tv.tv_usec = (n % 1000) * 1000;
   select (0, NULL, NULL, NULL, &tv);
+#endif
+}
+
+/* return true if filename can be opened for read */
+bool
+test_file (const char *filename)
+{
+  FILE *fp = fopen (filename, "r");
+  if (fp)
+    {
+      fclose (fp);
+      return true;
+    }
+  else
+    return false;
+}
+
+/* create a temporary filename in directory */
+const char *
+create_temp_filename (const char *directory, struct gc_arena *gc)
+{
+  struct buffer fname = alloc_buf_gc (256, gc);
+  buf_printf (&fname, "openvpn_%d_%d.tmp",
+	      (int) openvpn_thread_self (),
+	      (int) get_random ());
+  return gen_path (directory, BSTR (&fname), gc);
+}
+
+/* put a directory and filename together */
+const char *
+gen_path (const char *directory, const char *filename, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (256, gc);
+  char dirsep[2];
+
+  ASSERT (filename);
+
+  dirsep[0] = OS_SPECIFIC_DIRSEP;
+  dirsep[1] = '\0';
+
+  if (directory)
+    {
+      buf_printf (&out, "%s%s", directory, dirsep);
+    }
+  buf_printf (&out, "%s", filename);
+
+  return BSTR (&out);
+}
+
+/* delete a file, return true if succeeded */
+bool
+delete_file (const char *filename)
+{
+#if defined(WIN32)
+  return (DeleteFile (filename) != 0);
+#elif defined(HAVE_UNLINK)
+  return (unlink (filename) == 0);
+#else
+  return false;
 #endif
 }

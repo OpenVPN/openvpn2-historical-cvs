@@ -728,6 +728,8 @@ void
 tuntap_inherit_passive (struct tuntap *dest, const struct tuntap *src)
 {
   dest->type = src->type;
+  dest->local = src->local;
+  dest->remote_netmask = src->remote_netmask;
 }
 
 static void

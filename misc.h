@@ -113,9 +113,6 @@ const char *system_error_message (int, struct gc_arena *gc);
    false if error, exit if error and fatal==true */
 bool system_check (const char* command, const char* error_message, bool fatal);
 
-/* format a time_t as ascii, or use current time if 0 */
-const char* time_string (time_t t, int usec, bool show_usec, struct gc_arena *gc);
-
 #ifdef HAVE_STRERROR
 /* a thread-safe version of strerror */
 const char* strerror_ts (int errnum, struct gc_arena *gc);
@@ -155,5 +152,17 @@ long int get_random(void);
 #else
 #define get_random random
 #endif
+
+/* return true if filename can be opened for read */
+bool test_file (const char *filename);
+
+/* create a temporary filename in directory */
+const char *create_temp_filename (const char *directory, struct gc_arena *gc);
+
+/* put a directory and filename together */
+const char *gen_path (const char *directory, const char *filename, struct gc_arena *gc);
+
+/* delete a file, return true if succeeded */
+bool delete_file (const char *filename);
 
 #endif

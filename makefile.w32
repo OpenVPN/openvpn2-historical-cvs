@@ -40,17 +40,17 @@ EXE = openvpn.exe
 HEADERS = basic.h buffer.h circ_list.h common.h \
           config-win32.h crypto.h errlevel.h error.h \
           fdmisc.h forward-inline.h forward.h fragment.h \
-          gremlin.h init.h integer.h interval.h io.h list.h lzo.h \
+          gremlin.h init.h integer.h interval.h io.h list.h lzo.h mcast.h \
           memdbg.h misc.h mroute.h mss.h mtu.h multi.h occ-inline.h occ.h \
-          openvpn.h options.h packet_id.h ping-inline.h ping.h pool.h \
+          openvpn.h options.h otime.h packet_id.h ping-inline.h ping.h pool.h \
           proto.h proxy.h push.h reliable.h route.h schedule.h session_id.h \
           shaper.h sig.h socket.h socks.h ssl.h syshead.h \
           thread.h tun.h win32.h
 
 OBJS =  buffer.o crypto.o error.o fdmisc.o forward.o \
-        fragment.o gremlin.o inet_aton.o init.o interval.o io.o \
-        list.o lzo.o misc.o mroute.o mss.o mtu.o multi.o occ.o openvpn.o \
-        options.o packet_id.o ping.o pool.o proxy.o push.o reliable.o \
+        fragment.o gremlin.o inet_aton.o init.o io.o \
+        list.o lzo.o mcast.o misc.o mroute.o mss.o mtu.o multi.o occ.o openvpn.o \
+        options.o otime.o packet_id.o ping.o pool.o proxy.o push.o reliable.o \
         route.o schedule.o session_id.o shaper.o sig.o socket.o \
         socks.o ssl.o thread.o tun.o win32.o
 

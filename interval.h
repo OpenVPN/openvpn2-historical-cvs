@@ -32,162 +32,9 @@
 #ifndef INTERVAL_H
 #define INTERVAL_H
 
-#include "common.h"
-#include "integer.h"
-#include "buffer.h"
-#include "error.h"
+#include "otime.h"
 
 #define INTERVAL_DEBUG 1 // JYFIXME
-
-#ifdef WIN32
-int gettimeofday(struct timeval *tv, void *tz);
-#endif
-
-/* struct timeval functions */
-
-const char *tv_string (const struct timeval *tv, struct gc_arena *gc);
-const char *tv_string_abs (const struct timeval *tv, struct gc_arena *gc);
-
-static inline bool
-tv_defined (const struct timeval *tv)
-{
-  return tv->tv_sec > 0 && tv->tv_usec > 0;
-}
-
-/* return tv1 - tv2 in usec, constrained by max_seconds */
-static inline int
-tv_subtract (const struct timeval *tv1, const struct timeval *tv2, const unsigned int max_seconds)
-{
-  const int max_usec = max_seconds * 1000000;
-  const int sec_diff = tv1->tv_sec - tv2->tv_sec;
-
-  if (sec_diff > ((int)max_seconds + 10))
-    return max_usec;
-  else if (sec_diff < -((int)max_seconds + 10))
-    return -max_usec;
-  return constrain_int (sec_diff * 1000000 + (tv1->tv_usec - tv2->tv_usec), -max_usec, max_usec);
-}
-
-static inline void
-tv_add_approx (struct timeval *dest, const struct timeval *src)
-{
-  dest->tv_sec += src->tv_sec;
-  dest->tv_usec += src->tv_usec;
-  dest->tv_sec += (dest->tv_usec >> 20);
-  dest->tv_usec &= 0x000FFFFF;
-  if (dest->tv_usec > 999999)
-    dest->tv_usec = 999999;
-}
-
-static inline void
-tv_add (struct timeval *dest, const struct timeval *src)
-{
-  dest->tv_sec += src->tv_sec;
-  dest->tv_usec += src->tv_usec;
-  while (dest->tv_usec >= 1000000)
-    {
-      dest->tv_usec -= 1000000;
-      dest->tv_sec += 1;
-    }
-}
-
-static inline bool
-tv_lt (const struct timeval *t1, const struct timeval *t2)
-{
-  if (t1->tv_sec < t2->tv_sec)
-    return true;
-  else if (t1->tv_sec > t2->tv_sec)
-    return false;
-  else
-    return t1->tv_usec < t2->tv_usec;
-}
-
-static inline bool
-tv_le (const struct timeval *t1, const struct timeval *t2)
-{
-  if (t1->tv_sec < t2->tv_sec)
-    return true;
-  else if (t1->tv_sec > t2->tv_sec)
-    return false;
-  else
-    return t1->tv_usec <= t2->tv_usec;
-}
-
-static inline bool
-tv_ge (const struct timeval *t1, const struct timeval *t2)
-{
-  if (t1->tv_sec > t2->tv_sec)
-    return true;
-  else if (t1->tv_sec < t2->tv_sec)
-    return false;
-  else
-    return t1->tv_usec >= t2->tv_usec;
-}
-
-static inline bool
-tv_gt (const struct timeval *t1, const struct timeval *t2)
-{
-  if (t1->tv_sec > t2->tv_sec)
-    return true;
-  else if (t1->tv_sec < t2->tv_sec)
-    return false;
-  else
-    return t1->tv_usec > t2->tv_usec;
-}
-
-static inline bool
-tv_eq (const struct timeval *t1, const struct timeval *t2)
-{
-  return t1->tv_sec == t2->tv_sec && t1->tv_usec == t2->tv_usec;
-}
-
-static inline void
-tv_delta (struct timeval *dest, const struct timeval *t1, const struct timeval *t2)
-{
-  int sec = t2->tv_sec - t1->tv_sec;
-  int usec = t2->tv_usec - t1->tv_usec;
-
-  while (usec < 0)
-    {
-      usec += 1000000;
-      sec -= 1;
-    }
-
-  if (sec < 0)
-    usec = sec = 0;
-
-  dest->tv_sec = sec;
-  dest->tv_usec = usec;
-}
-
-#define TV_WITHIN_SIGMA_MAX_SEC 600
-#define TV_WITHIN_SIGMA_MAX_USEC (TV_WITHIN_SIGMA_MAX_SEC * 1000000)
-
-/*
- * Is t1 and t2 within sigma microseconds of each other?
- */
-static inline bool
-tv_within_sigma (const struct timeval *t1, const struct timeval *t2, unsigned int sigma)
-{
-  const int delta = tv_subtract (t1, t2, TV_WITHIN_SIGMA_MAX_SEC); /* sigma should be less than 10 minutes */
-  return -(int)sigma <= delta && delta <= (int)sigma;
-}
-
-/*
- * Used to determine in how many seconds we should be
- * called again.
- */
-static inline void
-interval_earliest_wakeup (interval_t *wakeup, time_t at, time_t current) {
-  if (at > current)
-    {
-      const interval_t delta = (interval_t) (at - current);
-      if (delta < *wakeup)
-	*wakeup = delta;
-      if (*wakeup < 0)
-	*wakeup = 0;
-    }
-}
 
 /*
  * Designed to limit calls to expensive functions that need to be called
@@ -224,21 +71,22 @@ interval_init (struct interval *top, int horizon, int refresh)
  */
 
 static inline bool
-interval_test (struct interval* top, time_t current)
+interval_test (struct interval* top)
 {
   bool trigger = false;
+  const time_t local_now = now;
 
-  if (top->future_trigger && current >= top->future_trigger)
+  if (top->future_trigger && local_now >= top->future_trigger)
     {
       trigger = true;
       top->future_trigger = 0;
     }
 
-  if (top->last_action + top->horizon > current ||
-      top->last_test_true + top->refresh <= current ||
+  if (top->last_action + top->horizon > local_now ||
+      top->last_test_true + top->refresh <= local_now ||
       trigger)
     {
-      top->last_test_true = current;
+      top->last_test_true = local_now;
 #if INTERVAL_DEBUG
       msg (D_INTERVAL, "INTERVAL interval_test true");
 #endif
@@ -251,10 +99,11 @@ interval_test (struct interval* top, time_t current)
 }
 
 static inline void
-interval_schedule_wakeup (struct interval* top, time_t current, interval_t *wakeup)
+interval_schedule_wakeup (struct interval* top, interval_t *wakeup)
 {
-  interval_earliest_wakeup (wakeup, top->last_test_true + top->refresh, current);
-  interval_earliest_wakeup (wakeup, top->future_trigger, current);
+  const time_t local_now = now;
+  interval_earliest_wakeup (wakeup, top->last_test_true + top->refresh, local_now);
+  interval_earliest_wakeup (wakeup, top->future_trigger, local_now);
 #if INTERVAL_DEBUG
   msg (D_INTERVAL, "INTERVAL interval_schedule wakeup=%d", (int)*wakeup);
 #endif
@@ -264,13 +113,13 @@ interval_schedule_wakeup (struct interval* top, time_t current, interval_t *wake
  * In wakeup seconds, interval_test will return true once.
  */
 static inline void
-interval_future_trigger (struct interval* top, interval_t wakeup, time_t current) {
+interval_future_trigger (struct interval* top, interval_t wakeup) {
   if (wakeup)
     {
 #if INTERVAL_DEBUG
       msg (D_INTERVAL, "INTERVAL interval_future_trigger %d", (int)wakeup);
 #endif
-      top->future_trigger = current + wakeup;
+      top->future_trigger = now + wakeup;
     }
 }
 
@@ -279,12 +128,12 @@ interval_future_trigger (struct interval* top, interval_t wakeup, time_t current
  * horizon seconds.
  */
 static inline void
-interval_action (struct interval* top, time_t current)
+interval_action (struct interval* top)
 {
 #if INTERVAL_DEBUG
   msg (D_INTERVAL, "INTERVAL action");
 #endif
-  top->last_action = current;
+  top->last_action = now;
 }
 
 /*
@@ -321,33 +170,35 @@ event_timeout_clear_ret ()
 }
 
 static inline void
-event_timeout_init (struct event_timeout* et, time_t current, interval_t n)
+event_timeout_init (struct event_timeout* et, interval_t n, const time_t local_now)
 {
   et->defined = true;
   et->n = (n >= 0) ? n : 0;
-  et->last = current;
+  et->last = local_now;
 }
 
 static inline void
-event_timeout_reset (struct event_timeout* et, time_t current)
+event_timeout_reset (struct event_timeout* et)
 {
   if (et->defined)
-    et->last = current;
+    et->last = now;
 }
 
 static inline bool
-event_timeout_trigger (struct event_timeout* et, time_t current, struct timeval* tv)
+event_timeout_trigger (struct event_timeout* et, struct timeval* tv)
 {
   bool ret = false;
+  const time_t local_now = now;
+
   if (et->defined)
     {
-      int wakeup = (int) et->last + et->n - current;
+      int wakeup = (int) et->last + et->n - local_now;
       if (wakeup <= 0)
 	{
 #if INTERVAL_DEBUG
 	  msg (D_INTERVAL, "EVENT event_timeout_trigger (%d)", et->n);
 #endif
-	  et->last = current;
+	  et->last = local_now;
 	  wakeup = et->n;
 	  ret = true;
 	}

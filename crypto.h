@@ -289,13 +289,11 @@ void free_key_ctx_bi (struct key_ctx_bi *ctx);
 
 void openvpn_encrypt (struct buffer *buf, struct buffer work,
 		      const struct crypto_options *opt,
-		      const struct frame* frame,
-		      const time_t current);
+		      const struct frame* frame);
 
 bool openvpn_decrypt (struct buffer *buf, struct buffer work,
 		      const struct crypto_options *opt,
-		      const struct frame* frame,
-		      const time_t current);
+		      const struct frame* frame);
 
 
 void crypto_adjust_frame_parameters (struct frame *frame,

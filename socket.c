@@ -856,6 +856,13 @@ socket_adjust_frame_parameters (struct frame *frame, int proto)
 }
 
 void
+setenv_trusted (struct link_socket *sock)
+{
+  struct link_socket_addr *lsa = sock->lsa;
+  setenv_sockaddr ("trusted", &lsa->actual);
+}
+
+void
 link_socket_connection_initiated (const struct buffer *buf,
 				  struct link_socket *sock,
 				  const struct sockaddr_in *addr,
@@ -863,9 +870,13 @@ link_socket_connection_initiated (const struct buffer *buf,
 {
   struct gc_arena gc = gc_new ();
   struct link_socket_addr *lsa = sock->lsa;
+
+  /* acquire script mutex */
+  mutex_lock_static (L_SCRIPT);
+
   lsa->actual = *addr; /* Note: skip this line for --force-dest */
+  setenv_trusted (sock);
   sock->set_outgoing_initial = true;
-  setenv_sockaddr ("trusted", &lsa->actual);
 
   /* Print connection initiated message, with common name if available */
   {
@@ -887,6 +898,8 @@ link_socket_connection_initiated (const struct buffer *buf,
       msg (D_TLS_DEBUG, "executing ip-change command: %s", BSTR (&out));
       system_check (BSTR (&out), "ip-change command failed", false);
     }
+
+  mutex_unlock_static (L_SCRIPT);
   gc_free (&gc);
 }
 
@@ -1152,6 +1165,15 @@ setenv_sockaddr (const char *name_prefix, const struct sockaddr_in *addr)
 
   openvpn_snprintf (name_buf, sizeof (name_buf), "%s_port", name_prefix);
   setenv_int (name_buf, ntohs (addr->sin_port));
+}
+
+void
+setenv_in_addr_t (const char *name_prefix, in_addr_t addr)
+{
+  struct sockaddr_in si;
+  CLEAR (si);
+  si.sin_addr.s_addr = htonl (addr);
+  setenv_sockaddr (name_prefix, &si);
 }
 
 /*

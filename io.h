@@ -42,6 +42,11 @@
 /* Maximum number of events we will wait for */
 #define MAX_EVENTS 5
 
+/* flags for wait_init() */
+
+#define WAIT_READ  0x01
+#define WAIT_WRITE 0x02
+
 /* allocate a buffer for socket or tun layer */
 void alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tuntap_buffer);
 
@@ -141,7 +146,9 @@ struct event_wait {
   HANDLE trigger;  /* handle that satisfied the most recent wait */
 };
 
-#define SELECT(w, t) my_select ((w), (t))
+#define SELECT(w, t)       my_select ((w), (t))
+#define SELECT_READ(w, t)  my_select ((w), (t))
+#define SELECT_WRITE(w, t) my_select ((w), (t))
 
 #define WAIT_SIGNAL(w) \
   { if (win32_signal.in != INVALID_HANDLE_VALUE) \
@@ -188,12 +195,6 @@ my_select (struct event_wait *ew, const struct timeval *tv)
 }
 
 static inline void
-wait_init (struct event_wait *ew)
-{
-  CLEAR (*ew);
-}
-
-static inline void
 wait_reset (struct event_wait *ew)
 {
   ew->n_events = 0;
@@ -211,6 +212,11 @@ static inline bool
 wait_trigger (const struct event_wait *ew, HANDLE h)
 {
   return ew->trigger == h;
+}
+
+static inline void
+wait_free (struct event_wait *ew)
+{
 }
 
 /*
@@ -252,52 +258,128 @@ char *getpass (const char *prompt);
 
 struct event_wait {
   int max_fd_plus_one;
-  int fds[MAX_EVENTS];
-  int n_events;
-  fd_set reads, writes;
+  fd_set *reads;
+  fd_set *writes;
 };
 
 #ifdef ENABLE_PROFILING
 int profile_select(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
-#define SELECT(w, t) profile_select ((w)->max_fd_plus_one, &((w)->reads), &((w)->writes), NULL, (t))
+#define SELECT(w, t)       profile_select ((w)->max_fd_plus_one, (w)->reads, (w)->writes, NULL, (t))
 #else
-#define SELECT(w, t) select ((w)->max_fd_plus_one, &((w)->reads), &((w)->writes), NULL, (t))
+#define SELECT(w, t)       select ((w)->max_fd_plus_one, (w)->reads, (w)->writes, NULL, (t))
 #endif
 
 #define SELECT_SIGNAL_RECEIVED(w, sig)
 #define GET_SIGNAL(sig)
 #define WAIT_SIGNAL(w)
 
-static inline void
-wait_init (struct event_wait *ew)
-{
-  CLEAR (*ew);
-  ew->max_fd_plus_one = -1;
-  FD_ZERO (&ew->reads);
-  FD_ZERO (&ew->writes);
-}
+void wait_free (struct event_wait *ew);
+
+#define ASSUME_FD_SET_IS_BITFIELD // JYFIXME
 
 static inline void
 wait_reset (struct event_wait *ew)
 {
-  /* FD_ZERO would be simpler, but this is more efficient */
-  int i;
-  for (i = 0; i < ew->n_events; ++i)
+#ifdef ASSUME_FD_SET_IS_BITFIELD
+  if (ew->max_fd_plus_one <= (int) sizeof (unsigned long))
     {
-      FD_CLR (ew->fds[i], &ew->reads);
-      FD_CLR (ew->fds[i], &ew->writes);
+      if (ew->reads)
+	*((unsigned long *) ew->reads) = 0;
+      if (ew->writes)
+	*((unsigned long *) ew->writes) = 0;
+    }
+  else
+#endif
+    {
+      if (ew->reads)
+	FD_ZERO (ew->reads);
+      if (ew->writes)
+	FD_ZERO (ew->writes);
+    }
+  ew->max_fd_plus_one = -1;
+}
+
+static inline void
+wait_add (struct event_wait *ew, int fd, const unsigned int rwflag)
+{
+  if (fd >= 0)
+    {
+      ew->max_fd_plus_one = max_int (ew->max_fd_plus_one, fd + 1);
+      if ((rwflag & WAIT_READ) && ew->reads)
+	FD_SET (fd, ew->reads);
+      if ((rwflag & WAIT_WRITE) && ew->writes)
+	FD_SET (fd, ew->writes);
     }
 }
 
 static inline void
-wait_update_maxfd (struct event_wait *ew, int fd)
+wait_add_reads (struct event_wait *ew, int fd)
 {
-  ew->max_fd_plus_one = max_int (ew->max_fd_plus_one, fd + 1);
+  if (fd >= 0)
+    {
+      ew->max_fd_plus_one = max_int (ew->max_fd_plus_one, fd + 1);
+      if (ew->reads)
+	FD_SET (fd, ew->reads);
+    }
+}
 
-  ASSERT (ew->n_events < MAX_EVENTS);
-  ew->fds[ew->n_events++] = fd;
+static inline void
+wait_add_writes (struct event_wait *ew, int fd)
+{
+  if (fd >= 0)
+    {
+      ew->max_fd_plus_one = max_int (ew->max_fd_plus_one, fd + 1);
+      if (ew->writes)
+	FD_SET (fd, ew->writes);
+    }
+}
+
+static inline bool
+wait_test (struct event_wait *ew, int fd, const unsigned int rwflag)
+{
+  if (fd >= 0)
+    {
+      if (rwflag == WAIT_READ && ew->reads)
+	return FD_ISSET (fd, ew->reads);
+      if (rwflag == WAIT_WRITE && ew->writes)
+	return FD_ISSET (fd, ew->writes);
+    }
+  else
+    return false;
+}
+
+static inline bool
+wait_test_reads (struct event_wait *ew, int fd)
+{
+  if (fd >= 0 && ew->reads)
+    return FD_ISSET (fd, ew->reads);
+  else
+    return false;
+}
+
+static inline bool
+wait_test_writes (struct event_wait *ew, int fd)
+{
+  if (fd >= 0 && ew->writes)
+    return FD_ISSET (fd, ew->writes);
+  else
+    return false;
+}
+
+static inline bool
+wait_read_enabled (const struct event_wait *ew)
+{
+  return ew->reads != NULL;
+}
+
+static inline bool
+wait_write_enabled (const struct event_wait *ew)
+{
+  return ew->writes != NULL;
 }
 
 #endif /* WIN32 */
+
+void wait_init (struct event_wait *ew, unsigned int rwflags);
 
 #endif

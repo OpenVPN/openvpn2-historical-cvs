@@ -284,7 +284,7 @@ reliable_send_purge (struct reliable *rel, struct reliable_ack *ack)
 	      {
 		if (e->next_try)
 		  {
-		    const interval_t wake = e->next_try - time(NULL);
+		    const interval_t wake = e->next_try - now;
 		    msg (M_INFO, "ACK " packet_id_format ", wake=%d", pid, wake);
 		  }
 	      }
@@ -445,7 +445,7 @@ reliable_get_buf_sequenced (struct reliable *rel)
 
 /* return true if reliable_send would return a non-NULL result */
 bool
-reliable_can_send (const struct reliable *rel, time_t current)
+reliable_can_send (const struct reliable *rel)
 {
   struct gc_arena gc = gc_new ();
   int i;
@@ -456,7 +456,7 @@ reliable_can_send (const struct reliable *rel, time_t current)
       if (e->active)
 	{
 	  ++n_active;
-	  if (current >= e->next_try)
+	  if (now >= e->next_try)
 	    ++n_current;
 	}
     }
@@ -491,14 +491,16 @@ reliable_unique_retry (struct reliable *rel, time_t retry)
 
 /* return next buffer to send to remote */
 struct buffer *
-reliable_send (struct reliable *rel, int *opcode, time_t current)
+reliable_send (struct reliable *rel, int *opcode)
 {
   int i;
   struct reliable_entry *best = NULL;
+  const time_t local_now = now;
+
   for (i = 0; i < rel->size; ++i)
     {
       struct reliable_entry *e = &rel->array[i];
-      if (e->active && current >= e->next_try)
+      if (e->active && local_now >= e->next_try)
 	{
 	  if (!best || e->packet_id < best->packet_id)
 	    best = e;
@@ -508,16 +510,16 @@ reliable_send (struct reliable *rel, int *opcode, time_t current)
     {
 #if 1
       /* exponential backoff */
-      best->next_try = reliable_unique_retry (rel, current + best->timeout);
+      best->next_try = reliable_unique_retry (rel, local_now + best->timeout);
       best->timeout *= 2;
 #else
       /* constant timeout, no backoff */
-      best->next_try = current + best->timeout;
+      best->next_try = local_now + best->timeout;
 #endif
       *opcode = best->opcode;
       msg (D_REL_DEBUG, "ACK reliable_send ID " packet_id_format " (size=%d to=%d)",
 	   (packet_id_print_type)best->packet_id, best->buf.len,
-	   (int)(best->next_try - current));
+	   (int)(best->next_try - local_now));
       return &best->buf;
     }
   return NULL;
@@ -525,7 +527,7 @@ reliable_send (struct reliable *rel, int *opcode, time_t current)
 
 /* schedule all pending packets for immediate retransmit */
 void
-reliable_schedule_now (struct reliable *rel, time_t current)
+reliable_schedule_now (struct reliable *rel)
 {
   int i;
   msg (D_REL_DEBUG, "ACK reliable_schedule_now");
@@ -534,7 +536,7 @@ reliable_schedule_now (struct reliable *rel, time_t current)
       struct reliable_entry *e = &rel->array[i];
       if (e->active)
 	{
-	  e->next_try = current;
+	  e->next_try = now;
 	  e->timeout = rel->initial_timeout;
 	}
     }
@@ -543,25 +545,26 @@ reliable_schedule_now (struct reliable *rel, time_t current)
 /* in how many seconds should we wake up to check for timeout */
 /* if we return BIG_TIMEOUT, nothing to wait for */
 interval_t
-reliable_send_timeout (const struct reliable *rel, time_t current)
+reliable_send_timeout (const struct reliable *rel)
 {
   struct gc_arena gc = gc_new ();
   interval_t ret = BIG_TIMEOUT;
   int i;
+  const time_t local_now = now;
 
   for (i = 0; i < rel->size; ++i)
     {
       const struct reliable_entry *e = &rel->array[i];
       if (e->active)
 	{
-	  if (e->next_try <= current)
+	  if (e->next_try <= local_now)
 	    {
 	      ret = 0;
 	      break;
 	    }
 	  else
 	    {
-	      ret = min_int (ret, e->next_try - current);
+	      ret = min_int (ret, e->next_try - local_now);
 	    }
 	}
     }
@@ -673,12 +676,12 @@ void
 reliable_debug_print (const struct reliable *rel, char *desc)
 {
   int i;
-  time_t current = time (NULL);
+  update_time ();
 
   printf ("********* struct reliable %s\n", desc);
   printf ("  initial_timeout=%d\n", (int)rel->initial_timeout);
   printf ("  packet_id=" packet_id_format "\n", rel->packet_id);
-  printf ("  current=" time_format "\n", current);
+  printf ("  now=" time_format "\n", now);
   for (i = 0; i < rel->size; ++i)
     {
       const struct reliable_entry *e = &rel->array[i];

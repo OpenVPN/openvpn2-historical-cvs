@@ -38,22 +38,44 @@
 
 #include "memdbg.h"
 
+static unsigned int
+adjust_power_of_2 (unsigned int u)
+{
+  unsigned int ret = 1;
+
+  while (ret < u)
+    {
+      ret <<= 1;
+      ASSERT (ret > 0);
+    }
+
+  return ret;
+}
+
 struct hash *
-hash_init (int n_buckets,
-	   bool auto_grow,
+hash_init (const int n_buckets,
+	   const bool auto_grow,
 	   uint32_t (*hash_function)(const void *key, uint32_t iv),
 	   bool (*compare_function)(const void *key1, const void *key2))
 {
   struct hash *h;
+  int i;
+
   ASSERT (n_buckets > 0);
   ALLOC_OBJ_CLEAR (h, struct hash);
-  mutex_init (&h->mutex);
-  h->n_buckets = n_buckets;
+  h->n_buckets = (int) adjust_power_of_2 (n_buckets);
+  h->mask = h->n_buckets - 1;
   h->auto_grow = auto_grow;
   h->hash_function = hash_function;
   h->compare_function = compare_function;
   h->iv = get_random ();
-  ALLOC_ARRAY_CLEAR (h->buckets, struct hash_bucket, n_buckets);
+  ALLOC_ARRAY (h->buckets, struct hash_bucket, h->n_buckets);
+  for (i = 0; i < h->n_buckets; ++i)
+    {
+      struct hash_bucket *b = &h->buckets[i];
+      b->list = NULL;
+      mutex_init (&b->mutex);
+    }
   return h;
 }
 
@@ -63,7 +85,10 @@ hash_free (struct hash *hash)
   int i;
   for (i = 0; i < hash->n_buckets; ++i)
     {
-      struct hash_element *he = hash->buckets[i].list;
+      struct hash_bucket *b = &hash->buckets[i];
+      struct hash_element *he = b->list;
+
+      mutex_destroy (&b->mutex);
       while (he)
 	{
 	  struct hash_element *next = he->next;
@@ -71,20 +96,17 @@ hash_free (struct hash *hash)
 	  he = next;
 	}
     }
-  mutex_destroy (&hash->mutex);
   free (hash->buckets);
   free (hash);
 }
 
 /* mutex must be held by caller */
-void *
-hash_lookup_dowork (struct hash *hash, const void *key, uint32_t hv)
+struct hash_element *
+hash_lookup_dowork (struct hash *hash, struct hash_bucket *bucket, const void *key, uint32_t hv)
 {
-  struct hash_bucket *bucket;
   struct hash_element *he;
   struct hash_element *prev = NULL;
 
-  bucket = &hash->buckets[hv % hash->n_buckets];
   he = bucket->list;
 
   while (he)
@@ -98,7 +120,7 @@ hash_lookup_dowork (struct hash *hash, const void *key, uint32_t hv)
 	      he->next = bucket->list;
 	      bucket->list = he;
 	    }
-	  return he->value;
+	  return he;
 	}
       prev = he;
       he = he->next;
@@ -116,10 +138,8 @@ hash_remove (struct hash *hash, const void *key)
   struct hash_element *prev = NULL;
 
   hv = hash_value (hash, key);
-
-  mutex_lock (&hash->mutex);
-
-  bucket = &hash->buckets[hv % hash->n_buckets];
+  bucket = &hash->buckets[hv & hash->mask];
+  mutex_lock (&bucket->mutex);
   he = bucket->list;
 
   while (he)
@@ -130,84 +150,155 @@ hash_remove (struct hash *hash, const void *key)
 	    prev->next = he->next;
 	  else
 	    bucket->list = he->next;
+	  mutex_unlock (&bucket->mutex);
 	  free (he);
-	  --hash->n_elements;
-	  mutex_unlock (&hash->mutex);
 	  return true;
 	}
       prev = he;
       he = he->next;
     }
-  mutex_unlock (&hash->mutex);
+  mutex_unlock (&bucket->mutex);
   return false;
 }
 
 bool
-hash_add (struct hash *hash, const void *key, void *value)
+hash_add (struct hash *hash, const void *key, void *value, bool replace)
 {
   uint32_t hv;
   struct hash_bucket *bucket;
   struct hash_element *he;
+  bool ret = false;
 
   hv = hash_value (hash, key);
+  bucket = &hash->buckets[hv & hash->mask];
+  mutex_lock (&bucket->mutex);
 
-  mutex_lock (&hash->mutex);
-
-  if (hash_lookup_dowork (hash, key, hv)) /* already exists? */
+  if ((he = hash_lookup_dowork (hash, bucket, key, hv))) /* already exists? */
     {
-      mutex_unlock (&hash->mutex);
-      return false;
+      if (replace)
+	{
+	  he->value = value;
+	  ret = true;
+	}
+    }
+  else
+    {
+      ALLOC_OBJ (he, struct hash_element);
+      he->value = value;
+      he->key = key;
+      he->hash_value = hv;
+      he->next = bucket->list;
+      bucket->list = he;
+      ret = true;
     }
 
-  bucket = &hash->buckets[hv % hash->n_buckets];
+  mutex_unlock (&bucket->mutex);
 
-  ALLOC_OBJ (he, struct hash_element);
-  he->value = value;
-  he->key = key;
-  he->hash_value = hv;
-  he->next = bucket->list;
-  bucket->list = he;
-  ++hash->n_elements;
+  return ret;
+}
 
-  mutex_unlock (&hash->mutex);
-
-  return true;
+void
+hash_remove_by_value (struct hash *hash, void *value)
+{
+  int i;
+  for (i = 0; i < hash->n_buckets; ++i)
+    {
+      struct hash_bucket *bucket = &hash->buckets[i];
+      if (bucket->list)
+	{
+	  struct hash_element *he, *prev;
+	  mutex_lock (&bucket->mutex);
+	  prev = NULL;
+	  he = bucket->list;
+	  while (he)
+	    {
+	      if (he->value == value)
+		{
+		  struct hash_element *newhe;
+		  if (prev)
+		    newhe = prev->next = he->next;
+		  else
+		    newhe = bucket->list = he->next;
+		  free (he);
+		  he = newhe;
+		}
+	      else
+		{
+		  prev = he;
+		  he = he->next;
+		}
+	    }
+	  mutex_unlock (&bucket->mutex);
+	}
+    }
 }
 
 void
 hash_iterator_init (struct hash *hash, struct hash_iterator *hi)
 {
-  mutex_lock (&hash->mutex);
   hi->hash = hash;
   hi->bucket_index = -1;
   hi->elem = NULL;
+  hi->bucket = NULL;
+}
+
+static inline void
+hash_iterator_lock (struct hash_iterator *hi, struct hash_bucket *b)
+{
+  mutex_lock (&b->mutex);
+  hi->bucket = b;
+}
+
+static inline void
+hash_iterator_unlock (struct hash_iterator *hi)
+{
+  if (hi->bucket)
+    {
+      mutex_unlock (&hi->bucket->mutex);
+      hi->bucket = NULL;
+    }
+}
+
+static inline void
+hash_iterator_advance (struct hash_iterator *hi)
+{
+  hi->elem = hi->elem->next;
+  if (!hi->elem)
+    hash_iterator_unlock (hi);
 }
 
 void
-hash_iterator_free (struct hash *hash, struct hash_iterator *hi)
+hash_iterator_free (struct hash_iterator *hi)
 {
-  mutex_unlock (&hash->mutex);
+  hash_iterator_unlock (hi);
 }
 
-void *
+struct hash_element *
 hash_iterator_next (struct hash_iterator *hi)
 {
-  void *ret = NULL;
+  struct hash_element *ret = NULL;
   if (hi->elem)
     {
-      ret = hi->elem->value;
-      hi->elem = hi->elem->next;
+      ret = hi->elem;
+      hash_iterator_advance (hi);
     }
   else
     {
       while (++hi->bucket_index < hi->hash->n_buckets)
 	{
-	  hi->elem = hi->hash->buckets[hi->bucket_index].list;
-	  if (hi->elem)
+	  struct hash_bucket *b;
+	  hash_iterator_unlock (hi);
+	  b = &hi->hash->buckets[hi->bucket_index];
+	  if (b->list)
 	    {
-	      ret = hi->elem->value;
-	      hi->elem = hi->elem->next;
-	      break;
+	      hash_iterator_lock (hi, b);
+	      hi->elem = b->list;
+	      if (hi->elem)
+		{
+		  ret = hi->elem;
+		  hash_iterator_advance (hi);
+		  break;
+		}
 	    }
 	}
     }
@@ -227,7 +318,7 @@ struct word
   int n;
 };
 
-uint32_t
+static uint32_t
 word_hash_function (const void *key, uint32_t iv)
 {
   const char *str = (const char *) key;
@@ -235,87 +326,145 @@ word_hash_function (const void *key, uint32_t iv)
   return hash_func ((const uint8_t *)str, len, iv);
 }
 
-bool
+static bool
 word_compare_function (const void *key1, const void *key2)
 {
   return strcmp ((const char *)key1, (const char *)key2) == 0;
 }
 
+static void
+print_nhash (struct hash *hash)
+{
+  struct hash_iterator hi;
+  struct hash_element *he;
+
+  hash_iterator_init (hash, &hi);
+
+  while ((he = hash_iterator_next (&hi)))
+    {
+      printf ("%d ", (int) he->value);
+    }
+  printf ("\n");
+
+  hash_iterator_free (&hi);
+}
+
+static void
+rmhash (struct hash *hash, const char *word)
+{
+  hash_remove (hash, word);
+}
+
 void
 list_test (void)
 {
-  struct gc_arena gc = gc_new ();
-  struct hash *hash = hash_init (16384, false, word_hash_function, word_compare_function);
+  openvpn_thread_init ();
 
-  /* parse words from stdin */
-  while (true)
-    {
-      char buf[512];
-      char wordbuf[512];
-      int wbi;
-      int bi;
-      char c;
-
-      if (!fgets(buf, sizeof(buf), stdin))
-	break;
-
-      bi = wbi = 0;
-      do
-	{
-	  c = buf[bi++];
-	  if (isalnum (c) || c == '_')
-	    {
-	      ASSERT (wbi < (int) sizeof (wordbuf));
-	      wordbuf[wbi++] = c;
-	    }
-	  else
-	    {
-	      if (wbi)
-		{
-		  struct word *w;
-		  ASSERT (wbi < (int) sizeof (wordbuf));
-		  wordbuf[wbi++] = '\0';
-		  
-		  /* word is parsed from stdin */
-
-		  /* does it already exist in table? */
-		  w = (struct word *) hash_lookup (hash, wordbuf);
-
-		  if (w)
-		    {
-		      /* yes, increment count */
-		      ++w->n;
-		    }
-		  else
-		    {
-		      /* no, make a new object */
-		      ALLOC_OBJ_GC (w, struct word, &gc);
-		      w->word = string_alloc (wordbuf, &gc);
-		      w->n = 1;
-		      ASSERT (hash_add (hash, w->word, w));
-		    }
-		}
-	      wbi = 0;
-	    }
-	} while (c);
-    }
-
-  /* output contents of hash table */
   {
-    struct hash_iterator hi;
-    struct word *w;
-    hash_iterator_init (hash, &hi);
+    struct gc_arena gc = gc_new ();
+    struct hash *hash = hash_init (10000, false, word_hash_function, word_compare_function);
+    struct hash *nhash = hash_init (256, false, word_hash_function, word_compare_function);
 
-    while ((w = (struct word *) hash_iterator_next (&hi)))
+    printf ("hash_init n_buckets=%d mask=0x%08x\n", hash->n_buckets, hash->mask);
+  
+    /* parse words from stdin */
+    while (true)
       {
-	printf ("%6d '%s'\n", w->n, w->word);
+	char buf[512];
+	char wordbuf[512];
+	int wbi;
+	int bi;
+	char c;
+
+	if (!fgets(buf, sizeof(buf), stdin))
+	  break;
+
+	bi = wbi = 0;
+	do
+	  {
+	    c = buf[bi++];
+	    if (isalnum (c) || c == '_')
+	      {
+		ASSERT (wbi < (int) sizeof (wordbuf));
+		wordbuf[wbi++] = c;
+	      }
+	    else
+	      {
+		if (wbi)
+		  {
+		    struct word *w;
+		    ASSERT (wbi < (int) sizeof (wordbuf));
+		    wordbuf[wbi++] = '\0';
+		  
+		    /* word is parsed from stdin */
+
+		    /* does it already exist in table? */
+		    w = (struct word *) hash_lookup (hash, wordbuf);
+
+		    if (w)
+		      {
+			/* yes, increment count */
+			++w->n;
+		      }
+		    else
+		      {
+			/* no, make a new object */
+			ALLOC_OBJ_GC (w, struct word, &gc);
+			w->word = string_alloc (wordbuf, &gc);
+			w->n = 1;
+			ASSERT (hash_add (hash, w->word, w, false));
+			ASSERT (hash_add (nhash, w->word, (void*) ((random() & 0x0F) + 1), false));
+		      }
+		  }
+		wbi = 0;
+	      }
+	  } while (c);
       }
 
-    hash_iterator_free (hash, &hi);
+#if 1
+    /* remove some words from the table */
+    {
+      rmhash (hash, "true");
+      rmhash (hash, "false");
+    }
+#endif
+
+    /* output contents of hash table */
+    {
+      struct hash_iterator hi;
+      struct hash_element *he;
+      hash_iterator_init (hash, &hi);
+
+      while ((he = hash_iterator_next (&hi)))
+	{
+	  struct word *w = (struct word *) he->value;
+	  printf ("%6d '%s'\n", w->n, w->word);
+	}
+
+      hash_iterator_free (&hi);
+    }
+	
+#if 1
+    /* test hash_remove_by_value function */
+    {
+      int i;
+      for (i = 1; i <= 16; ++i)
+	{
+	  printf ("[%d] ***********************************\n", i);
+	  print_nhash (nhash);
+	  hash_remove_by_value (nhash, (void *) i);
+	}
+      printf ("FINAL **************************\n");
+      print_nhash (nhash);
+    }
+#endif
+
+    hash_free (hash);
+    hash_free (nhash);
+    gc_free (&gc);
   }
 
-  hash_free (hash);
-  gc_free (&gc);
+  openvpn_thread_cleanup ();
 }
 
 #endif

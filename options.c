@@ -93,18 +93,6 @@ static const char usage_message[] =
   "--socks-proxy s [p]: Connect to remote host through a Socks5 proxy at address\n"
   "                  s and port p (default port = 1080).\n"
   "--socks-proxy-retry : Retry indefinitely on Socks proxy errors.\n"
-#if P2MP
-  "--push \"option\" : Push a config file option back to the peer for remote\n"
-  "                  execution.  Peer must specify --pull in its config file.\n"
-  "--pull          : Accept certain config file options from the peer as if they\n"
-  "                  were part of the local config file.  Must be specified\n"
-  "                  when connecting to a '--mode server' remote host.\n"
-  "--ifconfig-pool start-IP end-IP : Set aside a pool of /30 subnets to be\n"
-  "                  dynamically allocated to connecting clients.\n"
-  "                  Required for --mode server, not valid for --mode p2p.\n"
-  "--hash-size r v : Set the size of the real address hash table to r and the\n"
-  "                  virtual address table to v.  Only valid for --mode server.\n"
-#endif
   "--resolv-retry n: If hostname resolve fails for --remote, retry\n"
   "                  resolve for n seconds before failing (disabled by default).\n"
   "                  Set n=\"infinite\" to retry indefinitely.\n"
@@ -233,6 +221,35 @@ static const char usage_message[] =
   "                  packet for uncompressible data.\n"
   "--comp-noadapt  : Don't use adaptive compression when --comp-lzo\n"
   "                  is specified.\n"
+#endif
+#if P2MP
+  "\n"
+  "Multi-Client Server options (when --mode server is used):\n"
+  "--push \"option\" : Push a config file option back to the peer for remote\n"
+  "                  execution.  Peer must specify --pull in its config file.\n"
+  "--push-reset    : Don't inherit global push list for specific\n"
+  "                  client instance.\n"
+  "--ifconfig-pool start-IP end-IP : Set aside a pool of subnets to be\n"
+  "                  dynamically allocated to connecting clients.\n"
+  "--ifconfig-push local remote-netmask : Push an ifconfig option to remote,\n"
+  "                  overrides --ifconfig-pool dynamic allocation.\n"
+  "                  Must be associated with a specific client instance.\n"
+  "--iroute start end : Route IP address range from start to end to client.\n"
+  "                  Sets up internal routes only, and must be\n"
+  "                  associated with a specific client instance.\n"
+  "--client-to-client : Internally route client-to-client traffic.\n"
+  "--client-connect cmd : Run script cmd on client connection.\n"
+  "--client-disconnect cmd : Run script cmd on client disconnection.\n"
+  "--client-config-dir dir : Directory for custom client config files.\n"
+  "--tmp-dir dir   : Temporary directory, used for --client-connect return file.\n"
+  "--hash-size r v : Set the size of the real address hash table to r and the\n"
+  "                  virtual address table to v.\n"
+  "--bcast-delay n : Delay for n microseconds between broadcast packet sends.\n"
+  "\n"
+  "Client options (when connecting to a multi-client server):\n"
+  "--pull          : Accept certain config file options from the peer as if they\n"
+  "                  were part of the local config file.  Must be specified\n"
+  "                  when connecting to a '--mode server' remote host.\n"
 #endif
 #ifdef USE_CRYPTO
   "\n"
@@ -555,12 +572,72 @@ show_p2mp_parms (const struct options *o)
   SHOW_BOOL (ifconfig_pool_defined);
   msg (D_SHOW_PARMS, "  ifconfig_pool_start = %s", print_in_addr_t (o->ifconfig_pool_start, false, &gc));
   msg (D_SHOW_PARMS, "  ifconfig_pool_end = %s", print_in_addr_t (o->ifconfig_pool_end, false, &gc));
+  SHOW_INT (bcast_delay);
   SHOW_INT (real_hash_size);
   SHOW_INT (virtual_hash_size);
+  SHOW_STR (client_connect_script);
+  SHOW_STR (client_disconnect_script);
+  SHOW_STR (client_config_dir);
+  SHOW_STR (tmp_dir);
+  SHOW_BOOL (push_ifconfig_defined);
+  msg (D_SHOW_PARMS, "  push_ifconfig_local = %s", print_in_addr_t (o->push_ifconfig_local, false, &gc));
+  msg (D_SHOW_PARMS, "  push_ifconfig_remote_netmask = %s", print_in_addr_t (o->push_ifconfig_remote_netmask, false, &gc));
+  SHOW_BOOL (enable_c2c);
   gc_free (&gc);
 }
 
+static void
+option_iroute (struct options *o,
+	       const char *start,
+	       const char *end,
+	       int msglevel)
+{
+  const unsigned int max_address_range = 4096;
+  struct iroute *ir;
+  unsigned int diff;
+
+  msg (M_INFO, "IROUTE %s %s", start, end);
+
+  ALLOC_OBJ_GC (ir, struct iroute, &o->gc);
+  ir->start = getaddr (GETADDR_HOST_ORDER, start, 0, NULL, NULL);
+  ir->end   = getaddr (GETADDR_HOST_ORDER, end,   0, NULL, NULL);
+
+  if (!ir->start || !ir->end)
+    {
+      msg (msglevel, "Dynamic Options Error: bad --iroute parameter (must be 1 or 2 IP addresses)");
+      return;
+    }
+  if (ir->start > ir->end)
+    {
+      msg (msglevel, "Dynamic Options Error: --iroute start address is greater than end address");
+      return;
+    }
+  diff = ir->end - ir->start;
+  if (diff > max_address_range)
+    {
+      msg (msglevel, "Dynamic Options Error: --iroute address range is too large (max = %u addresses)", max_address_range);
+      return;
+    }
+  ir->next = o->iroutes;
+  o->iroutes = ir;
+}
+
 #endif
+
+void
+options_detach (struct options *o)
+{
+  gc_detach (&o->gc);
+  o->routes = NULL;
+#if P2MP
+  if (o->push_list) /* clone push_list */
+    {
+      const struct push_list *old = o->push_list;
+      ALLOC_OBJ_GC (o->push_list, struct push_list, &o->gc);
+      strcpy (o->push_list->options, old->options);
+    }
+#endif
+}
 
 static void
 rol_check_alloc (struct options *options)
@@ -907,18 +984,24 @@ options_postprocess (struct options *options, bool first_time)
    */
   if (options->mode == MODE_SERVER)
     {
-      if (!options->ifconfig_pool_defined)
-	msg (M_USAGE, "Options error: --mode server requires --ifconfig-pool");
       if (options->pull)
 	msg (M_USAGE, "Options error: --pull cannot be used with --mode server");
-      if (!(dev == DEV_TYPE_TUN || dev == DEV_TYPE_NULL))
-	msg (M_USAGE, "Options error: --mode server currently only supports --dev tun");
       if (options->proto != PROTO_UDPv4)
 	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp");
       if (!options->tls_server)
 	msg (M_USAGE, "Options error: --mode server requires --tls-server");
       if (options->tls_auth_file)
 	msg (M_USAGE, "Options error: --tls-auth can not be used with --mode server");
+
+#ifdef WIN32
+      /*
+       * We need to treat --route-delay as --tap-sleep because
+       * we do not schedule event timers in the top-level context.
+       */
+      options->route_delay_defined = false;
+      options->tuntap_options.tap_sleep = options->route_delay;
+#endif
+
     }
   else
     {
@@ -927,6 +1010,18 @@ options_postprocess (struct options *options, bool first_time)
       if (options->real_hash_size != defaults.real_hash_size
 	  || options->virtual_hash_size != defaults.virtual_hash_size)
 	msg (M_USAGE, "Options error: --hash-size requires --mode server");
+      if (options->client_connect_script)
+	msg (M_USAGE, "Options error: --client-connect requires --mode server");
+      if (options->client_disconnect_script)
+	msg (M_USAGE, "Options error: --client-disconnect requires --mode server");
+      if (options->tmp_dir)
+	msg (M_USAGE, "Options error: --tmp-dir requires --mode server");
+      if (options->client_config_dir)
+	msg (M_USAGE, "Options error: --client-config-dir requires --mode server");
+      if (options->bcast_delay)
+	msg (M_USAGE, "Options error: --bcast-delay requires --mode server");
+      if (options->enable_c2c)
+	msg (M_USAGE, "Options error: --client-to-client requires --mode server");
     }
 #endif
 
@@ -1427,7 +1522,8 @@ read_config_file (struct options *options,
 		  const char* top_file,
 		  int top_line,
 		  int msglevel,
-		  unsigned int permission_mask)
+		  unsigned int permission_mask,
+		  unsigned int *option_types_found)
 {
   const int max_recursive_levels = 10;
   FILE *fp;
@@ -1452,7 +1548,7 @@ read_config_file (struct options *options,
 	{
 	  if (strlen (p[0]) >= 3 && !strncmp (p[0], "--", 2))
 	    p[0] += 2;
-	  add_option (options, 0, p, file, line_num, level, msglevel, permission_mask, NULL);
+	  add_option (options, 0, p, file, line_num, level, msglevel, permission_mask, option_types_found);
 	}
     }
   fclose (fp);
@@ -1463,7 +1559,8 @@ parse_argv (struct options* options,
 	    int argc,
 	    char *argv[],
 	    int msglevel,
-	    unsigned int permission_mask)
+	    unsigned int permission_mask,
+	    unsigned int *option_types_found)
 {
   int i, j;
 
@@ -1495,7 +1592,7 @@ parse_argv (struct options* options,
 		break;
 	    }
 	}
-      i = add_option (options, i, p, NULL, 0, 0, msglevel, permission_mask, NULL);
+      i = add_option (options, i, p, NULL, 0, 0, msglevel, permission_mask, option_types_found);
     }
 }
 
@@ -1521,6 +1618,23 @@ apply_push_options (struct options *options,
 	}
     }
   return true;
+}
+
+void
+options_server_import (struct options *o,
+		       const char *filename,
+		       int msglevel,
+		       unsigned int permission_mask,
+		       unsigned int *option_types_found)
+{
+  read_config_file (o,
+		    filename,
+		    0,
+		    filename,
+		    0,
+		    msglevel,
+		    permission_mask,
+		    option_types_found);
 }
 
 #define VERIFY_PERMISSION(mask) { if (!verify_permission(p[0], (mask), permission_mask, option_types_found, msglevel)) goto err; }
@@ -1578,13 +1692,13 @@ add_option (struct options *options,
     {
       ++i;
 
-      VERIFY_PERMISSION (OPT_P_SCRIPT);
+      VERIFY_PERMISSION (OPT_P_CONFIG);
 
       /* save first config file only in options */
       if (!options->config)
 	options->config = p[1];
 
-      read_config_file (options, p[1], level, file, line, msglevel, permission_mask);
+      read_config_file (options, p[1], level, file, line, msglevel, permission_mask, option_types_found);
     }
   else if (streq (p[0], "mode") && p[1])
     {
@@ -2158,8 +2272,13 @@ add_option (struct options *options,
   else if (streq (p[0], "push") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_PUSH);
       push_option (options, p[1], msglevel);
+    }
+  else if (streq (p[0], "push-reset"))
+    {
+      VERIFY_PERMISSION (OPT_P_INSTANCE);
+      push_reset (options);
     }
   else if (streq (p[0], "pull"))
     {
@@ -2184,6 +2303,68 @@ add_option (struct options *options,
 	{
 	  msg (msglevel, "Options error: --hash-size sizes must be >= 1 (preferably a power of 2)");
 	  goto err;
+	}
+    }
+  else if (streq (p[0], "client-connect") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_SCRIPT);
+      options->client_connect_script = p[1];
+    }
+  else if (streq (p[0], "client-disconnect") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_SCRIPT);
+      options->client_disconnect_script = p[1];
+    }
+  else if (streq (p[0], "tmp-dir") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->tmp_dir = p[1];
+    }
+  else if (streq (p[0], "client-config-dir") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->client_config_dir = p[1];
+    }
+  else if (streq (p[0], "bcast-delay") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->bcast_delay = positive (atoi (p[1]));
+    }
+  else if (streq (p[0], "client-to-client"))
+    {
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->enable_c2c = true;
+    }
+  else if (streq (p[0], "iroute") && p[1])
+    {
+      const char *end = p[1];
+      VERIFY_PERMISSION (OPT_P_INSTANCE);
+      ++i;
+      if (p[2])
+	{
+	  ++i;
+	  end = p[2];
+	}
+      option_iroute (options, p[1], end, msglevel);
+    }
+  else if (streq (p[0], "ifconfig-push") && p[1] && p[2])
+    {
+      VERIFY_PERMISSION (OPT_P_INSTANCE);
+      i += 2;
+      options->push_ifconfig_local = getaddr (GETADDR_HOST_ORDER, p[1], 0, NULL, NULL);
+      options->push_ifconfig_remote_netmask = getaddr (GETADDR_HOST_ORDER, p[2], 0, NULL, NULL);
+      if (options->push_ifconfig_local && options->push_ifconfig_remote_netmask)
+	{
+	  options->push_ifconfig_defined = true;
+	}
+      else
+	{
+	  msg (msglevel, "Options error: cannot parse --ifconfig-push addresses");
 	}
     }
 #endif

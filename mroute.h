@@ -31,8 +31,12 @@
 #include "buffer.h"
 #include "list.h"
 
-struct mroute_list {
-};
+#define IP_MCAST_SUBNET_MASK  (240<<24)
+#define IP_MCAST_NETWORK      (224<<24)
+
+#define MROUTE_EXTRACT_SUCCEEDED (1<<1)
+#define MROUTE_EXTRACT_BCAST     (1<<2)
+#define MROUTE_EXTRACT_MCAST     (1<<3)
 
 /*
  * Choose the largest address possible with
@@ -59,20 +63,27 @@ struct mroute_addr {
   uint8_t addr[MR_MAX_ADDR_LEN];
 };
 
-struct mroute_list {
-  struct mroute_addr addr;
-};
+unsigned int mroute_extract_addr_from_packet (struct mroute_addr *src,
+					      struct mroute_addr *dest,
+					      const struct buffer *buf,
+					      int tunnel_type);
 
-bool mroute_extract_addr_from_packet (struct mroute_addr *addr, const struct buffer *buf, int tunnel_type, bool dest);
-bool mroute_extract_sockaddr_in (struct mroute_addr *addr, const struct sockaddr_in *saddr, bool use_port);
+bool mroute_extract_sockaddr_in (struct mroute_addr *addr,
+				 const struct sockaddr_in *saddr,
+				 bool use_port);
 
-void mroute_list_init (struct mroute_list *list);
-void mroute_list_free (struct mroute_list *list);
+bool mroute_learnable_address (const struct mroute_addr *addr);
 
 uint32_t mroute_addr_hash_function (const void *key, uint32_t iv);
 bool mroute_addr_compare_function (const void *key1, const void *key2);
 
 const char *mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc);
+
+static inline void
+mroute_addr_init (struct mroute_addr *addr)
+{
+  CLEAR (*addr);
+}
 
 static inline bool
 mroute_addr_equal (const struct mroute_addr *a1, const struct mroute_addr *a2)

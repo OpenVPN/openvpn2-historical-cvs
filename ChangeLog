@@ -1,7 +1,30 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.19 2004/04/02 15:01:23 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.20 2004/04/10 07:26:37 jimyonan Exp $
+
+2004.04.10 -- Version 2.0-test20
+
+* --mode server capability now works with either tun
+  or tap interfaces.  When used with tap interfaces,
+  OpenVPN will internally bridge all client tap
+  interfaces with the server tap interface.
+* Connecting clients can now have a client-specific
+  configuration on the server, based on the client
+  common name embedded in the client certificate.
+  See --client-config-dir and --client-connect.
+  These options can be used to configure client-specific
+  routes.
+* Added an option --client-to-client that enables
+  internal client-to-client routing or bridging.
+  Otherwise, clients will only "see" the server,
+  not other connected clients.
+* Fixed bug in route scheduling which would have caused
+  --mode server to not work on Windows in test18
+  and test19 with the sample config file.
+* Man page is up to date with all new options.
+* OpenVPN 2.0 release notes on web site updated
+  with tap-style tunnel examples.
 
 2004.04.02 -- Version 2.0-test19
 

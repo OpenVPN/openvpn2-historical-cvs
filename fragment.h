@@ -153,10 +153,10 @@ void fragment_frame_init (struct fragment_master *f, const struct frame *frame);
 void fragment_free (struct fragment_master *f);
 
 void fragment_incoming (struct fragment_master *f, struct buffer *buf,
-			const struct frame* frame, const time_t current);
+			const struct frame* frame);
 
 void fragment_outgoing (struct fragment_master *f, struct buffer *buf,
-			const struct frame* frame, const time_t current);
+			const struct frame* frame);
 
 bool fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
 			     const struct frame* frame);
@@ -164,17 +164,17 @@ bool fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
 /*
  * Private functions.
  */
-void fragment_wakeup (struct fragment_master *f, struct frame *frame, time_t current);
+void fragment_wakeup (struct fragment_master *f, struct frame *frame);
 
 /*
  * Inline functions
  */
 
 static inline void
-fragment_housekeeping (struct fragment_master *f, struct frame *frame, time_t current, struct timeval *tv)
+fragment_housekeeping (struct fragment_master *f, struct frame *frame, struct timeval *tv)
 {
-  if (event_timeout_trigger (&f->wakeup, current, tv))
-    fragment_wakeup (f, frame, current);
+  if (event_timeout_trigger (&f->wakeup, tv))
+    fragment_wakeup (f, frame);
 }
 
 static inline bool

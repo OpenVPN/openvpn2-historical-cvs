@@ -37,7 +37,7 @@ check_ping_restart (struct context *c)
   if (c->options.ping_rec_timeout
       && (!c->options.ping_timer_remote
 	  || addr_defined (&c->c1.link_socket_addr.actual))
-      && event_timeout_trigger (&c->c2.ping_rec_interval, c->c2.current,
+      && event_timeout_trigger (&c->c2.ping_rec_interval,
 				&c->c2.timeval))
     check_ping_restart_dowork (c);
 }
@@ -51,7 +51,7 @@ check_ping_send (struct context *c)
   void check_ping_send_dowork (struct context *c);
   if (c->options.ping_send_timeout
       && !c->c2.to_link.len
-      && event_timeout_trigger (&c->c2.ping_send_interval, c->c2.current,
+      && event_timeout_trigger (&c->c2.ping_send_interval,
 				&c->c2.timeval))
     check_ping_send_dowork (c);
 }

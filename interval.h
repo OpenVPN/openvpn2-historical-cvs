@@ -32,10 +32,89 @@
 #ifndef INTERVAL_H
 #define INTERVAL_H
 
+#include "common.h"
+#include "integer.h"
+#include "buffer.h"
 #include "error.h"
-#include "misc.h"
 
 #define INTERVAL_DEBUG 1 // JYFIXME
+
+/* struct timeval functions */
+
+const char *tv_string (const struct timeval *tv);
+
+static inline bool
+tv_defined (const struct timeval *tv)
+{
+  return tv->tv_sec > 0;
+}
+
+/* return tv1 - tv2 in usec, constrained by max_seconds */
+static inline int
+tv_subtract (const struct timeval *tv1, const struct timeval *tv2, bool max_seconds)
+{
+  const int max_usec = max_seconds * 1000000;
+  const int sec_diff = tv1->tv_sec - tv2->tv_sec;
+
+  if (sec_diff > (max_seconds + 10))
+    return max_usec;
+  else if (sec_diff < -(max_seconds + 10))
+    return -max_usec;
+  return constrain_int (sec_diff * 1000000 + (tv1->tv_usec - tv2->tv_usec), -max_usec, max_usec);
+}
+
+static inline void
+tv_add_approx (struct timeval *dest, const struct timeval *src)
+{
+  dest->tv_sec += src->tv_sec;
+  dest->tv_usec += src->tv_usec;
+  dest->tv_sec += (dest->tv_usec >> 20);
+  dest->tv_usec &= 0x000FFFFF;
+  if (dest->tv_usec > 999999)
+    dest->tv_usec = 999999;
+}
+
+static inline void
+tv_add (struct timeval *dest, const struct timeval *src)
+{
+  dest->tv_sec += src->tv_sec;
+  dest->tv_usec += src->tv_usec;
+  while (dest->tv_usec >= 1000000)
+    {
+      dest->tv_usec -= 1000000;
+      dest->tv_sec += 1;
+    }
+}
+
+static inline bool
+tv_lt (const struct timeval *t1, const struct timeval *t2)
+{
+  if (t1->tv_sec < t2->tv_sec)
+    return true;
+  else if (t1->tv_sec > t2->tv_sec)
+    return false;
+  else
+    return t1->tv_usec < t2->tv_usec;
+}
+
+static inline void
+tv_delta (struct timeval *dest, const struct timeval *t1, const struct timeval *t2)
+{
+  int sec = t2->tv_sec - t1->tv_sec;
+  int usec = t2->tv_usec - t1->tv_usec;
+
+  while (usec < 0)
+    {
+      usec += 1000000;
+      sec -= 1;
+    }
+
+  if (sec < 0)
+    usec = sec = 0;
+
+  dest->tv_sec = sec;
+  dest->tv_usec = usec;
+}
 
 /*
  * Used to determine in how many seconds we should be

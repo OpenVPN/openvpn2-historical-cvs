@@ -48,7 +48,7 @@ HEADERS = basic.h buffer.h circ_list.h common.h \
           thread.h tun.h win32.h
 
 OBJS =  buffer.o crypto.o error.o fdmisc.o forward.o \
-        fragment.o gremlin.o inet_aton.o init.o io.o \
+        fragment.o gremlin.o inet_aton.o init.o interval.o io.o \
         list.o lzo.o misc.o mroute.o mss.o mtu.o multi.o occ.o openvpn.o \
         options.o packet_id.o ping.o proxy.o reliable.o \
         route.o session_id.o shaper.o sig.o socket.o \

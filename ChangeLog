@@ -1,7 +1,12 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.9 2004/03/14 09:04:09 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.10 2004/03/16 12:33:46 jimyonan Exp $
+
+2004.03.16 -- Version 2.0-test10
+
+* More TAP-Win32 fixes.
+* Initial debugging and testing of multi.[ch].
 
 2004.03.14 -- Version 2.0-test9
 
@@ -15,6 +20,8 @@ $Id: ChangeLog,v 1.89.2.9 2004/03/14 09:04:09 jimyonan Exp $
 * In the majority of cases, TAP-Win32 should now be
   able to install and uninstall on Win2K without requiring
   a reboot.
+* TAP-Win32 MAC address can now be explicitly set in the
+  adapter advanced properties page.
 
 2004.03.04 -- Version 2.0-test8
 

@@ -55,6 +55,13 @@ multi_init (struct multi_context *m, struct context *t)
     }
 }
 
+/*
+ * Compute earliest timeout expiry from the set of
+ * all instances.  Output:
+ *
+ * m->earliest_wakeup : instance needing the earliest service.
+ * dest               : earliest timeout
+ */
 static void
 multi_get_timeout (struct multi_context *m, struct timeval *dest)
 {
@@ -70,7 +77,13 @@ multi_get_timeout (struct multi_context *m, struct timeval *dest)
   for (i = 0; i < MULTI_N_INSTANCE; ++i)
     {
       struct multi_instance *mi = &m->array[i];
-      if (mi->defined && tv_lt (&mi->wakeup, &tv))
+#if 1 // JYFIXME
+      if (mi->defined)
+	{
+	  msg (M_INFO, "[%d] WAKEUP %s", i, tv_string (&mi->wakeup));
+	}
+#endif
+      if (mi->defined && (!m->earliest_wakeup || tv_lt (&mi->wakeup, &tv)))
 	{
 	  m->earliest_wakeup = mi;
 	  tv = mi->wakeup;
@@ -80,6 +93,10 @@ multi_get_timeout (struct multi_context *m, struct timeval *dest)
   if (m->earliest_wakeup)
     {
       ASSERT (!gettimeofday (&current, NULL));
+#if 1 // JYFIXME
+      msg (M_INFO, "CURRENT %s", tv_string (&current));
+      msg (M_INFO, "EARLIEST %s", tv_string (&tv));
+#endif
       tv_delta (dest, &current, &tv);
     }
   else
@@ -138,11 +155,10 @@ multi_select (struct multi_context *m, struct context *t)
   t->c2.select_status = 1;	/* this will be our return "status" if select doesn't get called */
   if (!t->sig->signal_received)
     {
-      struct timeval tv;
+      multi_get_timeout (m, &t->c2.timeval);
       if (check_debug_level (D_SELECT))
 	show_select_status (t);
-      multi_get_timeout (m, &tv);
-      t->c2.select_status = SELECT (&t->c2.event_wait, &tv);
+      t->c2.select_status = SELECT (&t->c2.event_wait, &t->c2.timeval);
       check_status (t->c2.select_status, "multi-select", NULL, NULL);
     }
 
@@ -214,22 +230,61 @@ multi_close_instance (struct multi_instance *mi)
     }
 }
 
-static inline bool
-multi_process_post (struct multi_instance *mi)
+/*
+ * Figure instance-specific timers, convert
+ * earliest to absolute time in mi->wakeup.
+ *
+ * Also close context on signal.
+ */
+static bool
+multi_process_post (struct multi_context *m, struct multi_instance *mi)
 {
   if (!IS_SIG (&mi->context))
     {
+      /* figure timeouts and fetch possible outgoing
+	 to_link packets (such as ping or TLS control) */
       pre_select (&mi->context);
+
+      /* calculate an absolute wakeup time */
       ASSERT (!gettimeofday (&mi->wakeup, NULL));
       tv_add (&mi->wakeup, &mi->context.c2.timeval);
     }
   if (IS_SIG (&mi->context))
     {
+      /* make sure that link_out or tun_out is nullified if
+	 it points to our soon-to-be-deleted instance */
+      if (m->link_out == mi)
+	m->link_out = NULL;
+      if (m->tun_out == mi)
+	m->link_out = NULL;
       multi_close_instance (mi);
       return false;
     }
   else
-    return true;
+    {
+      /* did pre_select produce any to_link or to_tun output packets? */
+      if (m->link_out)
+	{
+	  if (!BLEN (&mi->context.c2.to_link))
+	    m->link_out = NULL;
+	}
+      else
+	{
+	  if (BLEN (&mi->context.c2.to_link))
+	    m->link_out = mi;
+	}
+      if (m->tun_out)
+	{
+	  if (!BLEN (&mi->context.c2.to_tun))
+	    m->tun_out = NULL;
+	}
+      else
+	{
+	  if (BLEN (&mi->context.c2.to_tun))
+	    m->tun_out = mi;
+	}
+      return true;
+    }
 }
 
 static void
@@ -252,6 +307,7 @@ multi_inherit_context (struct context *dest, const struct context *src)
 
   /* inherit SSL context */
   dest->c1.ks.ssl_ctx = src->c1.ks.ssl_ctx;
+  dest->c1.ks.key_type = src->c1.ks.key_type;
 
   /* options */
   dest->options = src->options;
@@ -287,6 +343,8 @@ multi_open_instance (struct multi_context *m, struct context *t)
   struct multi_instance *mi = multi_instance_get_free (m);
   ASSERT (mi); /* this will fail if we run out of free instances */
 
+  msg (M_INFO, "multi_open_instance called");
+
   CLEAR (*mi);
   mi->defined = true;
   mroute_list_init (&mi->real);
@@ -297,7 +355,7 @@ multi_open_instance (struct multi_context *m, struct context *t)
 
   multi_inherit_context (&mi->context, t);
 
-  if (multi_process_post (mi))
+  if (multi_process_post (m, mi))
     return mi;
   else
     return NULL;
@@ -308,6 +366,7 @@ multi_process_incoming_link (struct multi_context *m, struct context *t)
 {
   if (BLEN (&t->c2.buf))
     {
+      struct context *c;
       ASSERT (!m->tun_out);
 
       /* existing client? */
@@ -321,18 +380,20 @@ multi_process_incoming_link (struct multi_context *m, struct context *t)
 	    return;
 	}
 
+      /* get instance context */
+      c = &m->tun_out->context;
+
       /* transfer packet pointer from top-level context buffer to instance */
-      m->tun_out->context.c2.buf = t->c2.buf;
+      c->c2.buf = t->c2.buf;
 
       /* transfer from-addr from top-level context buffer to instance */
-      m->tun_out->context.c2.from = t->c2.from;
+      c->c2.from = t->c2.from;
 
       /* decrypt in instance context */
-      process_incoming_link (&m->tun_out->context);
+      process_incoming_link (c);
 
       /* postprocess and set wakeup */
-      if (!multi_process_post (m->tun_out))
-	m->tun_out = NULL;
+      multi_process_post (m, m->tun_out);
     }
 }
 
@@ -341,7 +402,9 @@ multi_process_incoming_tun (struct multi_context *m, struct context *t)
 {
   if (BLEN (&t->c2.buf))
     {
+      struct context *c;
       struct mroute_addr addr;
+
       ASSERT (!m->link_out);
 
       /* 
@@ -356,32 +419,38 @@ multi_process_incoming_tun (struct multi_context *m, struct context *t)
       if (!m->link_out)
 	return;
 
+      /* get instance context */
+      c = &m->link_out->context;
+
       /* transfer packet pointer from top-level context buffer to instance */
-      m->link_out->context.c2.buf = t->c2.buf;
+      c->c2.buf = t->c2.buf;
      
       /* encrypt in instance context */
-      process_incoming_tun (&m->link_out->context);
+      process_incoming_tun (c);
 
       /* postprocess and set wakeup */
-      if (!multi_process_post (m->link_out))
-	m->link_out = NULL;
+      multi_process_post (m, m->link_out);
     }
 }
 
 static inline void
 multi_process_outgoing_link (struct multi_context *m, struct context *t)
 {
-  process_outgoing_link (&m->link_out->context, &t->c2.link_socket);
-  multi_process_post (m->link_out);
+  struct multi_instance *mi = m->link_out;
+  ASSERT (mi);
   m->link_out = NULL;
+  process_outgoing_link (&mi->context, &t->c2.link_socket);
+  multi_process_post (m, mi);
 }
 
 static inline void
 multi_process_outgoing_tun (struct multi_context *m, struct context *t)
 {
-  process_outgoing_tun (&m->link_out->context, &t->c1.tuntap);
-  multi_process_post (m->tun_out);
+  struct multi_instance *mi = m->tun_out;
+  ASSERT (mi);
   m->tun_out = NULL;
+  process_outgoing_tun (&mi->context, &t->c1.tuntap);
+  multi_process_post (m, mi);
 }
 
 void
@@ -419,15 +488,12 @@ multi_process_io (struct multi_context *m, struct context *t)
 void
 multi_process_timeout (struct multi_context *m, struct context *t)
 {
+  /* instance marked for wakeup in multi_get_timeout? */
   if (m->earliest_wakeup)
     {
-      multi_process_post (m->earliest_wakeup);
+      multi_process_post (m, m->earliest_wakeup);
       m->earliest_wakeup = NULL;
     }
-  if (!m->link_out && BLEN (&m->earliest_wakeup->context.c2.to_link))
-    m->link_out = m->earliest_wakeup;
-  if (!m->tun_out && BLEN (&m->earliest_wakeup->context.c2.to_tun))
-    m->tun_out = m->earliest_wakeup;
 }
 
 void

@@ -181,10 +181,11 @@ DriverEntry (IN PDRIVER_OBJECT p_DriverObject,
     {
     case NDIS_STATUS_SUCCESS:
       {
-	DEBUGP (("[TAP] version [%d.%d] "
-		 __DATE__" "__TIME__
-		 " registered miniport successfully\n",
-		 TAP_DRIVER_MAJOR_VERSION, TAP_DRIVER_MINOR_VERSION));
+	DEBUGP (("[TAP] version [%d.%d] %s %s registered miniport successfully\n",
+		 TAP_DRIVER_MAJOR_VERSION,
+		 TAP_DRIVER_MINOR_VERSION,
+		 __DATE__,
+		 __TIME__));
 	DEBUGP (("Registry Path: '%S'\n", p_RegistryPath->Buffer));
 	break;
       }
@@ -238,8 +239,15 @@ DriverEntry (IN PDRIVER_OBJECT p_DriverObject,
 VOID 
 TapDriverUnload (IN PDRIVER_OBJECT p_DriverObject)
 {
-  DEBUGP (("[TAP] version [%d.%d] unloaded\n",
-	   TAP_DRIVER_MAJOR_VERSION, TAP_DRIVER_MINOR_VERSION));
+  DEBUGP (("[TAP] version [%d.%d] %s %s unloaded, instances=%d, imbs=%d\n",
+	   TAP_DRIVER_MAJOR_VERSION,
+	   TAP_DRIVER_MINOR_VERSION,
+	   __DATE__,
+	   __TIME__,
+	   NInstances(),
+	   InstanceMaxBucketSize()));
+
+  FreeInstanceList ();
 
   //==============================
   // Free debugging text space
@@ -489,6 +497,12 @@ AdapterHalt (IN NDIS_HANDLE p_AdapterContext)
 
   status = RemoveAdapterFromInstanceList (l_Adapter);
   DEBUGP (("[TAP] RemoveAdapterFromInstanceList returned %d\n", (int) status));
+
+  DEBUGP (("[TAP] version [%d.%d] %s %s AdapterHalt returning\n",
+	   TAP_DRIVER_MAJOR_VERSION,
+	   TAP_DRIVER_MINOR_VERSION,
+	   __DATE__,
+	   __TIME__));
 }
 
 VOID
@@ -501,8 +515,7 @@ AdapterFreeResources (TapAdapterPointer p_Adapter)
     RtlFreeAnsiString (&p_Adapter->m_NameAnsi);
   
   if (p_Adapter->m_RegisteredAdapterShutdownHandler)
-    NdisMDeregisterAdapterShutdownHandler
-      (p_Adapter->m_MiniportAdapterHandle);
+    NdisMDeregisterAdapterShutdownHandler (p_Adapter->m_MiniportAdapterHandle);
 }
 
 VOID
@@ -517,18 +530,30 @@ DestroyTapDevice (TapExtensionPointer p_Extension)
   p_Extension->m_TapOpens = 0;
   p_Extension->m_Halt = TRUE;
 
-  //====================================
-  // Give clients time to finish up.
+  //=====================================
+  // If we are concurrently executing in
+  // TapDeviceHook or AdapterTransmit,
+  // give those calls time to finish.
   // Note that we must be running at IRQL
   // < DISPATCH_LEVEL in order to call
   // NdisMSleep.
-  //====================================
-  NdisMSleep (1000000);
+  //=====================================
+  NdisMSleep (500000);
 
-  //================================
-  // Exhaust IRP and packet queues
-  //================================
+  //===========================================================
+  // Exhaust IRP and packet queues.  Any pending IRPs will
+  // be cancelled, causing user-space to get this error
+  // on overlapped reads:
+  //   The I/O operation has been aborted because of either a
+  //   thread exit or an application request.   (code=995)
+  // It's important that user-space close the device handle
+  // when this code is returned, so that when we finally
+  // do a NdisMDeregisterDevice, the device reference count
+  // is 0.  Otherwise the driver will not unload even if the
+  // the last adapter has been halted.
+  //===========================================================
   FlushQueues (p_Extension);
+  NdisMSleep (500000); // give user space time to respond to IRP cancel
 
   TapDeviceFreeResources (p_Extension);
 }
@@ -618,7 +643,6 @@ CreateTapDevice (TapExtensionPointer p_Extension, const char *p_Name)
   l_Dispatch[IRP_MJ_WRITE] = TapDeviceHook;
   l_Dispatch[IRP_MJ_CREATE] = TapDeviceHook;
   l_Dispatch[IRP_MJ_CLOSE] = TapDeviceHook;
-  l_Dispatch[IRP_MJ_CLEANUP] = TapDeviceHook;
 
   //==================================
   // Find the beginning of the GUID
@@ -1501,10 +1525,20 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 
   if (!l_Adapter || l_Adapter->m_Extension.m_Halt)
     {
-      DEBUGP (("TapDeviceHook called when TAP device is halted\n"));
-      p_IRP->IoStatus.Status = STATUS_NO_SUCH_DEVICE;
-      IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
-      return STATUS_NO_SUCH_DEVICE;
+      DEBUGP (("TapDeviceHook called when TAP device is halted, MajorFunction=%d\n",
+	       (int)l_IrpSp->MajorFunction));
+
+      if (l_IrpSp->MajorFunction == IRP_MJ_CLOSE)
+	{
+	  IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
+	  return STATUS_SUCCESS;
+	}
+      else
+	{
+	  p_IRP->IoStatus.Status = STATUS_NO_SUCH_DEVICE;
+	  IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
+	  return STATUS_NO_SUCH_DEVICE;
+	}
     }
 
   switch (l_IrpSp->MajorFunction)
@@ -2051,7 +2085,6 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
       //  User mode thread called CloseHandle() on the tap device
       //-----------------------------------------------------------
     case IRP_MJ_CLOSE:
-    case IRP_MJ_CLEANUP:
       {
 	BOOLEAN mutex_succeeded;
 
@@ -2212,7 +2245,7 @@ CancelIRP (TapExtensionPointer p_Extension,
 
   MYASSERT (p_IRP);
 
-  if (p_Extension && !p_Extension->m_Halt)
+  if (p_Extension)
     {
       NdisAcquireSpinLock (&p_Extension->m_QueueLock);
       exists = (QueueExtract (p_Extension->m_IrpQueue, p_IRP) == p_IRP);
@@ -2256,7 +2289,7 @@ FlushQueues (TapExtensionPointer p_Extension)
       if (l_IRP)
 	{
 	  ++n_IRP;
-	  CancelIRP (p_Extension, l_IRP, FALSE);
+	  CancelIRP (NULL, l_IRP, FALSE);
 	}
       else
 	break;

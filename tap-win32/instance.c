@@ -27,42 +27,126 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#define INSTANCE_KEY(a) ((PVOID)((a)->m_Extension.m_TapDevice))
+
+#define N_INSTANCE_BUCKETS 256
+
 typedef struct _INSTANCE {
   struct _INSTANCE *next;
   TapAdapterPointer m_Adapter;
 } INSTANCE;
 
-INSTANCE *g_Instance_List;
-MUTEX g_Instance_List_Lock;
+typedef struct {
+  INSTANCE *list;
+  MUTEX lock;
+} INSTANCE_BUCKET;
+
+typedef struct {
+  INSTANCE_BUCKET buckets[N_INSTANCE_BUCKETS];
+} INSTANCE_HASH;
+
+INSTANCE_HASH *g_InstanceHash = NULL;
+
+// must return a hash >= 0 and < N_INSTANCE_BUCKETS
+int
+InstanceHashValue (PVOID addr)
+{
+  UCHAR *p = (UCHAR *) &addr;
+
+  if (sizeof (addr) == 4)
+    return p[0] ^ p[1] ^ p[2] ^ p[3];
+  else if (sizeof (addr) == 8)
+    return p[0] ^ p[1] ^ p[2] ^ p[3] ^ p[4] ^ p[5] ^ p[6] ^ p[7];
+  else
+    {
+      MYASSERT (0);
+    }
+}
 
 BOOLEAN
 InitInstanceList (VOID)
 {
-  g_Instance_List = NULL;
-  INIT_MUTEX (&g_Instance_List_Lock);
-  return TRUE;
+  MYASSERT (g_InstanceHash == NULL);
+  g_InstanceHash = MemAlloc (sizeof (INSTANCE_HASH), TRUE);
+  if (g_InstanceHash)
+    {
+      int i;
+      for (i = 0; i < N_INSTANCE_BUCKETS; ++i)
+	INIT_MUTEX (&g_InstanceHash->buckets[i].lock);
+      return TRUE;
+    }
+  else
+    return FALSE;
 }
 
 int
 NInstances (VOID)
 {
-  BOOLEAN got_lock;
-  int ret = -1;
+  int i, n = 0;
 
-  ACQUIRE_MUTEX_ADAPTIVE (&g_Instance_List_Lock, got_lock);
-
-  if (got_lock)
+  if (g_InstanceHash)
     {
-      INSTANCE *current;
-      ret = 0;
-      for (current = g_Instance_List; current != NULL; current = current->next)
+      for (i = 0; i < N_INSTANCE_BUCKETS; ++i)
 	{
-	  ++ret;
+	  BOOLEAN got_lock;
+	  INSTANCE_BUCKET *ib = &g_InstanceHash->buckets[i];
+	  ACQUIRE_MUTEX_ADAPTIVE (&ib->lock, got_lock);
+
+	  if (got_lock)
+	    {
+	      INSTANCE *current;
+	      for (current = ib->list; current != NULL; current = current->next)
+		++n;
+	      RELEASE_MUTEX (&ib->lock);
+	    }
+	  else
+	    return -1;
 	}
-      RELEASE_MUTEX (&g_Instance_List_Lock);
     }
 
-  return ret;
+  return n;
+}
+
+int
+InstanceMaxBucketSize (VOID)
+{
+  int i, n = 0;
+
+  if (g_InstanceHash)
+    {
+      for (i = 0; i < N_INSTANCE_BUCKETS; ++i)
+	{
+	  BOOLEAN got_lock;
+	  int bucket_size = 0;
+	  INSTANCE_BUCKET *ib = &g_InstanceHash->buckets[i];
+	  ACQUIRE_MUTEX_ADAPTIVE (&ib->lock, got_lock);
+
+	  if (got_lock)
+	    {
+	      INSTANCE *current;
+	      for (current = ib->list; current != NULL; current = current->next)
+		  ++bucket_size;
+	      if (bucket_size > n)
+		n = bucket_size;
+	      RELEASE_MUTEX (&ib->lock);
+	    }
+	  else
+	    return -1;
+	}
+    }
+
+  return n;
+}
+
+VOID
+FreeInstanceList (VOID)
+{
+  if (g_InstanceHash)
+    {
+      MYASSERT (NInstances() == 0);
+      MemFree (g_InstanceHash, sizeof (INSTANCE_HASH));
+      g_InstanceHash = NULL;
+    }
 }
 
 BOOLEAN
@@ -70,8 +154,12 @@ AddAdapterToInstanceList (TapAdapterPointer p_Adapter)
 {
   BOOLEAN got_lock;
   BOOLEAN ret = FALSE;
+  const int hash = InstanceHashValue(INSTANCE_KEY(p_Adapter));
+  INSTANCE_BUCKET *ib = &g_InstanceHash->buckets[hash];
 
-  ACQUIRE_MUTEX_ADAPTIVE (&g_Instance_List_Lock, got_lock);
+  DEBUGP (("[TAP] AddAdapterToInstanceList hash=%d\n", hash));
+
+  ACQUIRE_MUTEX_ADAPTIVE (&ib->lock, got_lock);
 
   if (got_lock)
     {
@@ -80,11 +168,11 @@ AddAdapterToInstanceList (TapAdapterPointer p_Adapter)
 	{
 	  MYASSERT (p_Adapter);
 	  i->m_Adapter = p_Adapter;
-	  i->next = g_Instance_List;
-	  g_Instance_List = i;
+	  i->next = ib->list;
+	  ib->list = i;
 	  ret = TRUE;
 	}
-      RELEASE_MUTEX (&g_Instance_List_Lock);
+      RELEASE_MUTEX (&ib->lock);
     }
 
   return ret;
@@ -95,20 +183,21 @@ RemoveAdapterFromInstanceList (TapAdapterPointer p_Adapter)
 {
   BOOLEAN got_lock;
   BOOLEAN ret = FALSE;
+  INSTANCE_BUCKET *ib = &g_InstanceHash->buckets[InstanceHashValue(INSTANCE_KEY(p_Adapter))];
 
-  ACQUIRE_MUTEX_ADAPTIVE (&g_Instance_List_Lock, got_lock);
+  ACQUIRE_MUTEX_ADAPTIVE (&ib->lock, got_lock);
 
   if (got_lock)
     {
       INSTANCE *current, *prev=NULL;
-      for (current = g_Instance_List; current != NULL; current = current->next)
+      for (current = ib->list; current != NULL; current = current->next)
 	{
 	  if (current->m_Adapter == p_Adapter) // found match
 	    {
 	      if (prev)
 		prev->next = current->next;
 	      else
-		g_Instance_List = current->next;
+		ib->list = current->next;
 	      MemFree (current->m_Adapter, sizeof (TapAdapter));
 	      MemFree (current, sizeof (INSTANCE));
 	      ret = TRUE;
@@ -116,7 +205,7 @@ RemoveAdapterFromInstanceList (TapAdapterPointer p_Adapter)
 	    }
 	  prev = current;
 	}
-      RELEASE_MUTEX (&g_Instance_List_Lock);
+      RELEASE_MUTEX (&ib->lock);
     }
 
   return ret;
@@ -127,29 +216,30 @@ LookupAdapterInInstanceList (PDEVICE_OBJECT p_DeviceObject)
 {
   BOOLEAN got_lock;
   TapAdapterPointer ret = NULL;
+  INSTANCE_BUCKET *ib = &g_InstanceHash->buckets[InstanceHashValue((PVOID)p_DeviceObject)];
 
-  ACQUIRE_MUTEX_ADAPTIVE (&g_Instance_List_Lock, got_lock);
+  ACQUIRE_MUTEX_ADAPTIVE (&ib->lock, got_lock);
 
   if (got_lock)
     {
       INSTANCE *current, *prev=NULL;
-      for (current = g_Instance_List; current != NULL; current = current->next)
+      for (current = ib->list; current != NULL; current = current->next)
 	{
-	  if (p_DeviceObject == current->m_Adapter->m_Extension.m_TapDevice) // found match
+	  if (p_DeviceObject == INSTANCE_KEY (current->m_Adapter)) // found match
 	    {
 	      // move it to head of list
 	      if (prev)
 		{
 		  prev->next = current->next;
-		  current->next = g_Instance_List;
-		  g_Instance_List = current;
+		  current->next = ib->list;
+		  ib->list = current;
 		}
-	      ret = g_Instance_List->m_Adapter;
+	      ret = ib->list->m_Adapter;
 	      break;
 	    }
 	  prev = current;
 	}
-      RELEASE_MUTEX (&g_Instance_List_Lock);
+      RELEASE_MUTEX (&ib->lock);
     }
 
   return ret;

@@ -34,6 +34,7 @@
 #include "integer.h"
 #include "misc.h"
 #include "error.h"
+#include "interval.h"
 
 /*
  * A simple traffic shaper for

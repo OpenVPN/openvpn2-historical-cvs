@@ -541,7 +541,7 @@ time_string (time_t t, bool show_usec)
 
 /* thread-safe strerror */
 
-const char*
+const char *
 strerror_ts (int errnum)
 {
 #ifdef HAVE_STRERROR

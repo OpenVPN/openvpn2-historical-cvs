@@ -71,6 +71,7 @@
 #define D_COMP_LOW           LOGLEV(4, 45, 0)        /* show adaptive compression state changes */
 #define D_LOW                LOGLEV(4, 46, 0)        /* miscellaneous low-frequency debug info */
 #define D_DHCP_OPT           LOGLEV(4, 47, 0)        /* show DHCP options binary string */
+#define D_MULTI              LOGLEV(4, 48, 0)        /* show point-to-multipoint info */
 
 #define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 

@@ -53,7 +53,7 @@ typedef unsigned int ssize_t;
 
 /* Minimum TAP-Win32 version number expected by userspace */
 #define TAP_WIN32_MIN_MAJOR 6
-#define TAP_WIN32_MIN_MINOR 2
+#define TAP_WIN32_MIN_MINOR 7
 
 /* Define to 1 if you have the `chdir' function. */
 #define HAVE_CHDIR 1

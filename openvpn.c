@@ -1290,9 +1290,7 @@ openvpn (const struct options *options,
   link_socket_init_phase2 (&link_socket, &frame, &signal_received);
   if (signal_received)
     {
-#if 0
       signal_text = "socket";
-#endif
       print_signal (signal_received);
       goto cleanup;
     }
@@ -2908,11 +2906,14 @@ main (int argc, char *argv[])
 	clear_route_list (&route_list);
 	CLEAR (http_proxy);
 	if (options.http_proxy_server)
-	  init_http_proxy (&http_proxy,
-			   options.http_proxy_server,
-			   options.http_proxy_port,
-			   options.http_proxy_retry,
-			   options.http_proxy_authfile);
+	  {
+	    init_http_proxy (&http_proxy,
+			     options.http_proxy_server,
+			     options.http_proxy_port,
+			     options.http_proxy_retry,
+			     options.http_proxy_auth_method,
+			     options.http_proxy_auth_file);
+	  }
 
 	do {
 	  sig = openvpn (&options, &usa, &tuntap, &ks, &pid_persist, &route_list, &http_proxy, first_time);

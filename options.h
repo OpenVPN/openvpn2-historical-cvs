@@ -160,7 +160,8 @@ struct options
   /* http proxy */
   const char *http_proxy_server;
   int http_proxy_port;
-  const char *http_proxy_authfile;
+  const char *http_proxy_auth_method;
+  const char *http_proxy_auth_file;
   bool http_proxy_retry;
 
   /* Enable options consistency check between peers */

@@ -1,9 +1,9 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.24 2003/11/02 12:01:46 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.25 2003/11/03 10:17:51 jimyonan Exp $
 
-2003.11.xx -- Version 1.5-beta13
+2003.11.03 -- Version 1.5-beta13
 
 * Added CRL (certificate revocation list) capability using
   --crl-verify option (Stefano Bracalenti).
@@ -43,12 +43,12 @@ $Id: ChangeLog,v 1.86.2.24 2003/11/02 12:01:46 jimyonan Exp $
   "route_vpn_gateway" -- this is the remote VPN endpoint.
 * The special keywords vpn_gateway, net_gateway, and remote_host
   can now be used for the network or gateway components of the
-  --route option.
+  --route option.  See the man page for more info.
 * Added the --redirect-gateway option to configure the VPN
   as the default gateway (implemented on Linux and Windows only).
 * Added the --http-proxy option with basic authentication
   support for use in TCP client mode.  Successfully tested
-  using Squid as the HTTP proxy.
+  using Squid as the HTTP proxy, with and without authentication.
 
 2003.10.12 -- Version 1.5-beta12
 

@@ -21,9 +21,10 @@ What's new in 1.5-beta13
 The often-requested HTTP proxy feature
 has been added to allow OpenVPN to connect
 to its remote peer through an HTTP proxy
-using the HTTP CONNECT method (see the
-new --http-proxy option).  Basic authentication
-is supported as an option.
+using the HTTP CONNECT method.
+Basic HTTP authentication is supported as an
+option.  For more info, see the --http-proxy
+option.
 
 The --redirect-gateway feature has been added
 which redirects all IP traffic into the tunnel.
@@ -51,7 +52,9 @@ constant.  See the --replay-window option.
 A --key-method option has been added which can
 be used to select one of two different data
 channel key generation methods to be used
-in TLS mode.
+in TLS mode.  Key method 1 is the original,
+default key generation method.  Key
+method 2 is new and uses the TLS PRF function.
 
 A Certificate Revocation List capability has
 been added.

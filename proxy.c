@@ -41,48 +41,6 @@
 
 #include "memdbg.h"
 
-void
-init_http_proxy (struct http_proxy_info *p,
-		 const char *server,
-		 int port,
-		 bool retry,
-		 const char *authfile)
-{
-  CLEAR (*p);
-  ASSERT (server);
-  ASSERT (legal_ipv4_port (port));
-
-  strncpynt (p->server, server, sizeof (p->server));
-  p->port = port;
-  p->retry = retry;
-
-  if (authfile)
-    {
-      FILE *fp;
-
-      warn_if_group_others_accessible (authfile);
-      fp = fopen (authfile, "r");
-      if (!fp)
-	msg (M_ERR, "Error opening http proxy authfile: %s", authfile);
-
-      if (fgets (p->username, sizeof (p->username), fp) == NULL
-	  || fgets (p->password, sizeof (p->password), fp) == NULL)
-	msg (M_FATAL, "Error reading username and password (must be on two consecutive lines) from http proxy authfile: %s", authfile);
-
-      fclose (fp);
-
-      chomp (p->username);
-      chomp (p->password);
-
-      if (strlen (p->username) == 0)
-	msg (M_FATAL, "ERROR: username from http proxy authfile '%s' is empty", authfile);
-
-      p->use_basic_auth = true;
-    }
-
-  p->defined = true;
-}
-
 static bool
 recv_line (socket_descriptor_t sd,
 	   char *buf,
@@ -231,12 +189,71 @@ make_base64_string (const uint8_t *str)
 }
 
 static const char *
-user_pass_as_base64 (const struct http_proxy_info *p)
+username_password_as_base64 (const struct http_proxy_info *p)
 {
   struct buffer out = alloc_buf_gc (strlen (p->username) + strlen (p->password) + 2);
   ASSERT (strlen (p->username) > 0);
   buf_printf (&out, "%s:%s", p->username, p->password);
   return make_base64_string (BSTR (&out));
+}
+
+void
+init_http_proxy (struct http_proxy_info *p,
+		 const char *server,
+		 int port,
+		 bool retry,
+		 const char *auth_method,
+		 const char *auth_file)
+{
+  CLEAR (*p);
+  ASSERT (server);
+  ASSERT (legal_ipv4_port (port));
+
+  strncpynt (p->server, server, sizeof (p->server));
+  p->port = port;
+  p->retry = retry;
+  p->auth_method = HTTP_AUTH_NONE;
+
+  /* parse authentication method */
+  if (auth_method)
+    {
+      if (!strcmp (auth_method, "none"))
+	p->auth_method = HTTP_AUTH_NONE;
+      else if (!strcmp (auth_method, "basic"))
+	p->auth_method = HTTP_AUTH_BASIC;
+      else
+	msg (M_FATAL, "ERROR: unknown HTTP authentication method: '%s' -- only the 'none' or 'basic' methods are currently supported",
+	     auth_method);
+    }
+
+  /* only basic authentication supported so far */
+  if (p->auth_method == HTTP_AUTH_BASIC)
+    {
+      FILE *fp;
+      
+      if (!auth_file)
+	msg (M_FATAL, "ERROR: http proxy authentication requires a username/password file");
+
+      p->auth_method = HTTP_AUTH_BASIC;
+      warn_if_group_others_accessible (auth_file);
+      fp = fopen (auth_file, "r");
+      if (!fp)
+	msg (M_ERR, "Error opening http proxy auth_file: %s", auth_file);
+      
+      if (fgets (p->username, sizeof (p->username), fp) == NULL
+	  || fgets (p->password, sizeof (p->password), fp) == NULL)
+	msg (M_FATAL, "Error reading username and password (must be on two consecutive lines) from http proxy authfile: %s", auth_file);
+      
+      fclose (fp);
+      
+      chomp (p->username);
+      chomp (p->password);
+      
+      if (strlen (p->username) == 0)
+	msg (M_FATAL, "ERROR: username from http proxy authfile '%s' is empty", auth_file);
+    }
+
+  p->defined = true;
 }
 
 void
@@ -259,14 +276,22 @@ establish_http_proxy_passthru (struct http_proxy_info *p,
     goto error;
 
   /* auth specified? */
-  if (p->use_basic_auth)
+  switch (p->auth_method)
     {
+    case HTTP_AUTH_NONE:
+      break;
+
+    case HTTP_AUTH_BASIC:
       openvpn_snprintf (buf, sizeof(buf), "Proxy-Authorization: Basic %s",
-			user_pass_as_base64 (p));
+			username_password_as_base64 (p));
       msg (D_PROXY, "Attempting Basic Proxy-Authorization");
       msg (D_SHOW_KEYS, "Send to HTTP proxy: '%s'", buf);
       if (!send_line_crlf (sd, buf))
 	goto error;
+      break;
+
+    default:
+      ASSERT (0);
     }
 
   /* send empty CR, LF */
@@ -285,10 +310,12 @@ establish_http_proxy_passthru (struct http_proxy_info *p,
   /* parse return string */
   nparms = sscanf (buf, "%*s %d", &status);
 
+  /* check return code, success = 200 */
   if (nparms != 1 || status != 200)
     {
       msg (D_LINK_ERRORS, "HTTP proxy returned bad status");
 #if 0
+      /* DEBUGGING -- show a multi-line HTTP error response */
       while (true)
 	{
 	  if (!recv_line (sd, buf, sizeof (buf), signal_received))
@@ -307,6 +334,7 @@ establish_http_proxy_passthru (struct http_proxy_info *p,
   return;
 
  error:
+  /* on error, should we exit or restart? */
   if (!*signal_received)
     *signal_received = (p->retry ? SIGUSR1 : SIGTERM);
   return;

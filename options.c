@@ -482,7 +482,8 @@ show_settings (const struct options *o)
 
   SHOW_STR (http_proxy_server);
   SHOW_INT (http_proxy_port);
-  SHOW_STR (http_proxy_authfile);
+  SHOW_STR (http_proxy_auth_method);
+  SHOW_STR (http_proxy_auth_file);
   SHOW_BOOL (http_proxy_retry);
 
 #ifdef USE_LZO
@@ -1300,7 +1301,12 @@ add_option (struct options *options, int i, char *p[],
       if (p[3])
 	{
 	  ++i;
-	  options->http_proxy_authfile = p[3];
+	  options->http_proxy_auth_method = "basic";
+	  options->http_proxy_auth_file = p[3];
+	}
+      else
+	{
+	  options->http_proxy_auth_method = "none";
 	}
     }
   else if (streq (p[0], "http-proxy-retry"))

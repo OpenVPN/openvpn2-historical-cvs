@@ -1,9 +1,9 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86 2003/07/06 22:38:00 jimyonan Exp $
+$Id: ChangeLog,v 1.87 2003/07/16 04:26:16 jimyonan Exp $
 
-Upcoming Version 1.4.2
+2003.07.15 -- Version 1.4.2
 
 * Removed adaptive bandwidth from
   --mtu-dynamic -- its absence appears

@@ -38,20 +38,6 @@
 
 #include "memdbg.h"
 
-static unsigned int
-adjust_power_of_2 (unsigned int u)
-{
-  unsigned int ret = 1;
-
-  while (ret < u)
-    {
-      ret <<= 1;
-      ASSERT (ret > 0);
-    }
-
-  return ret;
-}
-
 struct hash *
 hash_init (const int n_buckets,
 	   const bool auto_grow,

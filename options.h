@@ -219,7 +219,7 @@ struct options
   const char *client_disconnect_script;
   const char *tmp_dir;
   const char *client_config_dir;
-  int bcast_delay;
+  int n_bcast_buf;
   struct iroute *iroutes;
   bool push_ifconfig_defined;
   in_addr_t push_ifconfig_local;

@@ -773,3 +773,21 @@ delete_file (const char *filename)
   return false;
 #endif
 }
+
+/*
+ * Return the next largest power of 2
+ * or u if u is a power of 2.
+ */
+unsigned int
+adjust_power_of_2 (unsigned int u)
+{
+  unsigned int ret = 1;
+
+  while (ret < u)
+    {
+      ret <<= 1;
+      ASSERT (ret > 0);
+    }
+
+  return ret;
+}

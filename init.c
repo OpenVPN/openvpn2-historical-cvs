@@ -1429,15 +1429,6 @@ do_close_event_wait (struct context *c)
   wait_free (&c->c2.event_wait);
 }
 
-#if P2MP
-static void
-do_close_mcast (struct context *c)
-{
-  if (c->c2.mcast)
-    mcast_free (c->c2.mcast);
-}
-#endif
-
 /*
  * Initialize a tunnel instance.
  */
@@ -1533,12 +1524,6 @@ init_instance (struct context *c, bool init_buffers)
   if (c->mode == CM_P2P)
     do_init_traffic_shaper (c);
 
-#if P2MP
-  /* initialize mcast output buffers */
-  if (c->mode == CM_CHILD)
-    c->c2.mcast = mcast_init ();
-#endif
-
   /* do one-time inits, and possibily become a daemon here */
   do_init_first_time_1 (c);
 
@@ -1608,11 +1593,6 @@ close_instance (struct context *c)
 
   /* close fragmentation handler */
   do_close_fragment (c);
-
-#if P2MP
-  /* close mcast buffer list */
-  do_close_mcast (c);
-#endif
 
   /* close syslog */
   if (c->mode == CM_P2P || c->mode == CM_TOP)

@@ -23,85 +23,71 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifdef WIN32
-#include "config-win32.h"
-#else
-#include "config.h"
-#endif
+#ifndef MBUF_H
+#define MBUF_H
 
-#include "syshead.h"
+/*
+ * Handle both multicast and broadcast functions.
+ */
 
 #if P2MP
 
+/* define this to enable special test mode */
+/*#define MBUF_TEST*/
+
+#include "basic.h"
 #include "buffer.h"
-#include "mcast.h"
+#include "multi.h"
 
-#include "memdbg.h"
+#define MBUF_INDEX(head, offset, size) (((head) + (offset)) & ((size)-1))
 
-struct mcast_set *
-mcast_init (void)
+struct mbuf_buffer
 {
-  struct mcast_set *ret;
-  ALLOC_OBJ (ret, struct mcast_set);
-  ret->buf = NULL;
-  return ret;
+  struct buffer buf;
+  int refcount;
+};
+
+struct mbuf_item
+{
+  struct mbuf_buffer *buffer;
+  struct multi_instance *instance;
+};
+
+struct mbuf_set
+{
+  unsigned int head;
+  unsigned int len;
+  unsigned int capacity;
+  struct mbuf_item *array;
+};
+
+struct mbuf_set *mbuf_init (unsigned int size);
+void mbuf_free (struct mbuf_set *ms);
+
+struct mbuf_buffer *mbuf_alloc_buf (const struct buffer *buf);
+void mbuf_free_buf (struct mbuf_buffer *mb);
+
+void mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item);
+
+static inline bool
+mbuf_defined (const struct mbuf_set *ms)
+{
+  return ms && ms->len;
 }
 
-void
-mcast_free (struct mcast_set *ms)
+static inline bool
+mbuf_extract_item (struct mbuf_set *ms, struct mbuf_item *item)
 {
-  if (ms->buf)
-    mcast_free_buf (ms->buf);
-  free (ms);
-}
-
-struct mcast_buffer *
-mcast_alloc_buf (const struct buffer *buf)
-{
-  struct mcast_buffer *ret;
-  ALLOC_OBJ (ret, struct mcast_buffer);
-  ret->buf = clone_buf (buf);
-  ret->refcount = 1;
-  return ret;
-}
-
-void
-mcast_free_buf (struct mcast_buffer *mb)
-{
-  if (--mb->refcount <= 0)
+  if (ms->len)
     {
-      free_buf (&mb->buf);
-      free (mb);
-    }
-}
-
-bool
-mcast_add_buf (struct mcast_set *ms, struct mcast_buffer* mb)
-{
-  if (ms->buf)
-    {
-      return false;
-    }
-  else
-    {
-      ms->buf = mb;
-      ++mb->refcount;
+      *item = ms->array[ms->head];
+      ms->head = MBUF_INDEX(ms->head, 1, ms->capacity);
+      --ms->len;
       return true;
     }
+  else
+    return false;
 }
 
-struct mcast_buffer *
-mcast_extract_buf (struct mcast_set *ms)
-{
-  struct mcast_buffer *ret = NULL;
-  if (ms->buf)
-    {
-      ret = ms->buf;
-      ms->buf = NULL;
-    }
-  return ret;
-}
-
-#else
-static void dummy(void) {}
-#endif /* P2MP */
+#endif
+#endif

@@ -272,24 +272,6 @@ check_fragment_dowork (struct context *c)
   fragment_housekeeping (c->c2.fragment, &c->c2.frame_fragment, &c->c2.timeval);
 }
 
-#if P2MP
-/*
- * Should we send a buffered multicast datagram to remote?
- */
-void
-check_send_mcast_dowork (struct context *c)
-{
-  struct mcast_buffer *mbuf = mcast_extract_buf (c->c2.mcast);
-  if (mbuf)
-    {
-      c->c2.buf = mbuf->buf;
-      encrypt_sign (c, true);
-      mcast_free_buf (mbuf);
-      msg (D_PACKET_CONTENT, "SENT MCAST");
-    }
-}
-#endif
-
 /*
  * Compress, fragment, encrypt and HMAC-sign an outgoing packet.
  */
@@ -975,11 +957,6 @@ pre_select (struct context *c)
 
   /* Should we send an OCC message? */
   check_send_occ_msg (c);
-
-#if P2MP
-  /* Should we send a buffered multicast datagram to remote? */
-  check_send_mcast (c);
-#endif
 
   /* Should we deliver a datagram fragment to remote? */
   check_fragment (c);

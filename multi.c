@@ -171,6 +171,11 @@ multi_init (struct multi_context *m, struct context *t)
   m->schedule = schedule_init ();
 
   /*
+   * Allocate broadcast/multicast buffer list
+   */
+  m->mbuf = mbuf_init (t->options.n_bcast_buf);
+
+  /*
    * Possibly allocate an ifconfig pool, do it
    * differently based on whether a tun or tap style
    * tunnel.
@@ -190,11 +195,6 @@ multi_init (struct multi_context *m, struct context *t)
 						 t->options.ifconfig_pool_end);
 	}
     }
-
-  /*
-   * Set Broadcast/Multicast interpacket delay in microseconds
-   */
-  m->bcast_delay = t->options.bcast_delay;
 
   /*
    * Allow client <-> client communication, without going through
@@ -328,6 +328,8 @@ multi_uninit (struct multi_context *m)
       m->hash = NULL;
 
       schedule_free (m->schedule);
+
+      mbuf_free (m->mbuf);
 
       ifconfig_pool_free (m->ifconfig_pool);
     }
@@ -763,6 +765,14 @@ multi_select (struct multi_context *m, struct context *t)
     }
 
   /*
+   * outgoing bcast buffer is waiting to be sent
+   */
+  if (mbuf_defined (m->mbuf))
+    {
+      SOCKET_SET_WRITE (&t->c2.event_wait, &t->c2.link_socket);
+    }
+
+  /*
    * If outgoing data (for TUN/TAP device) pending, wait for ready-to-send status
    * from device.  Otherwise, wait for incoming data on TCP/UDP port.
    */
@@ -798,27 +808,27 @@ multi_select (struct multi_context *m, struct context *t)
  * Add a multicast buffer to a particular
  * instance.
  */
-static void
-multi_add_mcast_buf (struct schedule *s,
-		     struct multi_instance *mi,
-		     struct mcast_buffer *mb,
-		     const struct timeval *tv)
+static inline void
+multi_add_mbuf (struct multi_context *m,
+		struct multi_instance *mi,
+		struct mbuf_buffer *mb)
 {
-  /* add counted reference, context -> buffer */
-  if (mcast_add_buf (mi->context.c2.mcast, mb))
-    {
-      if (tv_lt (tv, &mi->wakeup))
-	{
-	  mi->wakeup = *tv;
+  struct mbuf_item item;
+  item.buffer = mb;
+  item.instance = mi;
+  mbuf_add_item (m->mbuf, &item);
+}
 
-	  /* schedule the instance for wakeup at mi->wakeup,
-	     when the packet will be sent */
-	  schedule_add_entry (s,
-			      (struct schedule_entry *) mi,
-			      &mi->wakeup,
-			      0);
-	}
-    }
+static inline void
+multi_unicast (struct multi_context *m,
+	       const struct buffer *buf,
+	       struct multi_instance *mi)
+{
+  struct mbuf_buffer *mb;
+
+  mb = mbuf_alloc_buf (buf);
+  multi_add_mbuf (m, mi, mb);
+  mbuf_free_buf (mb);
 }
 
 static void
@@ -829,43 +839,20 @@ multi_broadcast (struct multi_context *m,
   struct hash_iterator hi;
   struct hash_element *he;
   struct multi_instance *mi;
-  struct mcast_buffer *mb;
-  struct timeval tv;
-  struct timeval delta;
+  struct mbuf_buffer *mb;
 
-  ASSERT (!gettimeofday (&tv, NULL));
-
-  delta.tv_sec = 0;
-  delta.tv_usec = m->bcast_delay;
-  mb = mcast_alloc_buf (buf);
+  mb = mbuf_alloc_buf (buf);
   hash_iterator_init (m->iter, &hi);
 
   while ((he = hash_iterator_next (&hi)))
     {
       mi = (struct multi_instance *) he->value;
       if (mi != omit)
-	{
-	  multi_add_mcast_buf (m->schedule, mi, mb, &tv);
-	  tv_add (&tv, &delta);
-	}
+	multi_add_mbuf (m, mi, mb);
     }
 
   hash_iterator_free (&hi);
-  mcast_free_buf (mb);
-}
-
-static void
-multi_unicast (struct multi_context *m,
-	       const struct buffer *buf,
-	       struct multi_instance *mi)
-{
-  struct mcast_buffer *mb;
-  struct timeval tv;
-
-  ASSERT (!gettimeofday (&tv, NULL));
-  mb = mcast_alloc_buf (buf);
-  multi_add_mcast_buf (m->schedule, mi, mb, &tv);
-  mcast_free_buf (mb);
+  mbuf_free_buf (mb);
 }
 
 /*
@@ -1132,14 +1119,44 @@ multi_process_incoming_tun (struct multi_context *m, struct context *t)
     }
 }
 
+static inline struct multi_instance *
+multi_bcast_instance (struct multi_context *m)
+{
+  struct mbuf_item item;
+  if (mbuf_extract_item (m->mbuf, &item))
+    {
+      item.instance->context.c2.buf = item.buffer->buf;
+      encrypt_sign (&item.instance->context, true);
+      mbuf_free_buf (item.buffer);
+#ifdef MULTI_DEBUG
+      msg (D_MULTI_DEBUG, "MULTI: BCAST INSTANCE");
+#endif
+      return item.instance;
+    }
+  else
+    {
+      return NULL;
+    }
+}
+
 static inline void
 multi_process_outgoing_link (struct multi_context *m, struct context *t)
 {
-  struct multi_instance *mi = m->link_out;
-  ASSERT (mi);
-  m->link_out = NULL;
-  process_outgoing_link (&mi->context, &t->c2.link_socket);
-  multi_process_post (m, mi);
+  struct multi_instance *mi;
+
+  if (m->link_out)
+    {
+      mi = m->link_out;
+      m->link_out = NULL;
+    }
+  else
+    mi = multi_bcast_instance (m);
+
+  if (mi)
+    {
+      process_outgoing_link (&mi->context, &t->c2.link_socket);
+      multi_process_post (m, mi);
+    }
 }
 
 static inline void
@@ -1157,18 +1174,8 @@ multi_process_io (struct multi_context *m, struct context *t)
 {
   if (t->c2.select_status > 0)
     {
-      /* TCP/UDP port ready to accept write */
-      if (SOCKET_ISSET (&t->c2.event_wait, &t->c2.link_socket, writes))
-	{
-	  multi_process_outgoing_link (m, t);
-	}
-      /* TUN device ready to accept write */
-      else if (TUNTAP_ISSET (&t->c2.event_wait, &t->c1.tuntap, writes))
-	{
-	  multi_process_outgoing_tun (m, t);
-	}
       /* Incoming data on TCP/UDP port */
-      else if (SOCKET_ISSET (&t->c2.event_wait, &t->c2.link_socket, reads))
+      if (SOCKET_ISSET (&t->c2.event_wait, &t->c2.link_socket, reads))
 	{
 	  read_incoming_link (t);
 	  if (!IS_SIG (t))
@@ -1180,6 +1187,16 @@ multi_process_io (struct multi_context *m, struct context *t)
 	  read_incoming_tun (t);
 	  if (!IS_SIG (t))
 	    multi_process_incoming_tun (m, t);
+	}
+      /* TUN device ready to accept write */
+      else if (TUNTAP_ISSET (&t->c2.event_wait, &t->c1.tuntap, writes))
+	{
+	  multi_process_outgoing_tun (m, t);
+	}
+      /* TCP/UDP port ready to accept write */
+      else if (SOCKET_ISSET (&t->c2.event_wait, &t->c2.link_socket, writes))
+	{
+	  multi_process_outgoing_link (m, t);
 	}
     }
 }

@@ -41,7 +41,6 @@
 #include "socks.h"
 #include "sig.h"
 #include "misc.h"
-#include "mcast.h"
 
 /*
  * Our global key schedules, packaged thusly
@@ -309,9 +308,6 @@ struct context_2
 
   struct event_timeout push_request_interval;
 
-  /* buffers that need to be encrypted and forwarded
-     to remote */
-  struct mcast_set *mcast;
 #endif
 };
 

@@ -26,7 +26,7 @@
 #ifndef SHAPER_H
 #define SHAPER_H
 
-#define SHAPER_DEBUG 0
+#define SHAPER_DEBUG // JYFIXME
 
 #ifdef HAVE_GETTIMEOFDAY
 
@@ -44,12 +44,20 @@
 #define SHAPER_MIN 100          /* bytes per second */
 #define SHAPER_MAX 100000000
 
-#define SHAPER_MAX_TIMEOUT 10          /* seconds */
+#define SHAPER_MAX_TIMEOUT 10   /* seconds */
+
+#define SHAPER_USE_FP
 
 struct shaper 
 {
   int bytes_per_second;
   struct timeval wakeup;
+
+#ifdef SHAPER_USE_FP
+  double factor;
+#else
+  int factor;
+#endif
 };
 
 void shaper_msg (struct shaper *s);
@@ -62,6 +70,12 @@ static inline void
 shaper_reset (struct shaper *s, int bytes_per_second)
 {
   s->bytes_per_second = bytes_per_second ? constrain_int (bytes_per_second, SHAPER_MIN, SHAPER_MAX) : 0;
+
+#ifdef SHAPER_USE_FP
+  s->factor = 1000000.0 / (double)s->bytes_per_second;
+#else
+  s->factor = 1000000 / s->bytes_per_second;
+#endif
 }
 
 static inline void
@@ -97,7 +111,7 @@ shaper_delay (struct shaper* s)
     {
       ASSERT (!gettimeofday (&tv, NULL));
       delay = tv_subtract (&s->wakeup, &tv, SHAPER_MAX_TIMEOUT);
-#if SHAPER_DEBUG
+#ifdef SHAPER_DEBUG
       msg (D_SHAPER_DEBUG, "SHAPER shaper_delay delay=%d", delay);
 #endif
     }
@@ -106,39 +120,52 @@ shaper_delay (struct shaper* s)
 }
 
 /*
- * We want to wake up in delay microseconds.  If timeval is 0 (undefined) or larger
+ * We want to wake up in delay microseconds.  If timeval is larger
  * than delay, set timeval to delay.
  */
-static inline void
+static inline bool
 shaper_soonest_event (struct timeval *tv, int delay)
 {
-  if (!tv->tv_usec && delay < 1000000)
+  bool ret = false;
+  if (delay < 1000000)
     {
-      tv->tv_usec = delay;
-      tv->tv_sec = 0;
+      if (tv->tv_sec)
+	{
+	  tv->tv_sec = 0;
+	  tv->tv_usec = delay;
+	  ret = true;
+	}
+      else if (delay < tv->tv_usec)
+	{
+	  tv->tv_usec = delay;
+	  ret = true;
+	}
     }
   else
     {
       const int sec = delay / 1000000;
       const int usec = delay % 1000000;
 
-      if ((!tv->tv_sec && !tv->tv_usec) || (sec < tv->tv_sec))
+      if (sec < tv->tv_sec)
 	{
 	  tv->tv_sec = sec;
 	  tv->tv_usec = usec;
+	  ret = true;
 	}
       else if (sec == tv->tv_sec)
 	{
 	  if (usec < tv->tv_usec)
 	    {
 	      tv->tv_usec = usec;
+	      ret = true;
 	    }
 	}
     }
-#if SHAPER_DEBUG
-  msg (D_SHAPER_DEBUG, "SHAPER shaper_soonest_event sec=%d usec=%d",
-       (int)tv->tv_sec, (int)tv->tv_usec);
+#ifdef SHAPER_DEBUG
+  msg (D_SHAPER_DEBUG, "SHAPER shaper_soonest_event sec=%d usec=%d ret=%d",
+       (int)tv->tv_sec, (int)tv->tv_usec, (int)ret);
 #endif
+  return ret;
 }
 
 /*
@@ -150,27 +177,34 @@ shaper_soonest_event (struct timeval *tv, int delay)
 static inline void
 shaper_wrote_bytes (struct shaper* s, int nbytes)
 {
-  /* delay in microseconds */
-  const int delay = s->bytes_per_second
-    ? min_int (((1000000 / s->bytes_per_second) * max_int (nbytes, 200)), (SHAPER_MAX_TIMEOUT*1000000))
+  struct timeval tv;
+
+  /* compute delay in microseconds */
+  tv.tv_sec = 0;
+#ifdef SHAPER_USE_FP
+  tv.tv_usec = min_int ((int)((double)max_int (nbytes, 100) * s->factor), (SHAPER_MAX_TIMEOUT*1000000));
+#else
+  tv.tv_usec = s->bytes_per_second
+    ? min_int (max_int (nbytes, 100) * s->factor, (SHAPER_MAX_TIMEOUT*1000000))
     : 0;
-  
-  if (delay)
+#endif
+
+  if (tv.tv_usec)
     {
       ASSERT (!gettimeofday (&s->wakeup, NULL));
-      s->wakeup.tv_usec += delay;
-      while (s->wakeup.tv_usec >= 1000000)
-	{
-	  ++s->wakeup.tv_sec;
-	  s->wakeup.tv_usec -= 1000000;
-	}
-#if SHAPER_DEBUG
+      tv_add (&s->wakeup, &tv);
+
+#ifdef SHAPER_DEBUG
       msg (D_SHAPER_DEBUG, "SHAPER shaper_wrote_bytes bytes=%d delay=%d sec=%d usec=%d",
-	   nbytes, delay, (int)s->wakeup.tv_sec, (int)s->wakeup.tv_usec);
+	   nbytes,
+	   (int)tv.tv_usec,
+	   (int)s->wakeup.tv_sec,
+	   (int)s->wakeup.tv_usec);
 #endif
     }
 }
 
+#if 0
 /*
  * Increase/Decrease bandwidth by a percentage.
  *
@@ -185,6 +219,7 @@ shaper_change_pct (struct shaper *s, int pct)
   shaper_reset (s, new_bandwidth);
   return s->bytes_per_second != orig_bandwidth;
 }
+#endif
 
 #endif /* HAVE_GETTIMEOFDAY */
 

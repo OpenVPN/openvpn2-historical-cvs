@@ -119,16 +119,6 @@ check_fragment (struct context *c)
 }
 
 #if P2MP
-/*
- * Should we send a buffered multicast datagram to remote?
- */
-static inline void
-check_send_mcast (struct context *c)
-{
-  void check_send_mcast_dowork (struct context *c);
-  if (mcast_defined (c->c2.mcast) && !c->c2.to_link.len)
-    check_send_mcast_dowork (c);
-}
 
 /*
  * see if we should send a push_request in response to --pull

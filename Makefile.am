@@ -49,7 +49,7 @@ openvpn_SOURCES = \
 	io.c io.h \
 	list.c list.h \
 	lzo.c lzo.h \
-	mcast.c mcast.h \
+	mbuf.c mbuf.h \
         memdbg.h \
 	misc.c misc.h \
 	mroute.c mroute.h \

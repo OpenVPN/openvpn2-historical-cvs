@@ -165,4 +165,7 @@ const char *gen_path (const char *directory, const char *filename, struct gc_are
 /* delete a file, return true if succeeded */
 bool delete_file (const char *filename);
 
+/* return the next largest power of 2 */
+unsigned int adjust_power_of_2 (unsigned int u);
+
 #endif

@@ -30,7 +30,7 @@
 
 #include "openvpn.h"
 #include "mroute.h"
-#include "mcast.h"
+#include "mbuf.h"
 #include "list.h"
 #include "schedule.h"
 #include "pool.h"
@@ -54,15 +54,16 @@ struct multi_instance {
 
 struct multi_context {
   struct multi_instance *link_out;
+  struct multi_instance *link_out_bcast;
   struct multi_instance *tun_out;
   struct multi_instance *earliest_wakeup;
   struct hash *hash;   /* indexed by real address */
   struct hash *vhash;  /* indexed by virtual address */
   struct hash *iter;   /* like real address hash but optimized for iteration */
   struct schedule *schedule;
+  struct mbuf_set *mbuf;
   struct ifconfig_pool *ifconfig_pool;
 
-  int bcast_delay;
   bool enable_c2c;
 };
 

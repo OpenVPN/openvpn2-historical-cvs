@@ -235,7 +235,7 @@ void x_msg (unsigned int flags, const char *format, ...)
   else
     {
       FILE *fp = msg_fp();
-      const bool show_usec = check_debug_level (DEBUG_LEVEL_USEC_TIME);
+      const bool show_usec = check_debug_level (DEBUG_LEVEL_USEC_TIME - 1);
       if (flags & M_NOPREFIX)
 	{
 	  fprintf (fp, "%s\n", m1);
@@ -433,7 +433,7 @@ x_check_status (int status,
 		 strerror_ts (my_errno, &gc),
 		 my_errno);
 
-	  /* avoid a barrage of errors */
+	  /* avoid a barrage of errors, JYFIXME -- set this to something */
 	  if (x_cs_err_delay_ms)
 	    sleep_milliseconds (x_cs_err_delay_ms);
 	}

@@ -244,7 +244,7 @@ static const char usage_message[] =
   "--tmp-dir dir   : Temporary directory, used for --client-connect return file.\n"
   "--hash-size r v : Set the size of the real address hash table to r and the\n"
   "                  virtual address table to v.\n"
-  "--bcast-delay n : Delay for n microseconds between broadcast packet sends.\n"
+  "--nbuf n :        Allocate n broadcast buffers.\n"
   "\n"
   "Client options (when connecting to a multi-client server):\n"
   "--pull          : Accept certain config file options from the peer as if they\n"
@@ -419,6 +419,7 @@ init_options (struct options *o)
 #if P2MP
   o->real_hash_size = 256;
   o->virtual_hash_size = 256;
+  o->n_bcast_buf = 64;
 #endif
 #ifdef USE_CRYPTO
   o->ciphername = "BF-CBC";
@@ -572,7 +573,7 @@ show_p2mp_parms (const struct options *o)
   SHOW_BOOL (ifconfig_pool_defined);
   msg (D_SHOW_PARMS, "  ifconfig_pool_start = %s", print_in_addr_t (o->ifconfig_pool_start, false, &gc));
   msg (D_SHOW_PARMS, "  ifconfig_pool_end = %s", print_in_addr_t (o->ifconfig_pool_end, false, &gc));
-  SHOW_INT (bcast_delay);
+  SHOW_INT (n_bcast_buf);
   SHOW_INT (real_hash_size);
   SHOW_INT (virtual_hash_size);
   SHOW_STR (client_connect_script);
@@ -1018,8 +1019,6 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --tmp-dir requires --mode server");
       if (options->client_config_dir)
 	msg (M_USAGE, "Options error: --client-config-dir requires --mode server");
-      if (options->bcast_delay)
-	msg (M_USAGE, "Options error: --bcast-delay requires --mode server");
       if (options->enable_c2c)
 	msg (M_USAGE, "Options error: --client-to-client requires --mode server");
     }
@@ -2332,11 +2331,13 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->client_config_dir = p[1];
     }
-  else if (streq (p[0], "bcast-delay") && p[1])
+  else if (streq (p[0], "nbuf") && p[1])
     {
       ++i;
       VERIFY_PERMISSION (OPT_P_GENERAL);
-      options->bcast_delay = positive (atoi (p[1]));
+      options->n_bcast_buf = atoi (p[1]);
+      if (options->n_bcast_buf < 1)
+	msg (msglevel, "Options Error: --nbuf parameter must be > 0");
     }
   else if (streq (p[0], "client-to-client"))
     {

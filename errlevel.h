@@ -35,6 +35,11 @@
 #define DEBUG_LEVEL_USEC_TIME  6
 
 /*
+ * Enable D_LOG_RW
+ */
+#define LOG_RW
+
+/*
  * Debugging levels for various kinds
  * of output.
  */
@@ -50,8 +55,8 @@
 #define D_FRAG_ERRORS        LOGLEV(1, 7, M_NONFATAL)   /* show fragmentation errors */
 #define D_STREAM_ERRORS      LOGLEV(1, 8, M_NONFATAL)   /* TCP stream error requiring restart */
 #define D_MULTI_ERRORS       LOGLEV(1, 9, M_NONFATAL)   /* show multi-client server errors */
-#define D_PUSH_ERRORS        LOGLEV(1, 10, M_NONFATAL)   /* show push/pull errors */
-#define D_IMPORT_ERRORS      LOGLEV(1, 11, M_NONFATAL)   /* show server import option errors */
+#define D_PUSH_ERRORS        LOGLEV(1, 10, M_NONFATAL)  /* show push/pull errors */
+#define D_IMPORT_ERRORS      LOGLEV(1, 11, M_NONFATAL)  /* show server import option errors */
 
 #define D_HANDSHAKE          LOGLEV(2, 20, 0)        /* show data & control channel handshakes */
 #define D_MTU_INFO           LOGLEV(2, 21, 0)        /* show terse MTU info */
@@ -68,15 +73,13 @@
 
 #define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
 #define D_SHOW_OCC           LOGLEV(4, 41, 0)        /* show options compatibility string */
-#define D_MSS                LOGLEV(4, 42, 0)        /* show MSS adjustments */
-#define D_BACKTRACK          LOGLEV(4, 43, 0)        /* show replay backtracks */
-#define D_SEMAPHORE_LOW      LOGLEV(4, 44, 0)        /* show Win32 semaphore waits (low freq) */
-#define D_COMP_LOW           LOGLEV(4, 45, 0)        /* show adaptive compression state changes */
-#define D_LOW                LOGLEV(4, 46, 0)        /* miscellaneous low-frequency debug info */
-#define D_DHCP_OPT           LOGLEV(4, 47, 0)        /* show DHCP options binary string */
-#define D_MULTI              LOGLEV(4, 48, 0)        /* show point-to-multipoint info */
-#define D_PUSH               LOGLEV(4, 49, 0)        /* show push/pull info */
-#define D_IFCONFIG_POOL      LOGLEV(4, 50, 0)        /* show ifconfig pool info */
+#define D_BACKTRACK          LOGLEV(4, 42, 0)        /* show replay backtracks */
+#define D_SEMAPHORE_LOW      LOGLEV(4, 43, 0)        /* show Win32 semaphore waits (low freq) */
+#define D_LOW                LOGLEV(4, 44, 0)        /* miscellaneous low-frequency debug info */
+#define D_DHCP_OPT           LOGLEV(4, 45, 0)        /* show DHCP options binary string */
+#define D_MULTI              LOGLEV(4, 46, 0)        /* show point-to-multipoint info */
+#define D_PUSH               LOGLEV(4, 47, 0)        /* show push/pull info */
+#define D_IFCONFIG_POOL      LOGLEV(4, 48, 0)        /* show ifconfig pool info */
 
 #define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 
@@ -92,6 +95,8 @@
 #define D_MTU_DEBUG          LOGLEV(7, 70, M_DEBUG)  /* show MTU debugging info */
 #define D_PID_DEBUG_LOW      LOGLEV(7, 70, M_DEBUG)  /* show low-freq packet-id debugging info */
 #define D_MULTI_DEBUG        LOGLEV(7, 70, M_DEBUG)  /* show medium-freq multi debugging info */
+#define D_MSS                LOGLEV(7, 70, M_DEBUG)  /* show MSS adjustments */
+#define D_COMP_LOW           LOGLEV(7, 70, M_DEBUG)  /* show adaptive compression state changes */
 
 #define D_HANDSHAKE_VERBOSE  LOGLEV(8, 70, M_DEBUG)  /* show detailed description of each handshake */
 #define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* limited info from tls_session routines */
@@ -100,6 +105,7 @@
 #define D_GREMLIN_VERBOSE    LOGLEV(8, 70, M_DEBUG)  /* show verbose info from gremlin module */
 #define D_REL_DEBUG          LOGLEV(8, 70, M_DEBUG)  /* show detailed info from reliable routines */
 #define D_SELECT             LOGLEV(8, 70, M_DEBUG)  /* show detailed info from main select() call */
+#define D_TUN_RW             LOGLEV(8, 70, M_DEBUG)  /* show TUN/TAP reads/writes */
 
 #define D_TLS_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show detailed info from TLS routines */
 #define D_CRYPTO_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show detailed info from crypto.c routines */
@@ -111,13 +117,12 @@
 #define D_PID_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show packet-id debugging info */
 #define D_PID_PERSIST_DEBUG  LOGLEV(9, 70, M_DEBUG)  /* show packet-id persist debugging info */
 #define D_LINK_RW_VERBOSE    LOGLEV(9, 70, M_DEBUG)  /* show link reads/writes with greater verbosity */
-#define D_TUN_RW             LOGLEV(9, 70, M_DEBUG)  /* show TUN/TAP reads/writes */
 #define D_STREAM_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show TCP stream debug info */
 #define D_WIN32_IO           LOGLEV(9, 70, M_DEBUG)  /* win32 I/O debugging info */
 
 #define D_SHAPER_DEBUG       LOGLEV(10, 70, M_DEBUG) /* show traffic shaper info */
 
-#define D_REGISTRY           LOGLEV(11, 70, M_DEBUG)  /* win32 registry debugging info */
+#define D_REGISTRY           LOGLEV(11, 70, M_DEBUG) /* win32 registry debugging info */
 #define D_OPENSSL_LOCK       LOGLEV(11, 70, M_DEBUG) /* show OpenSSL locks */
 
 #endif

@@ -51,16 +51,40 @@ int shaper_delay (struct shaper* s);
 void shaper_soonest_event (struct timeval *tv, int delay);
 void shaper_wrote_bytes (struct shaper* s, int nbytes);
 bool shaper_change_pct (struct shaper *s, int pct);
-void shaper_reset (struct shaper *s, int bytes_per_second);
 
 /*
  * inline functions
  */
 
+static inline void
+shaper_reset (struct shaper *s, int bytes_per_second)
+{
+  s->bytes_per_second = bytes_per_second ? constrain_int (bytes_per_second, SHAPER_MIN, SHAPER_MAX) : 0;
+}
+
 static inline int
 shaper_current_bandwidth (struct shaper *s)
 {
   return s->bytes_per_second;
+}
+
+/*
+ * Measure incoming bandwidth
+ */
+
+struct incoming_bandwidth
+{
+  struct timeval tv;
+  int bytes;
+  int bytes_per_second;
+};
+
+void incoming_bandwidth_data (struct incoming_bandwidth *b, int size, int usec_max);
+
+static inline int
+incoming_bandwidth_current_bandwidth (struct incoming_bandwidth *band)
+{
+  return band->bytes_per_second;
 }
 
 #endif

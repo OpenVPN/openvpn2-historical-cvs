@@ -874,6 +874,8 @@ openvpn (const struct options *options,
 	      udp_socket.mtu_changed = false;
 	      fragment_received_os_mtu_hint (fragment, &frame_fragment);
 	    }
+
+	  /* Are we ready to send a fragment to remote? */
 	  if (!to_udp.len && fragment_ready_to_send (fragment, &buf, &frame_fragment, current))
 	    {
 #ifdef USE_CRYPTO
@@ -914,10 +916,14 @@ openvpn (const struct options *options,
 	      to_udp = buf;
 	      free_to_udp = false;
 	    }
+
+	  /* Should we bounce back a "Fragmentation needed but DF set" ICMP to TUN/TAP device? */
 	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame_fragment, current))
 	    {
 	      to_tun = buf;
 	    }
+
+	  /* Expire TTLs, digest potential MTU changes */
 	  fragment_housekeeping (fragment, &frame_fragment, current, &timeval);
 	}
 
@@ -1277,6 +1283,9 @@ openvpn (const struct options *options,
 		  if (options->tun_af_inet)
 		    tun_rm_head (&buf, AF_INET);
 #endif
+		  /* let fragment code know original (pre-compressed) size */
+		  if (fragment)
+		    fragment_receive_tun (fragment, BLEN (&buf));
 #if PASSTOS_CAPABILITY
 		  if (options->passtos)
 		    {

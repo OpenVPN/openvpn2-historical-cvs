@@ -35,7 +35,7 @@
 #define N_FRAG_BUF                   10      /* number of packet buffers, should be <= N_FRAG_ID */
 #define FRAG_TTL_SEC                 10      /* number of seconds time-to-live for a fragment */
 #define FRAG_WAKEUP_INTERVAL         5       /* wakeup code called once per n seconds */
-#define FRAG_INITIAL_BANDWIDTH       10000   /* starting point (bytes per sec) for adaptive bandwidth */
+//#define FRAG_INITIAL_BANDWIDTH       10000   /* starting point (bytes per sec) for adaptive bandwidth */
 
 
 struct fragment {
@@ -67,8 +67,6 @@ struct fragment_master {
   struct buffer icmp_buf;
 
   struct event_timeout wakeup;     /* when should main openvpn event loop wake us up */
-
-  struct shaper shaper;            /* output bandwidth */
 
   /* this value is bounced back to peer in FRAG_SIZE with FRAG_WHOLE/FRAG_YES_NOTLAST set */
   int n_packets_received;          /* value is zeroed after send to peer */
@@ -111,6 +109,12 @@ struct fragment_master {
   /* storage for possible backtrack in MTU and/or bandwidth parameters */
   struct frame known_good_frame;
   int known_good_bandwidth;
+
+  /* measure incoming bandwidth from the tun device */
+  struct incoming_bandwidth incoming_bandwidth;
+
+  /* output bandwidth */
+  struct shaper shaper;
 
   /* a sequence ID describes a set of fragments that make up one datagram */
 # define N_SEQ_ID            256   /* sequence number wraps to 0 at this value (should be a power of 2) */
@@ -228,6 +232,7 @@ void fragment_wakeup (struct fragment_master *f, struct frame *frame, time_t cur
  * Inline functions
  */
 
+/* called periodically by main openvpn event loop */
 static inline void
 fragment_housekeeping (struct fragment_master *f, struct frame *frame, time_t current, struct timeval *tv)
 {
@@ -236,12 +241,14 @@ fragment_housekeeping (struct fragment_master *f, struct frame *frame, time_t cu
   event_timeout_wakeup (&f->wakeup, current, tv);
 }
 
+/* return true if outgoing fragments are waiting to be sent */
 static inline bool
 fragment_outgoing_defined (struct fragment_master *f)
 {
   return f->outgoing.len > 0;
 }
 
+/* called immediately after UDP datagram is sent to remote */
 static inline void
 fragment_post_send (struct fragment_master *f, int len)
 {
@@ -251,6 +258,17 @@ fragment_post_send (struct fragment_master *f, int len)
   f->n_packets_sent += f->n_packets_sent_pending;
   f->max_packet_size_sent = max_int (f->max_packet_size_sent, f->max_packet_size_sent_pending);
   f->n_packets_sent_pending = f->max_packet_size_sent_pending = 0;
+}
+
+/* called immediately after TUN/TAP packet is received */
+static inline void
+fragment_receive_tun (struct fragment_master *f, int size)
+{
+  int bandwidth;
+
+  incoming_bandwidth_data (&f->incoming_bandwidth, size, 1000000);
+  bandwidth = incoming_bandwidth_current_bandwidth (&f->incoming_bandwidth);
+  shaper_reset (&f->shaper, bandwidth);
 }
 
 #endif

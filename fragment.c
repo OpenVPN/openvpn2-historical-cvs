@@ -94,7 +94,7 @@ fragment_init (struct frame *frame)
 
   event_timeout_init (&ret->wakeup, 0, FRAG_WAKEUP_INTERVAL);
 
-  shaper_init (&ret->shaper, FRAG_INITIAL_BANDWIDTH);
+  shaper_init (&ret->shaper, 0);
 
   return ret;
 }
@@ -514,6 +514,7 @@ fragment_adjust_mtu_bandwidth (struct fragment_master *f, struct frame *frame, t
       f->max_packet_size_sent_sync = f->max_packet_size_sent_confirmed = 0;
     }
 
+#if 0
   /*
    * Adjust bandwidth trend, based on the difference between the number
    * of packets sent by us, and the number received by our peer.
@@ -564,6 +565,7 @@ fragment_adjust_mtu_bandwidth (struct fragment_master *f, struct frame *frame, t
       
       f->n_packets_sent_sync = f->n_packets_sent_confirmed = 0;
     }
+#endif
 
   msg (D_FRAG_DEBUG, "FRAG adjust post mtu=%d mtu_trend=%d bw=%d bw_trend=%d",
        EXPANDED_SIZE_DYNAMIC (frame),

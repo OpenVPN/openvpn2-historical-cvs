@@ -125,11 +125,16 @@ check_debug_level (int level)
 }
 
 static inline void
-check_status (int status, const char *description)
+check_status (int status, const char *description, int fd)
 {
+  extern void print_extended_socket_error (int sd);
   msg (x_cs_verbose_level, "%s returned %d", description, status);
   if (status < 0)
-    msg (x_cs_info_level | M_ERRNO, "%s", description);
+    {
+      msg (x_cs_info_level | M_ERRNO, "%s", description);
+      if (fd >= 0)
+	print_extended_socket_error (fd);
+    }
 }
 
 void become_daemon (const char *cd);

@@ -28,6 +28,7 @@
 #include "syshead.h"
 
 #include "socket.h"
+#include "mtu.h"
 #include "fdmisc.h"
 #include "error.h"
 #include "thread.h"
@@ -107,7 +108,8 @@ udp_socket_init (struct udp_socket *sock,
 		 bool inetd,
 		 struct udp_socket_addr *usa,
 		 const char *ipchange_command,
-		 int resolve_retry_seconds)
+		 int resolve_retry_seconds,
+		 int mtu_discover_type)
 {
   CLEAR (*sock);
 
@@ -165,6 +167,12 @@ udp_socket_init (struct udp_socket *sock,
   /* set socket file descriptor to not pass across execs, so that scripts don't have
      access to it */
   set_cloexec (sock->sd);
+
+  /* set Path MTU discovery options on the socket */
+  set_mtu_discover_type (sock->sd, mtu_discover_type);
+
+  /* if the OS supports it, enable extended error passing on the socket */
+  set_sock_extended_error_passing (sock->sd);
 
   /* print local and active remote address */
   if (sock->sd == INETD_SOCKET_DESCRIPTOR)

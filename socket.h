@@ -56,7 +56,8 @@ udp_socket_init (struct udp_socket *sock,
 		 bool inetd,
 		 struct udp_socket_addr *addr,
 		 const char *ipchange_command,
-		 int resolve_retry_seconds);
+		 int resolve_retry_seconds,
+		 int mtu_discover_type);
 
 void
 udp_socket_set_outgoing_addr (const struct buffer *buf,

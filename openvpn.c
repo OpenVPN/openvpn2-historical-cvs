@@ -364,7 +364,8 @@ openvpn (const struct options *options,
 		     options->bind_local, options->remote_float,
 		     options->inetd,
 		     udp_socket_addr, options->ipchange,
-		     options->resolve_retry_seconds);
+		     options->resolve_retry_seconds,
+		     options->mtu_discover_type);
 
 #ifdef USE_CRYPTO
 
@@ -1000,7 +1001,7 @@ openvpn (const struct options *options,
       if (!stat) /* timeout? */
 	continue;
 #endif
-      check_status (stat, "select");
+      check_status (stat, "select", -1);
       if (stat > 0)
 	{
 	  /* Incoming data on UDP port */
@@ -1024,7 +1025,7 @@ openvpn (const struct options *options,
 		udp_read_bytes += buf.len;
 
 	      /* check recvfrom status */
-	      check_status (buf.len, "read from UDP");
+	      check_status (buf.len, "read from UDP", udp_socket.sd);
 
 	      /* take action to corrupt packet if we are in gremlin test mode */
 	      if (options->gremlin) {
@@ -1170,7 +1171,7 @@ openvpn (const struct options *options,
 		tun_read_bytes += buf.len;
 
 	      /* Check the status return from read() */
-	      check_status (buf.len, "read from TUN/TAP");
+	      check_status (buf.len, "read from TUN/TAP", tuntap->fd);
 	      if (buf.len > 0)
 		{
 #if 0
@@ -1263,7 +1264,7 @@ openvpn (const struct options *options,
 		  const int size = write_tun (tuntap, BPTR (&to_tun), BLEN (&to_tun));
 		  if (size > 0)
 		    tun_write_bytes += size;
-		  check_status (size, "write to TUN/TAP");
+		  check_status (size, "write to TUN/TAP", tuntap->fd);
 
 		  /* check written packet size */
 		  if (size > 0)
@@ -1343,7 +1344,7 @@ openvpn (const struct options *options,
 		    size = 0;
 
 		  /* Check sendto() return status */
-		  check_status (size, "write to UDP");
+		  check_status (size, "write to UDP", udp_socket.sd);
 
 		  if (size > 0)
 		    {

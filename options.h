@@ -61,6 +61,7 @@ struct options
   int udp_mtu;          /* MTU of device over which tunnel packets pass via UDP */
   bool tun_mtu_defined; /* true if user overriding parm with command line option */
   bool udp_mtu_defined; /* true if user overriding parm with command line option */
+  int mtu_discover_type;
   bool mlock;
   int inactivity_timeout;
   int ping_send_timeout;        /* Send a UDP ping to remote every n seconds */

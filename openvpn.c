@@ -86,69 +86,6 @@ tunnel_point_to_point (struct context *c)
   c->first_time = false;
 }
 
-#if P2MP
-
-/*
- * Check for signals -- to be used
- * in the context of the
- * tunnel_multiclient_udp_server function. 
- */
-#define TNUS_SIG() \
-  if (IS_SIG (top)) \
-  { \
-    if (top->sig->signal_received == SIGUSR2) \
-      { \
-        multi_print_status (&multi, top); \
-        top->sig->signal_received = 0; \
-        continue; \
-      } \
-    break; \
-  }
-
-static void
-tunnel_server (struct context *top)
-{
-  struct multi_context multi;
-
-  ASSERT (top->options.proto == PROTO_UDPv4);
-  ASSERT (top->options.mode == MODE_SERVER);
-
-  multi_init (&multi, top);
-  context_clear_2 (top);
-
-  /* initialize tunnel instance */
-  init_instance (top, true);
-  if (IS_SIG (top))
-    return;
-
-  /* per-packet event loop */
-  while (true)
-    {
-      /* set up and do the select() */
-      multi_select (&multi, top);
-      TNUS_SIG ();
-
-      /* timeout? */
-      if (!top->c2.select_status)
-	{
-	  multi_process_timeout (&multi, top);
-	}
-      else
-	{
-	  /* process the I/O which triggered select */
-	  multi_process_io (&multi, top);
-	  TNUS_SIG ();
-	}
-    }
-
-  /* tear down tunnel instance (unless --persist-tun) */
-  close_instance (top);
-  multi_uninit (&multi);
-  top->first_time = false;
-}
-
-#endif
-
 int
 main (int argc, char *argv[])
 {

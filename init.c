@@ -1338,7 +1338,7 @@ do_close_tuntap (struct context *c)
 	  if (c->c1.route_list)
 	    delete_routes (c->c1.route_list);
 
-	  msg (D_CLOSE, "Closing TUN/TAP device");
+	  msg (D_CLOSE, "Closing TUN/TAP interface");
 	  close_tun (&c->c1.tuntap);
 
 	  /* Run the down script -- note that it will run at reduced

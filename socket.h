@@ -459,7 +459,15 @@ void stream_buf_init (struct stream_buf *sb, struct buffer *buf);
 void stream_buf_close (struct stream_buf* sb);
 bool stream_buf_added (struct stream_buf *sb, int length_added);
 
-bool stream_buf_read_setup (struct link_socket* sock);
+static inline bool
+stream_buf_read_setup (struct link_socket* sock)
+{
+  bool stream_buf_read_setup_dowork (struct link_socket* sock);
+  if (link_socket_connection_oriented (sock))
+    return stream_buf_read_setup_dowork (sock);
+  else
+    return true;
+}
 
 /*
  * Socket Read Routines

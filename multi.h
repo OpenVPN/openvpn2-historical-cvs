@@ -66,6 +66,8 @@ struct multi_context {
   bool enable_c2c;
 };
 
+void tunnel_server (struct context *top);
+
 void multi_init (struct multi_context *m, struct context *t);
 void multi_select (struct multi_context *m, struct context *t);
 void multi_print_status (struct multi_context *m, struct context *t);

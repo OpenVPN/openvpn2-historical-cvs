@@ -46,6 +46,75 @@
 
 static bool multi_process_post (struct multi_context *m, struct multi_instance *mi);
 
+/*
+ * Check for signals -- to be used
+ * in the context of the
+ * tunnel_multiclient_udp_server function. 
+ */
+#define TNUS_SIG() \
+  if (IS_SIG (top)) \
+  { \
+    if (top->sig->signal_received == SIGUSR2) \
+      { \
+        multi_print_status (&multi, top); \
+        top->sig->signal_received = 0; \
+        continue; \
+      } \
+    break; \
+  }
+
+void
+tunnel_server (struct context *top)
+{
+  struct multi_context multi;
+
+  ASSERT (top->options.proto == PROTO_UDPv4);
+  ASSERT (top->options.mode == MODE_SERVER);
+
+#ifdef USE_PTHREAD
+  if (top->options.n_threads > 1) // JYFIXME
+    openvpn_thread_init ();
+#endif
+
+  multi_init (&multi, top);
+  context_clear_2 (top);
+
+  /* initialize tunnel instance */
+  init_instance (top, true);
+  if (IS_SIG (top))
+    return;
+
+  /* per-packet event loop */
+  while (true)
+    {
+      /* set up and do the select() */
+      multi_select (&multi, top);
+      TNUS_SIG ();
+
+      /* timeout? */
+      if (!top->c2.select_status)
+	{
+	  multi_process_timeout (&multi, top);
+	}
+      else
+	{
+	  /* process the I/O which triggered select */
+	  multi_process_io (&multi, top);
+	  TNUS_SIG ();
+	}
+    }
+
+  /* tear down tunnel instance (unless --persist-tun) */
+  close_instance (top);
+  multi_uninit (&multi);
+  top->first_time = false;
+
+#ifdef USE_PTHREAD
+  if (top->options.n_threads > 1) // JYFIXME
+    openvpn_thread_cleanup ();
+#endif
+}
+
 void
 multi_init (struct multi_context *m, struct context *t)
 {
@@ -171,7 +240,7 @@ multi_get_instance_by_virtual_addr (struct multi_context *m, const struct mroute
   return ret;
 }
 
-static inline void
+static void
 multi_close_context (struct context *c)
 {
   c->sig->signal_received = SIGTERM;
@@ -180,7 +249,7 @@ multi_close_context (struct context *c)
   free (c->sig);
 }
 
-static inline void
+static void
 multi_close_instance (struct multi_context *m, struct multi_instance *mi)
 {
   msg (D_MULTI_DEBUG, "MULTI: multi_close_instance called");
@@ -247,6 +316,7 @@ multi_uninit (struct multi_context *m)
       while ((he = hash_iterator_next (&hi)))
 	{
 	  struct multi_instance *mi = (struct multi_instance *) he->value;
+	  mi->did_iter = false;
 	  multi_close_instance (m, mi);
 	}
 
@@ -986,7 +1056,7 @@ multi_process_incoming_link (struct multi_context *m, struct context *t)
 		    {
 		      multi_broadcast (m, &c->c2.to_tun, m->tun_out);
 		    }
-		  else /* try client to client routing */
+		  else /* try client-to-client routing */
 		    {
 		      mi = multi_get_instance_by_virtual_addr (m, &dest);
 
@@ -1116,8 +1186,6 @@ multi_process_io (struct multi_context *m, struct context *t)
 void
 multi_process_timeout (struct multi_context *m, struct context *t)
 {
-  // LOCK -- global read unlock
-
   /* instance marked for wakeup in multi_get_timeout? */
   if (m->earliest_wakeup)
     {

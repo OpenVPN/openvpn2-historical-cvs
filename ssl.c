@@ -242,7 +242,8 @@ static struct user_pass passbuf;
 void
 pem_password_setup (const char *auth_file)
 {
-  get_user_pass (&passbuf, auth_file, true, "Private Key");
+  if (!strlen (passbuf.password))
+    get_user_pass (&passbuf, auth_file, true, "Private Key");
 }
 
 int
@@ -250,6 +251,9 @@ pem_password_callback (char *buf, int size, int rwflag, void *u)
 {
   if (buf)
     {
+      /* prompt for password even if --askpass wasn't specified */
+      pem_password_setup (NULL);
+
       strncpynt (buf, passbuf.password, size);
       return strlen (buf);
     }

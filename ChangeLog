@@ -1,7 +1,13 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.40 2004/10/18 05:35:27 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.41 2004/10/18 21:38:14 jimyonan Exp $
+
+2004.10.18 -- Version 2.0-beta13
+
+* Fixed an issue introduced in Beta12 where the private
+  key password would not be prompted for unless --askpass
+  was explicitly specified in the config.
 
 2004.10.17 -- Version 2.0-beta12
 

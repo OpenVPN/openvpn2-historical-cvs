@@ -1,11 +1,15 @@
 /*
  *  TAP-Win32 -- A kernel driver to provide virtual tap device functionality
- *               on Windows.  Derived from the CIPE-Win32 project at
- *               http://cipe-win32.sourceforge.net/
+ *               on Windows.  Originally derived from the CIPE-Win32
+ *               project by Damion K. Wilson, with extensive modifications by
+ *               James Yonan.
  *
- *  Copyright (C) 2003 Damion K. Wilson
+ *  All source code which derives from the CIPE-Win32 project is
+ *  Copyright (C) Damion K. Wilson, 2003, and is released under the
+ *  GPL version 2 (see below).
  *
- *  Modifications by James Yonan in accordance with the GPL.
+ *  All other source code is Copyright (C) James Yonan, 2003,
+ *  and is released under the GPL version 2 (see below).
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -43,22 +47,28 @@ unsigned char HexStringToDecimalInt (unsigned char p_Character)
     return l_Value;
    }
 
-void ConvertMacInfo (unsigned char *p_Destination, unsigned char *p_Source, unsigned long p_Length)
+void ConvertMacInfo (MACADDR p_Destination, unsigned char *p_Source, unsigned long p_Length)
    {
     unsigned long l_Index, l_HexIdx, l_Ind = 0, l_Init = 1;
 
-    ASSERT (p_Destination);
-    ASSERT (p_Source);
-    ASSERT (p_Length);
+    MYASSERT (p_Destination);
+    MYASSERT (p_Source);
+    MYASSERT (p_Length);
 
-    for (l_Index = l_HexIdx = l_Ind = 0; l_Index < p_Length && l_HexIdx < 6 && p_Source [l_Index]; ++l_Index)
+    for (l_Index = l_HexIdx = l_Ind = 0;
+	 l_Index < p_Length && l_HexIdx < sizeof (MACADDR) && p_Source [l_Index];
+	 ++l_Index)
        {
         if (IsMacDelimiter (p_Source [l_Index]))
            l_Ind = 0, ++l_HexIdx, l_Init = 1;
         else if (++l_Ind == 3)
-           (++l_HexIdx < 6 ? (p_Destination [l_HexIdx] = HexStringToDecimalInt (p_Source [l_Index]), l_Ind = 0) : 0);
+           (++l_HexIdx < sizeof (MACADDR)
+	    ? (p_Destination [l_HexIdx]
+	       = HexStringToDecimalInt (p_Source [l_Index]), l_Ind = 0) : 0);
         else
-           p_Destination [l_HexIdx] = (l_Init ? 0 : p_Destination [l_HexIdx] * 16) + HexStringToDecimalInt (p_Source [l_Index]), l_Init = 0;
+           p_Destination [l_HexIdx]
+	     = (l_Init ? 0 : p_Destination [l_HexIdx] * 16)
+	     + HexStringToDecimalInt (p_Source [l_Index]), l_Init = 0;
        }
    }
 
@@ -81,7 +91,7 @@ void ConvertMacInfo (unsigned char *p_Destination, unsigned char *p_Source, unsi
  * of collision would be 0.01157288998621678766.
  */
 
-void GenerateRandomMac (unsigned char *mac, unsigned char *adapter_name)
+void GenerateRandomMac (MACADDR mac, unsigned char *adapter_name)
 {
   unsigned const char *cp = adapter_name;
   unsigned char c;
@@ -90,14 +100,14 @@ void GenerateRandomMac (unsigned char *mac, unsigned char *adapter_name)
   int brace = 0;
   int state = 0;
 
-  NdisZeroMemory (mac, 6);
+  NdisZeroMemory (mac, sizeof (MACADDR));
 
   mac[0] = 0x00;
   mac[1] = 0xFF;
 
   while (c = *cp++)
     {
-      if (i >= 6)
+      if (i >= sizeof (MACADDR))
 	break;
       if (c == '{')
 	brace = 1;
@@ -118,6 +128,12 @@ void GenerateRandomMac (unsigned char *mac, unsigned char *adapter_name)
 	    }
 	}
     }
+}
+
+void GenerateRelatedMAC (MACADDR dest, const MACADDR src)
+{
+  COPY_MAC (dest, src);
+  (*((ULONG *) ((unsigned char *) dest + 2)))++;
 }
 
 #ifdef __cplusplus

@@ -50,6 +50,10 @@ PORTING NOTES:
     functions.  If your tun/tap virtual device is
     sufficiently generic, you may be able to use the
     default case.
+  * Add appropriate code to route.c to handle
+    the route command on your platform.  This
+    is necessary for the --route option to
+    work correctly.
   * After you successfully build OpenVPN, run
     the loopback tests as described in INSTALL.
   * For the next test, confirm that the UDP socket

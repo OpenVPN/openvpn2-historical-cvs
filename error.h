@@ -149,6 +149,31 @@ void redirect_stdout_stderr (const char *file, bool append);
 /* exit program */
 void openvpn_exit (int status);
 
+/*
+ * Check the return status of read/write routines.
+ */
+
+struct link_socket;
+struct tuntap;
+
+extern unsigned int x_cs_info_level;
+extern unsigned int x_cs_verbose_level;
+
+void reset_check_status (void);
+void set_check_status (unsigned int info_level, unsigned int verbose_level);
+
+void x_check_status (int status,
+		     const char *description,
+		     struct link_socket *sock,
+		     struct tuntap *tt);
+
+static inline void
+check_status (int status, const char *description, struct link_socket *sock, struct tuntap *tt)
+{
+  if (status < 0 || check_debug_level (x_cs_verbose_level))
+    x_check_status (status, description, sock, tt);
+}
+
 #include "errlevel.h"
 
 #endif

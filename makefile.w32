@@ -33,16 +33,16 @@ EXE = openvpn.exe
 HEADERS = basic.h buffer.h circ_list.h common.h \
 	config-win32.h crypto.h errlevel.h error.h io.h \
 	fdmisc.h fragment.h gremlin.h interval.h lzo.h \
-	memdbg.h misc.h mtu.h win32.h openvpn.h \
-	options.h packet_id.h reliable.h session_id.h \
-	shaper.h socket.h ssl.h syshead.h thread.h tun.h \
-	tap-win32/constants.h
+	memdbg.h misc.h mss.h mtu.h win32.h openvpn.h \
+	options.h packet_id.h proto.h reliable.h route.h \
+        session_id.h shaper.h socket.h ssl.h syshead.h \
+	thread.h tun.h tap-win32/constants.h
 
 OBJS =	buffer.o crypto.o error.o fdmisc.o fragment.o \
-	gremlin.o inet_aton.o io.o lzo.o misc.o mtu.o \
+	gremlin.o inet_aton.o io.o lzo.o misc.o mss.o mtu.o \
 	win32.o openvpn.o options.o packet_id.o \
-	reliable.o session_id.o shaper.o socket.o ssl.o \
-	thread.o tun.o
+	reliable.o route.o session_id.o shaper.o socket.o \
+        ssl.o thread.o tun.o
 
 dynamic : ${OBJS}
 	${CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl32 -leay32 -llzo -lws2_32 -lgdi32

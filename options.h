@@ -25,6 +25,13 @@
 
 #include "basic.h"
 #include "mtu.h"
+#include "route.h"
+
+/*
+ * Maximum number of parameters to an options,
+ * including the option name itself.
+ */
+#define MAX_PARMS 5
 
 extern const char title_string[];
 
@@ -60,7 +67,7 @@ struct options
   const char *dev_type;
   const char *dev_node;
   const char *ifconfig_local;
-  const char *ifconfig_remote;
+  const char *ifconfig_remote_netmask;
 #ifdef HAVE_GETTIMEOFDAY
   int shaper;
 #endif
@@ -102,11 +109,16 @@ struct options
   bool persist_remote_ip;       /* Don't re-resolve remote address on SIGUSR1 or PING_RESTART */
   bool persist_key;             /* Don't re-read key files on SIGUSR1 or PING_RESTART */
 
+  int mssfix;                   /* Upper bound on TCP MSS */
+  bool mssfix_defined;
+
 #if PASSTOS_CAPABILITY
   bool passtos;                  
 #endif
 
   int resolve_retry_seconds;    /* If hostname resolve fails, retry for n seconds */
+
+  unsigned int tuntap_flags;
 
   /* Misc parms */
   const char *username;
@@ -132,6 +144,13 @@ struct options
   bool comp_lzo;
   bool comp_lzo_adaptive;
 #endif
+
+  /* route management */
+  const char *route_script;
+  const char *route_default_gateway;
+  bool route_noauto;
+  int route_delay;
+  struct route_option_list routes;
 
 #ifdef USE_CRYPTO
   /* Cipher parms */

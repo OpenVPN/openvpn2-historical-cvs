@@ -379,6 +379,7 @@ void get_highest_preference_tls_cipher (char *buf, int size);
 int pem_password_callback (char *buf, int size, int rwflag, void *u);
 
 void tls_set_verify_command (const char *cmd);
+int get_max_tls_verify_id ();
 
 void tls_adjust_frame_parameters(struct frame *frame);
 

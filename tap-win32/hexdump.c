@@ -1,11 +1,15 @@
 /*
  *  TAP-Win32 -- A kernel driver to provide virtual tap device functionality
- *               on Windows.  Derived from the CIPE-Win32 project at
- *               http://cipe-win32.sourceforge.net/
+ *               on Windows.  Originally derived from the CIPE-Win32
+ *               project by Damion K. Wilson, with extensive modifications by
+ *               James Yonan.
  *
- *  Copyright (C) 2003 Damion K. Wilson
+ *  All source code which derives from the CIPE-Win32 project is
+ *  Copyright (C) Damion K. Wilson, 2003, and is released under the
+ *  GPL version 2 (see below).
  *
- *  Modifications by James Yonan in accordance with the GPL.
+ *  All other source code is Copyright (C) James Yonan, 2003,
+ *  and is released under the GPL version 2 (see below).
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -54,13 +58,15 @@ void HexDump (unsigned char *p_Buffer, unsigned long p_Size)
 
     for (l_Index = l_Row [16] = 0; l_Index < p_Size || l_Index % 16; ++l_Index)
        {
-        if (l_Index % 16 == 0) DbgPrint ("%05x   ", l_Index);
-        DbgPrint ("%02x ", l_Row [l_Index % 16] = (l_Index < p_Size ? p_Buffer [l_Index] : 0));
+        if (l_Index % 16 == 0)
+	  DEBUGP (("%05x   ", l_Index));
+        DEBUGP (("%02x ", l_Row [l_Index % 16] = (l_Index < p_Size ? p_Buffer [l_Index] : 0)));
         l_Row [l_Index % 16] = IfPrint (l_Row [l_Index % 16]);
-        if ((l_Index + 1) % 16 == 0) DbgPrint ("   %s\n", l_Row);
+        if ((l_Index + 1) % 16 == 0)
+	  DEBUGP (("   %s\n", l_Row));
        }
 
-    DbgPrint ("\n");
+    DEBUGP (("\n"));
    }
 
 #ifdef __cplusplus

@@ -210,6 +210,39 @@ wait_trigger (const struct event_wait *ew, HANDLE h)
   return ew->trigger == h;
 }
 
+/*
+ * Use to control access to resources that only one
+ * OpenVPN process on a given machine can access at
+ * a given time.
+ */
+
+struct semaphore
+{
+  const char *name;
+  bool locked;
+  HANDLE hand;
+};
+
+void semaphore_clear (struct semaphore *s);
+void semaphore_open (struct semaphore *s, const char *name);
+bool semaphore_lock (struct semaphore *s, int timeout_milliseconds);
+void semaphore_release (struct semaphore *s);
+void semaphore_close (struct semaphore *s);
+
+/*
+ * Special global semaphore used to protect network
+ * shell commands from simultaneous instantiation.
+ *
+ * Not kidding -- you can't run more than one instance
+ * of netsh on the same machine at the same time.
+ */
+
+extern struct semaphore netcmd_semaphore;
+void netcmd_semaphore_init (void);
+void netcmd_semaphore_close (void);
+void netcmd_semaphore_lock (void);
+void netcmd_semaphore_release (void);
+
 #else /* Posix stuff here */
 
 struct event_wait {

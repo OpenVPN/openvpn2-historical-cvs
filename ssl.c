@@ -260,11 +260,18 @@ tmp_rsa_cb (SSL * s, int is_export, int keylength)
  */
 
 static const char *verify_command;
+static int verify_maxlevel;
 
 void
 tls_set_verify_command (const char *cmd)
 {
   verify_command = cmd;
+}
+
+int
+get_max_tls_verify_id ()
+{
+  return verify_maxlevel;
 }
 
 static int
@@ -291,6 +298,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
     msg (M_WARN, "TLS Warning: Convoluted certificate chain detected with depth [%d] greater than %d", ctx->error_depth, max_depth);
 
   /* export subject name string as environmental variable */
+  verify_maxlevel = max_int (verify_maxlevel, ctx->error_depth);
   openvpn_snprintf (envname, sizeof(envname), "tls_id_%d", ctx->error_depth);
   setenv_str (envname, txt);
 
@@ -1834,7 +1842,7 @@ thread_func (void *arg)
 	   (int)tv.tv_usec);
 
       stat = select (parm->sd[TLS_THREAD_WORKER] + 1, &reads, &writes, NULL, &tv);
-      check_status (stat, "thread select", NULL);
+      check_status (stat, "thread select", NULL, NULL);
       if (!stat) /* timeout? */
 	continue;
 
@@ -1850,7 +1858,7 @@ thread_func (void *arg)
 	  /* send buffer to foreground where it will be forwarded to remote */
 	  stat = write (parm->sd[TLS_THREAD_WORKER], &ret, sizeof (ret));
 	  fatal = local_sock_fatal (stat);
-	  check_status (stat, "write to foreground", NULL);
+	  check_status (stat, "write to foreground", NULL, NULL);
 	  if (stat < 0)
 	    free_buf (&ret.to_link);
 	  if (fatal)
@@ -1865,7 +1873,7 @@ thread_func (void *arg)
 
 	    stat = read (parm->sd[TLS_THREAD_WORKER], &tc, sizeof (tc));
 	    fatal = local_sock_fatal (stat);
-	    check_status (stat, "read from foreground", NULL);
+	    check_status (stat, "read from foreground", NULL, NULL);
 	    if (stat == sizeof (tc))
 	      {
 		if (tc.cmd == TTCMD_PROCESS)
@@ -1921,7 +1929,7 @@ tls_thread_send_command (struct thread_parms *state, int cmd, bool wait_if_neces
 	break;
     }
   fatal = local_sock_fatal (stat);
-  check_status (stat, "write command to tls thread", NULL);
+  check_status (stat, "write command to tls thread", NULL, NULL);
   if (stat == sizeof (tc))
     return 1;
   else if (fatal)
@@ -2013,7 +2021,7 @@ tls_thread_rec_buf (struct thread_parms *state, struct tt_ret* ttr, bool do_chec
   stat = read (state->sd[TLS_THREAD_MAIN], ttr, sizeof (*ttr));
   fatal = local_sock_fatal (stat);
   if (do_check_status)
-    check_status (stat, "read buffer from tls thread", NULL);
+    check_status (stat, "read buffer from tls thread", NULL, NULL);
   if (stat == sizeof (*ttr))
     return 1;
   else if (fatal)

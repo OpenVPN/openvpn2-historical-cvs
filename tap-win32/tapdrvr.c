@@ -1,11 +1,15 @@
 /*
- *  TAP-Win32 -- A kernel driver to provide virtual tap device functionality
- *               on Windows.  Derived from the CIPE-Win32 project at
- *               http://cipe-win32.sourceforge.net/
+ *  TAP-Win32 -- A kernel driver to provide virtual tap device
+ *               functionality on Windows.  Originally derived
+ *               from the CIPE-Win32 project by Damion K. Wilson,
+ *               with extensive modifications by James Yonan.
  *
- *  Copyright (C) 2003 Damion K. Wilson
+ *  All source code which derives from the CIPE-Win32 project is
+ *  Copyright (C) Damion K. Wilson, 2003, and is released under the
+ *  GPL version 2 (see below).
  *
- *  Modifications by James Yonan in accordance with the GPL.
+ *  All other source code is Copyright (C) James Yonan, 2003,
+ *  and is released under the GPL version 2 (see below).
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -23,55 +27,93 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+//======================================================
+// This driver is designed to work on Win 2000 or higher
+// versions of Windows.
+//
+// It is SMP-safe and handles NDIS 5 power management.
+//
+// By default we operate as a "tap" virtual ethernet
+// 802.3 interface, but we can emulate a "tun"
+// interface (point-to-point IPv4) through the
+// TAP_IOCTL_CONFIG_POINT_TO_POINT ioctl.
+//======================================================
+
 #define NDIS_MINIPORT_DRIVER
 #define BINARY_COMPATIBLE 0
 #define NDIS50_MINIPORT 1
 #define NDIS_WDM 0
 #define NDIS50 1
-#define OVERWRITE_OLD_PACKETS FALSE
+#define NTSTRSAFE_LIB
 
-#include "ndis.h"
+#include <ndis.h>
+#include <ntstrsafe.h>
+
 #include "constants.h"
 #include "types.h"
 #include "prototypes.h"
+#include "error.h"
+#include "endian.h"
 
+#include "mem.c"
 #include "macinfo.c"
+#include "error.c"
 
-//==========================================================================
-//                                         Globals
-//==========================================================================
+//========================================================
+//                            Globals
+//========================================================
 PDRIVER_DISPATCH g_DispatchHook[IRP_MJ_MAXIMUM_FUNCTION + 1];
 NDIS_MINIPORT_CHARACTERISTICS g_Properties;
 PDRIVER_OBJECT g_TapDriverObject = NULL;
-struct LROOTSTRUCT g_TapAdapterList;
 char g_DispatchFunctionsHooked = 0;
 NDIS_HANDLE g_NdisWrapperHandle;
-unsigned char g_MAC[6] = { 0, 0, 0, 0, 0, 0 };
+MACADDR g_MAC = { 0, 0, 0, 0, 0, 0 };
+
+#define IS_UP(a) \
+  ((a)->m_TapIsRunning && (a)->m_InterfaceIsRunning)
+
+#define INCREMENT_STAT(s) ++(s)
 
 UINT g_SupportedOIDList[] = {
-  OID_GEN_HARDWARE_STATUS, OID_GEN_MEDIA_SUPPORTED, OID_GEN_MEDIA_IN_USE,
-  OID_GEN_MAXIMUM_LOOKAHEAD, OID_GEN_MAC_OPTIONS, OID_GEN_LINK_SPEED,
-  OID_GEN_TRANSMIT_BLOCK_SIZE, OID_GEN_RECEIVE_BLOCK_SIZE,
-    OID_GEN_VENDOR_DESCRIPTION,
-  OID_GEN_DRIVER_VERSION, OID_GEN_XMIT_OK, OID_GEN_RCV_OK,
-  OID_GEN_XMIT_ERROR, OID_GEN_RCV_ERROR, OID_802_3_PERMANENT_ADDRESS,
-  OID_802_3_CURRENT_ADDRESS, OID_GEN_RCV_NO_BUFFER,
-    OID_802_3_RCV_ERROR_ALIGNMENT,
-  OID_802_3_XMIT_ONE_COLLISION, OID_802_3_XMIT_MORE_COLLISIONS,
-    OID_802_3_MULTICAST_LIST,
-  OID_802_3_MAXIMUM_LIST_SIZE, OID_GEN_VENDOR_ID, OID_GEN_CURRENT_LOOKAHEAD,
-  OID_GEN_CURRENT_PACKET_FILTER, OID_GEN_PROTOCOL_OPTIONS,
-    OID_GEN_MAXIMUM_TOTAL_SIZE,
-  OID_GEN_TRANSMIT_BUFFER_SPACE, OID_GEN_RECEIVE_BUFFER_SPACE,
-    OID_GEN_MAXIMUM_FRAME_SIZE,
-  OID_GEN_VENDOR_DRIVER_VERSION, OID_GEN_MAXIMUM_SEND_PACKETS,
-    OID_GEN_MEDIA_CONNECT_STATUS,
+  OID_GEN_HARDWARE_STATUS,
+  OID_GEN_MEDIA_SUPPORTED,
+  OID_GEN_MEDIA_IN_USE,
+  OID_GEN_MAXIMUM_LOOKAHEAD,
+  OID_GEN_MAC_OPTIONS,
+  OID_GEN_LINK_SPEED,
+  OID_GEN_TRANSMIT_BLOCK_SIZE,
+  OID_GEN_RECEIVE_BLOCK_SIZE,
+  OID_GEN_VENDOR_DESCRIPTION,
+  OID_GEN_DRIVER_VERSION,
+  OID_GEN_XMIT_OK,
+  OID_GEN_RCV_OK,
+  OID_GEN_XMIT_ERROR,
+  OID_GEN_RCV_ERROR,
+  OID_802_3_PERMANENT_ADDRESS,
+  OID_802_3_CURRENT_ADDRESS,
+  OID_GEN_RCV_NO_BUFFER,
+  OID_802_3_RCV_ERROR_ALIGNMENT,
+  OID_802_3_XMIT_ONE_COLLISION,
+  OID_802_3_XMIT_MORE_COLLISIONS,
+  OID_802_3_MULTICAST_LIST,
+  OID_802_3_MAXIMUM_LIST_SIZE,
+  OID_GEN_VENDOR_ID,
+  OID_GEN_CURRENT_LOOKAHEAD,
+  OID_GEN_CURRENT_PACKET_FILTER,
+  OID_GEN_PROTOCOL_OPTIONS,
+  OID_GEN_MAXIMUM_TOTAL_SIZE,
+  OID_GEN_TRANSMIT_BUFFER_SPACE,
+  OID_GEN_RECEIVE_BUFFER_SPACE,
+  OID_GEN_MAXIMUM_FRAME_SIZE,
+  OID_GEN_VENDOR_DRIVER_VERSION,
+  OID_GEN_MAXIMUM_SEND_PACKETS,
+  OID_GEN_MEDIA_CONNECT_STATUS,
   OID_GEN_SUPPORTED_LIST
 };
 
-//=======================================================================
-//                                       Driver Entry
-//=======================================================================
+//============================================================
+//                         Driver Entry
+//============================================================
 #pragma NDIS_INIT_FUNCTION (DriverEntry)
 
 NTSTATUS
@@ -80,18 +122,24 @@ DriverEntry (IN PDRIVER_OBJECT p_DriverObject,
 {
   NDIS_STATUS l_Status = NDIS_STATUS_FAILURE;
 
-  ListActivate (&g_TapAdapterList, 0);
+  //========================================================
+  // Notify NDIS that a new miniport driver is initializing.
+  //========================================================
 
   NdisMInitializeWrapper (&g_NdisWrapperHandle,
 			  g_TapDriverObject = p_DriverObject,
 			  p_RegistryPath, NULL);
+
+  //=======================================
+  // Set and register miniport entry points
+  //=======================================
 
   NdisZeroMemory (&g_Properties, sizeof (g_Properties));
 
   g_Properties.MajorNdisVersion = TAP_NDIS_MAJOR_VERSION;
   g_Properties.MinorNdisVersion = TAP_NDIS_MINOR_VERSION;
   g_Properties.InitializeHandler = AdapterCreate;
-  g_Properties.HaltHandler = AdapterDestroy;
+  g_Properties.HaltHandler = AdapterHalt;
   g_Properties.ResetHandler = AdapterReset;
   g_Properties.TransferDataHandler = AdapterReceive;
   g_Properties.SendHandler = AdapterTransmit;
@@ -124,106 +172,145 @@ DriverEntry (IN PDRIVER_OBJECT p_DriverObject,
     {
     case NDIS_STATUS_SUCCESS:
       {
-	DbgPrint ("[TAP] version [%d.%d] registered miniport successfully\n",
-		  TAP_DRIVER_MAJOR_VERSION, TAP_DRIVER_MINOR_VERSION);
+	DEBUGP (("[TAP] version [%d.%d] registered miniport successfully\n",
+		  TAP_DRIVER_MAJOR_VERSION, TAP_DRIVER_MINOR_VERSION));
 	break;
       }
 
     case NDIS_STATUS_BAD_CHARACTERISTICS:
       {
-	DbgPrint ("[TAP] Miniport characteristics were badly defined\n");
+	DEBUGP (("[TAP] Miniport characteristics were badly defined\n"));
 	NdisTerminateWrapper (g_NdisWrapperHandle, NULL);
 	break;
       }
 
     case NDIS_STATUS_BAD_VERSION:
       {
-	DbgPrint
-	  ("[TAP] NDIS Version is wrong for the given characteristics\n");
+	DEBUGP
+	  (("[TAP] NDIS Version is wrong for the given characteristics\n"));
 	NdisTerminateWrapper (g_NdisWrapperHandle, NULL);
 	break;
       }
 
     case NDIS_STATUS_RESOURCES:
       {
-	DbgPrint ("[TAP] Insufficient resources\n");
+	DEBUGP (("[TAP] Insufficient resources\n"));
 	NdisTerminateWrapper (g_NdisWrapperHandle, NULL);
 	break;
       }
 
     case NDIS_STATUS_FAILURE:
       {
-	DbgPrint ("[TAP] Unknown fatal registration error\n");
+	DEBUGP (("[TAP] Unknown fatal registration error\n"));
 	NdisTerminateWrapper (g_NdisWrapperHandle, NULL);
 	break;
       }
     }
 
+  //==============================================================
+  // Save original NDIS dispatch functions and override with ours
+  //==============================================================
+  HookDispatchFunctions ();
+
   return l_Status;
 }
 
-//========================================================================
+//==========================================================
 //                            Adapter Initialization
-//========================================================================
+//==========================================================
 NDIS_STATUS AdapterCreate
   (OUT PNDIS_STATUS p_ErrorStatus,
    OUT PUINT p_MediaIndex,
    IN PNDIS_MEDIUM p_Media,
    IN UINT p_MediaCount,
-   IN NDIS_HANDLE p_AdapterHandle, IN NDIS_HANDLE p_ConfigurationHandle)
+   IN NDIS_HANDLE p_AdapterHandle,
+   IN NDIS_HANDLE p_ConfigurationHandle)
 {
-  static NDIS_PHYSICAL_ADDRESS l_HighestAcceptableMax =
-    NDIS_PHYSICAL_ADDRESS_CONST (-1, -1);
-  NDIS_MEDIUM l_PreferredMedium = NdisMedium802_3;
-  TapAdapterPointer l_Adapter;
+  NDIS_MEDIUM l_PreferredMedium = NdisMedium802_3; // Ethernet
+  TapAdapterPointer l_Adapter = NULL;
   ANSI_STRING l_AdapterString;
 #ifndef ENABLE_RANDOM_MAC
-  unsigned char l_MAC[6];
+  MACADDR l_MAC;
 #endif
   UINT l_Index;
   NDIS_STATUS status;
 
+  //====================================
+  // Make sure adapter type is supported
+  //====================================
+
   for (l_Index = 0;
-       l_Index < p_MediaCount && p_Media[l_Index] != NdisMedium802_3;
+       l_Index < p_MediaCount && p_Media[l_Index] != l_PreferredMedium;
        ++l_Index);
 
   if (l_Index == p_MediaCount)
     {
-      DbgPrint ("[TAP] Unsupported adapter type [%d]\n", NdisMedium802_3);
+      DEBUGP (("[TAP] Unsupported adapter type [wanted: %d]\n",
+	       l_PreferredMedium));
       return NDIS_STATUS_UNSUPPORTED_MEDIA;
     }
 
   *p_MediaIndex = l_Index;
 
-  status = NdisAllocateMemory ((PVOID *) & l_Adapter, sizeof (TapAdapter), 0,
-			       l_HighestAcceptableMax);
+  //=========================================
+  // Allocate memory for TapAdapter structure
+  //=========================================
+
+  status = NdisAllocateMemoryWithTag ((PVOID *) & l_Adapter,
+				      sizeof (TapAdapter), '1PAT');
 
   if (status != NDIS_STATUS_SUCCESS || l_Adapter == NULL)
     {
-      DbgPrint ("[TAP] Couldn't allocate adapter memory\n");
+      DEBUGP (("[TAP] Couldn't allocate adapter memory\n"));
       return NDIS_STATUS_RESOURCES;
     }
+
+  //==========================================
+  // Inform the NDIS library about significant
+  // features of our virtual NIC.
+  //==========================================
 
   NdisMSetAttributesEx
     (p_AdapterHandle,
      (NDIS_HANDLE) l_Adapter,
      16,
-     NDIS_ATTRIBUTE_DESERIALIZE |
-     NDIS_ATTRIBUTE_IGNORE_PACKET_TIMEOUT |
-     NDIS_ATTRIBUTE_IGNORE_REQUEST_TIMEOUT |
-     NDIS_ATTRIBUTE_NO_HALT_ON_SUSPEND, NdisInterfaceInternal);
+     NDIS_ATTRIBUTE_DESERIALIZE
+     | NDIS_ATTRIBUTE_IGNORE_PACKET_TIMEOUT
+     | NDIS_ATTRIBUTE_IGNORE_REQUEST_TIMEOUT
+     | NDIS_ATTRIBUTE_NO_HALT_ON_SUSPEND,
+     NdisInterfaceInternal);
+
+  //=====================================
+  // Initialize simple Adapter parameters
+  //=====================================
 
   NdisZeroMemory (l_Adapter, sizeof (TapAdapter));
-  NdisMRegisterAdapterShutdownHandler (p_AdapterHandle, l_Adapter,
-				       AdapterStop);
-  NdisAllocateSpinLock (&l_Adapter->m_Lock);
 
-  l_Adapter->m_TapIsRunning = l_Adapter->m_InterfaceIsRunning = FALSE;
-  l_Adapter->m_MiniportAdapterHandle = p_AdapterHandle;
   l_Adapter->m_Lookahead = DEFAULT_PACKET_LOOKAHEAD;
-  l_Adapter->m_TapName = l_Adapter->m_Name = "";
   l_Adapter->m_Medium = l_PreferredMedium;
-  l_Adapter->m_TapOpens = 0;
+  l_Adapter->m_DeviceState = '?';
+
+  //====================================================
+  // Register a shutdown handler which will be called
+  // on system restart/shutdown to halt our virtual NIC.
+  //====================================================
+
+  NdisMRegisterAdapterShutdownHandler (p_AdapterHandle, l_Adapter,
+				       AdapterHalt);
+  l_Adapter->m_MiniportAdapterHandle = p_AdapterHandle;
+  l_Adapter->m_RegisteredAdapterShutdownHandler = TRUE;
+
+  //===========================================================
+  // Allocate spinlocks used to control access to
+  // shared data structures by concurrent threads of execution.
+  // QueueLock is used to lock the packet queue used
+  // for the TAP-Win32 NIC -> User Space packet flow direction.
+  // This code is designed to be fully SMP-safe.
+  //===========================================================
+
+  NdisAllocateSpinLock (&l_Adapter->m_Lock);
+  NdisAllocateSpinLock (&l_Adapter->m_QueueLock);
+  l_Adapter->m_AllocatedSpinlocks = TRUE;
 
   //====================================
   // Allocate and construct adapter name
@@ -233,16 +320,18 @@ NDIS_STATUS AdapterCreate
     ((PNDIS_MINIPORT_BLOCK) p_AdapterHandle)->MiniportName.Length + 5;
 
   if ((l_Adapter->m_Name = l_AdapterString.Buffer =
-       ExAllocatePool (NonPagedPool, l_AdapterString.MaximumLength)) == NULL)
+       ExAllocatePoolWithTag (NonPagedPool,
+			      l_AdapterString.MaximumLength,
+			      '2PAT')) == NULL)
     {
-      NdisMDeregisterAdapterShutdownHandler (p_AdapterHandle);
-      NdisFreeMemory ((PVOID) l_Adapter, sizeof (TapAdapter), 0);
+      AdapterFreeResources (l_Adapter);
       return NDIS_STATUS_RESOURCES;
     }
 
-  RtlUnicodeStringToAnsiString (&l_AdapterString,
-				&((PNDIS_MINIPORT_BLOCK) p_AdapterHandle)->
-				MiniportName, FALSE);
+  RtlUnicodeStringToAnsiString (
+             &l_AdapterString,
+	     &((PNDIS_MINIPORT_BLOCK) p_AdapterHandle)->MiniportName,
+	     FALSE);
   l_AdapterString.Buffer[l_AdapterString.Length] = 0;
 
   //==================================
@@ -251,9 +340,9 @@ NDIS_STATUS AdapterCreate
 
 #ifdef ENABLE_RANDOM_MAC
   GenerateRandomMac (g_MAC, l_Adapter->m_Name);
-  memcpy (l_Adapter->m_MAC, g_MAC, 6);
+  COPY_MAC (l_Adapter->m_MAC, g_MAC);
 #else
-  memcpy (l_Adapter->m_MAC, g_MAC, 6);
+  COPY_MAC (l_Adapter->m_MAC, g_MAC);
 
   l_MAC[0] = g_MAC[5];
   l_MAC[1] = g_MAC[4];
@@ -264,10 +353,19 @@ NDIS_STATUS AdapterCreate
   g_MAC[4] = l_MAC[1];
 #endif
 
-  DbgPrint ("[%s] Using MAC %x:%x:%x:%x:%x:%x\n",
+  DEBUGP (("[%s] Using MAC %x:%x:%x:%x:%x:%x\n",
 	    l_Adapter->m_Name,
 	    l_Adapter->m_MAC[0], l_Adapter->m_MAC[1], l_Adapter->m_MAC[2],
-	    l_Adapter->m_MAC[3], l_Adapter->m_MAC[4], l_Adapter->m_MAC[5]);
+	    l_Adapter->m_MAC[3], l_Adapter->m_MAC[4], l_Adapter->m_MAC[5]));
+
+  //==================
+  // Set broadcast MAC
+  //==================
+  {
+    int i;
+    for (i = 0; i < sizeof (MACADDR); ++i)
+      l_Adapter->m_MAC_Broadcast[i] = 0xFF;
+  }
 
   //====================================
   // Get MTU from registry -- Can be set
@@ -302,43 +400,72 @@ NDIS_STATUS AdapterCreate
 	  }
 	NdisCloseConfiguration (configHandle);
       }
-    DbgPrint ("[%s] MTU=%d\n", l_Adapter->m_Name, l_Adapter->m_MTU);
+    DEBUGP (("[%s] MTU=%d\n", l_Adapter->m_Name, l_Adapter->m_MTU));
   }
 
   //====================================
-  // Finalize initialization
+  // Initialize TAP device
   //====================================
-  ListAdd (&g_TapAdapterList, l_Adapter);
-  HookDispatchFunctions ();
-  CreateTapDevice (l_Adapter);
-  l_Adapter->m_InterfaceIsRunning = TRUE;
+  {
+    NDIS_STATUS tap_status;
+    tap_status = CreateTapDevice (l_Adapter);
+    if (tap_status != NDIS_STATUS_SUCCESS)
+      {
+	AdapterFreeResources (l_Adapter);
+	return tap_status;
+      }
+  }
 
+  l_Adapter->m_InterfaceIsRunning = TRUE;
   return NDIS_STATUS_SUCCESS;
 }
 
 VOID
-AdapterDestroy (IN NDIS_HANDLE p_AdapterContext)
+AdapterHalt (IN NDIS_HANDLE p_AdapterContext)
 {
   TapAdapterPointer l_Adapter = (TapAdapterPointer) p_AdapterContext;
-  DbgPrint ("[%s] is being removed from the system\n", l_Adapter->m_Name);
-  AdapterStop (p_AdapterContext);
-  ListExtract (&g_TapAdapterList, l_Adapter);
 
+  DEBUGP (("[%s] is being halted\n", l_Adapter->m_Name));
+  l_Adapter->m_InterfaceIsRunning = FALSE;
+  NOTE_ERROR (l_Adapter);
+
+  // Close TAP device
   if (l_Adapter->m_TapDevice)
+    DestroyTapDevice (l_Adapter);
+
+  // Free resources
+  DEBUGP (("[%s] Freeing Resources\n", l_Adapter->m_Name));
+  AdapterFreeResources (l_Adapter);
+}
+
+VOID
+AdapterFreeResources (TapAdapterPointer p_Adapter)
+{
+  MYASSERT (!p_Adapter->m_CalledAdapterFreeResources);
+  p_Adapter->m_CalledAdapterFreeResources = TRUE;
+
+  if (p_Adapter->m_Name)
     {
-      DestroyTapDevice (l_Adapter);
+      ExFreePool (p_Adapter->m_Name);
+      p_Adapter->m_Name = NULL;
     }
 
-  DbgPrint ("[%s] is being deregistered\n", l_Adapter->m_Name);
-
-  if (l_Adapter->m_Name)
+  if (p_Adapter->m_AllocatedSpinlocks)
     {
-      ExFreePool (l_Adapter->m_Name);
-      l_Adapter->m_Name = 0;
+      NdisFreeSpinLock (&p_Adapter->m_Lock);
+      NdisFreeSpinLock (&p_Adapter->m_QueueLock);
+      p_Adapter->m_AllocatedSpinlocks = FALSE;
     }
 
-  NdisMDeregisterAdapterShutdownHandler (l_Adapter->m_MiniportAdapterHandle);
-  NdisFreeMemory ((PVOID) l_Adapter, sizeof (TapAdapter), 0);
+  if (p_Adapter->m_RegisteredAdapterShutdownHandler)
+    {
+      NdisMDeregisterAdapterShutdownHandler
+        (p_Adapter->m_MiniportAdapterHandle);
+      p_Adapter->m_RegisteredAdapterShutdownHandler = FALSE;
+    }
+
+  NdisZeroMemory ((PVOID) p_Adapter, sizeof (TapAdapter));
+  NdisFreeMemory ((PVOID) p_Adapter, sizeof (TapAdapter), 0);
 }
 
 //========================================================================
@@ -352,27 +479,46 @@ CreateTapDevice (TapAdapterPointer p_Adapter)
   ANSI_STRING l_TapString, l_LinkString;
   TapExtensionPointer l_Extension;
   UNICODE_STRING l_TapUnicode;
-  NTSTATUS l_Status;
+  BOOLEAN l_FreeTapUnicode = FALSE;
+  NTSTATUS l_Status, l_Return = NDIS_STATUS_SUCCESS;
+
+  l_LinkString.Buffer = NULL;
 
   l_TapString.MaximumLength = l_LinkString.MaximumLength =
     l_AdapterLength + strlen (TAPSUFFIX);
 
-  DbgPrint ("[%s] Creating tap device\n", p_Adapter->m_Name);
+  DEBUGP (("[TAP] version [%d.%d] creating tap device: %s\n",
+	   TAP_DRIVER_MAJOR_VERSION,
+	   TAP_DRIVER_MINOR_VERSION,
+	   p_Adapter->m_Name));
+
+  //==================================
+  // Allocate pool for TAP device name
+  //==================================
 
   if ((p_Adapter->m_TapName = l_TapString.Buffer =
-       ExAllocatePool (NonPagedPool, l_TapString.MaximumLength)) == NULL)
+       ExAllocatePoolWithTag (NonPagedPool,
+			      l_TapString.MaximumLength,
+			      '3PAT')) == NULL)
     {
-      DbgPrint ("[%s] couldn't alloc TAP name buffer\n", p_Adapter->m_Name);
-      return NDIS_STATUS_RESOURCES;
+      DEBUGP (("[%s] couldn't alloc TAP name buffer\n", p_Adapter->m_Name));
+      l_Return = NDIS_STATUS_RESOURCES;
+      goto cleanup;
     }
-  else
-    if ((l_LinkString.Buffer =
-	 ExAllocatePool (NonPagedPool, l_LinkString.MaximumLength)) == NULL)
+
+  //================================================
+  // Allocate pool for TAP symbolic link name buffer
+  //================================================
+
+  if ((l_LinkString.Buffer =
+       ExAllocatePoolWithTag (NonPagedPool,
+			      l_LinkString.MaximumLength,
+			      '4PAT')) == NULL)
     {
-      DbgPrint ("[%s] couldn't alloc TAP symbolic link name buffer\n",
-		p_Adapter->m_Name);
-      ExFreePool (p_Adapter->m_TapName);
-      return NDIS_STATUS_RESOURCES;
+      DEBUGP (("[%s] couldn't alloc TAP symbolic link name buffer\n",
+	       p_Adapter->m_Name));
+      l_Return = NDIS_STATUS_RESOURCES;
+      goto cleanup;
     }
 
   //=======================================================
@@ -406,12 +552,12 @@ CreateTapDevice (TapAdapterPointer p_Adapter)
   if (RtlAnsiStringToUnicodeString (&l_TapUnicode, &l_TapString, TRUE) !=
       STATUS_SUCCESS)
     {
-      DbgPrint ("[%s] couldn't alloc TAP unicode name buffer\n",
-		p_Adapter->m_Name);
-      ExFreePool (l_LinkString.Buffer);
-      ExFreePool (p_Adapter->m_TapName);
-      return NDIS_STATUS_RESOURCES;
+      DEBUGP (("[%s] couldn't alloc TAP unicode name buffer\n",
+		p_Adapter->m_Name));
+      l_Return = NDIS_STATUS_RESOURCES;
+      goto cleanup;
     }
+  l_FreeTapUnicode = TRUE;
 
   l_Status = IoCreateDevice
     (g_TapDriverObject,
@@ -422,25 +568,22 @@ CreateTapDevice (TapAdapterPointer p_Adapter)
 
   if (l_Status != STATUS_SUCCESS)
     {
-      DbgPrint ("[%s] couldn't be created\n", p_Adapter->m_TapName);
-      RtlFreeUnicodeString (&l_TapUnicode);
-      ExFreePool (l_LinkString.Buffer);
-      ExFreePool (p_Adapter->m_TapName);
-      return NDIS_STATUS_RESOURCES;
+      DEBUGP (("[%s] couldn't be created\n", p_Adapter->m_TapName));
+      l_Return = NDIS_STATUS_RESOURCES;
+      goto cleanup;
     }
 
   if (RtlAnsiStringToUnicodeString
-      (&p_Adapter->m_UnicodeLinkName, &l_LinkString, TRUE) != STATUS_SUCCESS)
+      (&p_Adapter->m_UnicodeLinkName, &l_LinkString, TRUE)
+      != STATUS_SUCCESS)
     {
-      DbgPrint
-	("[%s] Couldn't allocate unicode string for symbolic link name\n",
-	 p_Adapter->m_Name);
-      IoDeleteDevice (p_Adapter->m_TapDevice);
-      RtlFreeUnicodeString (&l_TapUnicode);
-      ExFreePool (l_LinkString.Buffer);
-      ExFreePool (p_Adapter->m_TapName);
-      return NDIS_STATUS_RESOURCES;
+      DEBUGP
+	(("[%s] Couldn't allocate unicode string for symbolic link name\n",
+	 p_Adapter->m_Name));
+      l_Return = NDIS_STATUS_RESOURCES;
+      goto cleanup;
     }
+  p_Adapter->m_CreatedUnicodeLinkName = TRUE;
 
   //==================================================
   // Associate symbolic link with new device
@@ -448,38 +591,83 @@ CreateTapDevice (TapAdapterPointer p_Adapter)
   if (!NT_SUCCESS
       (IoCreateSymbolicLink (&p_Adapter->m_UnicodeLinkName, &l_TapUnicode)))
     {
-      DbgPrint ("[%s] symbolic link couldn't be created\n",
-		l_LinkString.Buffer);
-      IoDeleteDevice (p_Adapter->m_TapDevice);
-      RtlFreeUnicodeString (&p_Adapter->m_UnicodeLinkName);
-      RtlFreeUnicodeString (&l_TapUnicode);
-      ExFreePool (l_LinkString.Buffer);
-      ExFreePool (p_Adapter->m_TapName);
-      return NDIS_STATUS_RESOURCES;
+      DEBUGP (("[%s] symbolic link couldn't be created\n",
+		l_LinkString.Buffer));
+      l_Return = NDIS_STATUS_RESOURCES;
+      goto cleanup;
     }
+  p_Adapter->m_CreatedSymbolLink = TRUE;
+
+  //==================================================
+  // Initialize device extension (basically a kind
+  // of private data area containing our state info).
+  //==================================================
 
   l_Extension =
     ((TapExtensionPointer) p_Adapter->m_TapDevice->DeviceExtension);
 
   NdisZeroMemory (l_Extension, sizeof (TapExtension));
 
-  ListActivate (&l_Extension->m_PacketQueue, PACKET_QUEUE_SIZE);
-  ListActivate (&l_Extension->m_IrpQueue, IRP_QUEUE_SIZE);
+  p_Adapter->m_DeviceExtensionIsAccessible = TRUE;
 
   l_Extension->m_Adapter = p_Adapter;
+  l_Extension->m_halt = FALSE;
 
-  p_Adapter->m_TapDevice->Flags &= ~DO_DEVICE_INITIALIZING;
-  p_Adapter->m_TapDevice->Flags |= DO_DIRECT_IO; /* instead of DO_BUFFERED_IO */
+  //========================================================
+  // Initialize Packet and IRP queues.
+  //
+  // The packet queue is used to buffer data which has been
+  // "transmitted" by the virtual NIC, before user space
+  // has had a chance to read it.
+  //
+  // The IRP queue is used to buffer pending I/O requests
+  // from userspace, i.e. read requests on the TAP device
+  // waiting for the system to "transmit" something through
+  // the virtual NIC.
+  //
+  // Basically, packets in the packet queue are used
+  // to satisfy IRP requests in the IRP queue.
+  //
+  // All accesses to packet or IRP queues should be
+  // bracketed by the QueueLock spinlock,
+  // in order to be SMP-safe.
+  //========================================================
 
-  RtlFreeUnicodeString (&l_TapUnicode);
-  ExFreePool (l_LinkString.Buffer);
+  l_Extension->m_PacketQueue = QueueInit (PACKET_QUEUE_SIZE);
+  l_Extension->m_IrpQueue = QueueInit (IRP_QUEUE_SIZE);
 
-  DbgPrint ("[%s] successfully created TAP device [%s]\n", p_Adapter->m_Name,
-	    p_Adapter->m_TapName);
+  if (!l_Extension->m_PacketQueue
+      || !l_Extension->m_IrpQueue)
+    {
+      DEBUGP (("[%s] couldn't alloc TAP queues\n", p_Adapter->m_Name));
+      l_Return = NDIS_STATUS_RESOURCES;
+      goto cleanup;
+    }
+
+  //========================
+  // Finalize initialization
+  //========================
 
   p_Adapter->m_TapIsRunning = TRUE;
 
-  return NDIS_STATUS_SUCCESS;
+  /* instead of DO_BUFFERED_IO */
+  p_Adapter->m_TapDevice->Flags |= DO_DIRECT_IO;
+
+  p_Adapter->m_TapDevice->Flags &= ~DO_DEVICE_INITIALIZING;
+
+  DEBUGP (("[%s] successfully created TAP device [%s]\n", p_Adapter->m_Name,
+	    p_Adapter->m_TapName));
+
+ cleanup:
+  if (l_FreeTapUnicode)
+    RtlFreeUnicodeString (&l_TapUnicode);
+  if (l_LinkString.Buffer)
+    ExFreePool (l_LinkString.Buffer);
+
+  if (l_Return != NDIS_STATUS_SUCCESS)
+    TapDeviceFreeResources (p_Adapter);
+
+  return l_Return;
 }
 
 VOID
@@ -487,53 +675,94 @@ DestroyTapDevice (TapAdapterPointer p_Adapter)
 {
   TapExtensionPointer l_Extension =
     (TapExtensionPointer) p_Adapter->m_TapDevice->DeviceExtension;
-  TapPacketPointer l_PacketBuffer;
-  PIRP l_IRP;
 
-  DbgPrint ("[%s] Destroying tap device\n", p_Adapter->m_TapName);
+  DEBUGP (("[%s] Destroying tap device\n", p_Adapter->m_TapName));
 
+  //======================================
+  // Let clients know we are shutting down
+  //======================================
   p_Adapter->m_TapIsRunning = FALSE;
   p_Adapter->m_TapOpens = 0;
+  l_Extension->m_halt = TRUE;
 
-  while (QueueCount (&l_Extension->m_IrpQueue))
-    if (l_IRP = QueuePop (&l_Extension->m_IrpQueue))
-      {
-	CancelIRP (p_Adapter->m_TapDevice, l_IRP);
-      }
+  //====================================
+  // Give clients time to finish up.
+  // Note that we must be running at IRQL
+  // < DISPATCH_LEVEL in order to call
+  // NdisMSleep.
+  //====================================
+  NdisMSleep (1000);        
 
-  while (QueueCount (&l_Extension->m_PacketQueue))
-    if (l_PacketBuffer = QueuePop (&l_Extension->m_PacketQueue))
-      {
-	MemFree (l_PacketBuffer, sizeof (TapPacket) + l_PacketBuffer->m_Size);
-      }
+  //================================
+  // Exhaust IRP and packet queues
+  //================================
+  FlushQueues (p_Adapter);
 
-  ListDeactivate (&l_Extension->m_PacketQueue);
-  ListDeactivate (&l_Extension->m_IrpQueue);
-  IoDeleteSymbolicLink (&p_Adapter->m_UnicodeLinkName);
-  RtlFreeUnicodeString (&p_Adapter->m_UnicodeLinkName);
-  IoDeleteDevice (p_Adapter->m_TapDevice);
-  ExFreePool (p_Adapter->m_TapName);
-  p_Adapter->m_TapDevice = 0;
-  p_Adapter->m_TapName = 0;
+  TapDeviceFreeResources (p_Adapter);
 }
 
-//====================================================================
-//                                    Adapter Control
-//====================================================================
+VOID
+TapDeviceFreeResources (TapAdapterPointer p_Adapter)
+{
+  MYASSERT (p_Adapter);
+  MYASSERT (!p_Adapter->m_CalledTapDeviceFreeResources);
+  p_Adapter->m_CalledTapDeviceFreeResources = TRUE;
+
+  if (p_Adapter->m_DeviceExtensionIsAccessible)
+    {
+      TapExtensionPointer l_Extension;
+
+      MYASSERT (p_Adapter->m_TapDevice);
+      l_Extension = (TapExtensionPointer)
+	p_Adapter->m_TapDevice->DeviceExtension;
+      MYASSERT (l_Extension);
+
+      if (l_Extension->m_PacketQueue)
+	QueueFree (l_Extension->m_PacketQueue);
+      if (l_Extension->m_IrpQueue)
+	QueueFree (l_Extension->m_IrpQueue);
+
+      p_Adapter->m_DeviceExtensionIsAccessible = FALSE;
+    }
+
+  if (p_Adapter->m_CreatedSymbolLink)
+    IoDeleteSymbolicLink (&p_Adapter->m_UnicodeLinkName);
+
+  if (p_Adapter->m_CreatedUnicodeLinkName)
+    RtlFreeUnicodeString (&p_Adapter->m_UnicodeLinkName);
+
+  //==========================================================
+  // According to DDK docs, the device is not actually deleted
+  // until its reference count falls to zero.  That means we
+  // still need to gracefully fail TapDeviceHook requests
+  // after this point, otherwise ugly things would happen if
+  // the device was disabled (e.g. in the network connections
+  // control panel) while a userspace app still held an open
+  // file handle to it.
+  //==========================================================
+  
+  if (p_Adapter->m_TapDevice)
+    {
+      IoDeleteDevice (p_Adapter->m_TapDevice);
+      p_Adapter->m_TapDevice = NULL;
+    }
+
+  if (p_Adapter->m_TapName)
+    {
+      ExFreePool (p_Adapter->m_TapName);
+      p_Adapter->m_TapName = NULL;
+    }
+}
+
+//========================================================
+//                      Adapter Control
+//========================================================
 NDIS_STATUS
 AdapterReset (OUT PBOOLEAN p_AddressingReset, IN NDIS_HANDLE p_AdapterContext)
 {
   TapAdapterPointer l_Adapter = (TapAdapterPointer) p_AdapterContext;
-  DbgPrint ("[%s] is resetting\n", l_Adapter->m_Name);
+  DEBUGP (("[%s] is resetting\n", l_Adapter->m_Name));
   return NDIS_STATUS_SUCCESS;
-}
-
-VOID
-AdapterStop (IN NDIS_HANDLE p_AdapterContext)
-{
-  TapAdapterPointer l_Adapter = (TapAdapterPointer) p_AdapterContext;
-  DbgPrint ("[%s] is stopping\n", l_Adapter->m_Name);
-  l_Adapter->m_InterfaceIsRunning = FALSE;
 }
 
 NDIS_STATUS AdapterReceive
@@ -545,9 +774,9 @@ NDIS_STATUS AdapterReceive
   return NDIS_STATUS_SUCCESS;
 }
 
-//==========================================================================
-//                            Adapter Option Query/Modification
-//==========================================================================
+//==============================================================
+//                  Adapter Option Query/Modification
+//==============================================================
 NDIS_STATUS AdapterQuery
   (IN NDIS_HANDLE p_AdapterContext,
    IN NDIS_OID p_OID,
@@ -635,9 +864,10 @@ NDIS_STATUS AdapterQuery
 
     case OID_GEN_MAC_OPTIONS:
       // This MUST be here !!!
-      l_Query.m_Long = (NDIS_MAC_OPTION_RECEIVE_SERIALIZED | NDIS_MAC_OPTION_COPY_LOOKAHEAD_DATA |
-			NDIS_MAC_OPTION_NO_LOOPBACK |
-			NDIS_MAC_OPTION_TRANSFERS_NOT_PEND);
+      l_Query.m_Long = (NDIS_MAC_OPTION_RECEIVE_SERIALIZED
+			| NDIS_MAC_OPTION_COPY_LOOKAHEAD_DATA
+			| NDIS_MAC_OPTION_NO_LOOPBACK
+			| NDIS_MAC_OPTION_TRANSFERS_NOT_PEND);
 
       break;
 
@@ -683,8 +913,8 @@ NDIS_STATUS AdapterQuery
 
     case OID_802_3_PERMANENT_ADDRESS:
     case OID_802_3_CURRENT_ADDRESS:
-      memcpy (l_Query.m_MacAddress, l_Adapter->m_MAC, 6);
-      l_QueryLength = 6;
+      COPY_MAC (l_Query.m_MacAddress, l_Adapter->m_MAC);
+      l_QueryLength = sizeof (MACADDR);
       break;
 
       //==================================================================
@@ -773,7 +1003,7 @@ NDIS_STATUS AdapterQuery
       //                          Not Handled
       //===================================================================
     default:
-      DbgPrint ("[%s] Unhandled OID %lx\n", l_Adapter->m_Name, p_OID);
+      DEBUGP (("[%s] Unhandled OID %lx\n", l_Adapter->m_Name, p_OID));
       l_Status = NDIS_STATUS_INVALID_OID;
       break;
     }
@@ -798,7 +1028,9 @@ NDIS_STATUS AdapterModify
   (IN NDIS_HANDLE p_AdapterContext,
    IN NDIS_OID p_OID,
    IN PVOID p_Buffer,
-   IN ULONG p_BufferLength, OUT PULONG p_BytesRead, OUT PULONG p_BytesNeeded)
+   IN ULONG p_BufferLength,
+   OUT PULONG p_BytesRead,
+   OUT PULONG p_BytesNeeded)
 {
   TapAdapterQueryPointer l_Query = (TapAdapterQueryPointer) p_Buffer;
   TapAdapterPointer l_Adapter = (TapAdapterPointer) p_AdapterContext;
@@ -813,8 +1045,8 @@ NDIS_STATUS AdapterModify
       //                            Device Info
       //==================================================================
     case OID_802_3_MULTICAST_LIST:
-      DbgPrint ("[%s] Setting [OID_802_3_MAXIMUM_LIST_SIZE]\n",
-		l_Adapter->m_Name);
+      DEBUGP (("[%s] Setting [OID_802_3_MAXIMUM_LIST_SIZE]\n",
+		l_Adapter->m_Name));
       l_Status = NDIS_STATUS_SUCCESS;
       break;
 
@@ -824,9 +1056,9 @@ NDIS_STATUS AdapterModify
 
       if (p_BufferLength >= sizeof (ULONG))
 	{
-	  DbgPrint
-	    ("[%s] Setting [OID_GEN_CURRENT_PACKET_FILTER] to [0x%02lx]\n",
-	     l_Adapter->m_Name, l_Query->m_Long);
+	  DEBUGP
+	    (("[%s] Setting [OID_GEN_CURRENT_PACKET_FILTER] to [0x%02lx]\n",
+	     l_Adapter->m_Name, l_Query->m_Long));
 	  l_Status = NDIS_STATUS_SUCCESS;
 	  *p_BytesRead = sizeof (ULONG);
 	}
@@ -844,8 +1076,8 @@ NDIS_STATUS AdapterModify
 	l_Status = NDIS_STATUS_INVALID_DATA;
       else
 	{
-	  DbgPrint ("[%s] Setting [OID_GEN_CURRENT_LOOKAHEAD] to [%d]\n",
-		    l_Adapter->m_Name, l_Query->m_Long);
+	  DEBUGP (("[%s] Setting [OID_GEN_CURRENT_LOOKAHEAD] to [%d]\n",
+		    l_Adapter->m_Name, l_Query->m_Long));
 	  l_Adapter->m_Lookahead = l_Query->m_Long;
 	  l_Status = NDIS_STATUS_SUCCESS;
 	  *p_BytesRead = sizeof (ULONG);
@@ -870,6 +1102,25 @@ NDIS_STATUS AdapterModify
 
 	  NewDeviceState = (*(PNDIS_DEVICE_POWER_STATE) p_Buffer);
 
+	  switch (NewDeviceState)
+	    {
+	    case NdisDeviceStateD0:
+	      l_Adapter->m_DeviceState = '0';
+	      break;
+	    case NdisDeviceStateD1:
+	      l_Adapter->m_DeviceState = '1';
+	      break;
+	    case NdisDeviceStateD2:
+	      l_Adapter->m_DeviceState = '2';
+	      break;
+	    case NdisDeviceStateD3:
+	      l_Adapter->m_DeviceState = '3';
+	      break;
+	    default:
+	      l_Adapter->m_DeviceState = '?';
+	      break;
+	    }
+
 	  l_Status = NDIS_STATUS_FAILURE;
 
 	  //
@@ -881,14 +1132,17 @@ NDIS_STATUS AdapterModify
 	      break;
 	    }
 
-	  //
 	  if (NewDeviceState > NdisDeviceStateD0)
 	    {
 	      l_Adapter->m_InterfaceIsRunning = FALSE;
+	      DEBUGP (("[%s] Power management device state OFF\n",
+		       l_Adapter->m_Name));
 	    }
 	  else
 	    {
 	      l_Adapter->m_InterfaceIsRunning = TRUE;
+	      DEBUGP (("[%s] Power management device state ON\n",
+		       l_Adapter->m_Name));
 	    }
 
 	  l_Status = NDIS_STATUS_SUCCESS;
@@ -914,8 +1168,8 @@ NDIS_STATUS AdapterModify
       break;
 
     default:
-      DbgPrint ("[%s] Can't set value for OID %lx\n", l_Adapter->m_Name,
-		p_OID);
+      DEBUGP (("[%s] Can't set value for OID %lx\n", l_Adapter->m_Name,
+		p_OID));
       l_Status = NDIS_STATUS_INVALID_OID;
       *p_BytesRead = *p_BytesNeeded = 0;
       break;
@@ -933,15 +1187,14 @@ NDIS_STATUS
 AdapterTransmit (IN NDIS_HANDLE p_AdapterContext, IN PNDIS_PACKET p_Packet,
 		 IN UINT p_Flags)
 {
-  static NDIS_PHYSICAL_ADDRESS l_HighestAcceptableMax =
-    NDIS_PHYSICAL_ADDRESS_CONST (-1, -1);
   TapAdapterPointer l_Adapter = (TapAdapterPointer) p_AdapterContext;
   ULONG l_Index = 0, l_BufferLength = 0, l_PacketLength = 0;
-  TapPacketPointer l_PacketBuffer, l_Throwaway;
+  PIRP l_IRP;
+  TapPacketPointer l_PacketBuffer;
   TapExtensionPointer l_Extension;
   PNDIS_BUFFER l_NDIS_Buffer;
   PUCHAR l_Buffer;
-  KIRQL OldIrql;
+  PVOID result;
 
   NdisQueryPacket (p_Packet, NULL, NULL, &l_NDIS_Buffer, &l_PacketLength);
 
@@ -954,10 +1207,9 @@ AdapterTransmit (IN NDIS_HANDLE p_AdapterContext, IN PNDIS_PACKET p_Packet,
 
   if (l_Adapter->m_TapDevice == NULL)
     return NDIS_STATUS_FAILURE;
-  else
-    if ((l_Extension =
-	 (TapExtensionPointer) l_Adapter->m_TapDevice->DeviceExtension) ==
-	NULL)
+  else if ((l_Extension =
+	    (TapExtensionPointer) l_Adapter->m_TapDevice->DeviceExtension) ==
+	   NULL)
     return NDIS_STATUS_FAILURE;
   else if (l_PacketLength < ETHERNET_HEADER_SIZE)
     return NDIS_STATUS_FAILURE;
@@ -966,21 +1218,20 @@ AdapterTransmit (IN NDIS_HANDLE p_AdapterContext, IN PNDIS_PACKET p_Packet,
   else if (!l_Adapter->m_TapOpens)	// Nothing is bound to the TAP device
     return NDIS_STATUS_SUCCESS;
 
-  if (NdisAllocateMemory (&l_PacketBuffer,
-			  sizeof (TapPacket) + l_PacketLength, 0,
-			  l_HighestAcceptableMax) != NDIS_STATUS_SUCCESS)
+  if (NdisAllocateMemoryWithTag (&l_PacketBuffer,
+				 TAP_PACKET_SIZE (l_PacketLength),
+				 '5PAT') != NDIS_STATUS_SUCCESS)
     return NDIS_STATUS_RESOURCES;
 
   if (l_PacketBuffer == NULL)
     return NDIS_STATUS_RESOURCES;
 
-  NdisZeroMemory (l_PacketBuffer, sizeof (TapPacket) + l_PacketLength);	// necessary?
-
-  l_PacketBuffer->m_Size = l_PacketLength;
+  l_PacketBuffer->m_SizeFlags = (l_PacketLength & TP_SIZE_MASK);
 
   //===========================
   // Reassemble packet contents
   //===========================
+
   __try
   {
     for (l_Index = 0; l_NDIS_Buffer && l_Index < l_PacketLength;
@@ -992,66 +1243,127 @@ AdapterTransmit (IN NDIS_HANDLE p_AdapterContext, IN PNDIS_PACKET p_Packet,
 			l_BufferLength);
 	NdisGetNextBuffer (l_NDIS_Buffer, &l_NDIS_Buffer);
       }
-  }
-  __except (EXCEPTION_EXECUTE_HANDLER)
-  {
-  }
 
-  KeRaiseIrql (DISPATCH_LEVEL, &OldIrql);
+    DEBUG_PACKET ("AdapterTransmit", l_PacketBuffer->m_Data, l_PacketLength);
 
-  __try
-  {
-    if (QueuePush (&l_Extension->m_PacketQueue, l_PacketBuffer) !=
-	l_PacketBuffer)
-      switch (OVERWRITE_OLD_PACKETS)
-	{
-	  //******************** ALERT ************************
-	  // If the oldest packet is discarded when a new queue
-	  // insertion is attempted, the usermode thread may
-	  // get a packet whose contents are partially invalid
-	  // I.E. the packet gets deleted while the usermode
-	  // thread is trying to fetch it
-	  //******************** ALERT ************************
-	case TRUE:		// Try to throw away oldest packet
+    //===============================================
+    // In Point-To-Point mode, check to see whether
+    // packet is ARP or IPv4 (if neither, then drop).
+    //===============================================
+    if (l_Adapter->m_PointToPoint)
+      {
+	ETH_HEADER *e;
+
+	if (l_PacketLength < ETHERNET_HEADER_SIZE)
+	  goto no_queue;
+
+	e = (ETH_HEADER *) l_PacketBuffer->m_Data;
+
+	switch (ntohs (e->proto))
 	  {
-	    if (l_Throwaway = QueuePop (&l_Extension->m_PacketQueue))
-	      {
-		NdisFreeMemory (l_Throwaway,
-				sizeof (TapPacket) + l_Throwaway->m_Size, 0);
-	      }
+	  case ETH_P_ARP:
 
-	    if (QueuePush (&l_Extension->m_PacketQueue, l_PacketBuffer) !=
-		l_PacketBuffer)
-	      {
-		NdisFreeMemory (l_PacketBuffer,
-				sizeof (TapPacket) + l_PacketBuffer->m_Size,
-				0);
-	      }
+	    // Make sure that packet is the
+	    // right size for ARP.
+	    if (l_PacketLength != sizeof (ARP_PACKET))
+	      goto no_queue;
 
-	    break;
+	    ProcessARP (l_Adapter, (PARP_PACKET) l_PacketBuffer->m_Data);
+
+	  default:
+	    goto no_queue;
+
+	  case ETH_P_IP:
+
+	    // Make sure that packet is large
+	    // enough to be IPv4.
+	    if (l_PacketLength
+		< ETHERNET_HEADER_SIZE + IP_HEADER_SIZE)
+	      goto no_queue;
+
+	    // Only accept directed packets,
+	    // not broadcasts.
+	    if (memcmp (e, &l_Adapter->m_TapToUser, ETHERNET_HEADER_SIZE))
+	      goto no_queue;
+
+	    // Packet looks like IPv4, queue it.
+	    l_PacketBuffer->m_SizeFlags |= TP_POINT_TO_POINT;
+	  }
+      }
+
+    //===============================================
+    // Push packet onto queue to wait for read from
+    // userspace.
+    //===============================================
+
+    NdisAcquireSpinLock (&l_Adapter->m_QueueLock);
+
+    result = NULL;
+    if (IS_UP (l_Adapter))
+      result = QueuePush (l_Extension->m_PacketQueue, l_PacketBuffer);
+
+    NdisReleaseSpinLock (&l_Adapter->m_QueueLock);
+
+    if ((TapPacketPointer) result != l_PacketBuffer)
+      {
+	// adapter receive overrun
+#ifndef NEED_TAP_IOCTL_SET_STATISTICS
+	INCREMENT_STAT (l_Adapter->m_TxErr);
+#endif
+	goto no_queue;
+      }
+#ifndef NEED_TAP_IOCTL_SET_STATISTICS
+    else
+      {
+	INCREMENT_STAT (l_Adapter->m_Tx);
+      }
+#endif
+
+    //============================================================
+    // Cycle through IRPs and packets, try to satisfy each pending
+    // IRP with a queued packet.
+    //============================================================
+    while (TRUE)
+      {
+	l_IRP = NULL;
+	l_PacketBuffer = NULL;
+
+	NdisAcquireSpinLock (&l_Adapter->m_QueueLock);
+
+	if (IS_UP (l_Adapter)
+	    && QueueCount (l_Extension->m_PacketQueue)
+	    && QueueCount (l_Extension->m_IrpQueue))
+	  {
+	    l_IRP = (PIRP) QueuePop (l_Extension->m_IrpQueue);
+	    l_PacketBuffer = (TapPacketPointer)
+	      QueuePop (l_Extension->m_PacketQueue);
 	  }
 
-	case FALSE:
+	NdisReleaseSpinLock (&l_Adapter->m_QueueLock);
+
+	MYASSERT ((l_IRP != NULL) + (l_PacketBuffer != NULL) != 1);
+
+	if (l_IRP && l_PacketBuffer)
 	  {
-	    NdisFreeMemory (l_PacketBuffer,
-			    sizeof (TapPacket) + l_PacketBuffer->m_Size, 0);
-	    break;
+	    CompleteIRP (l_Adapter,
+			 l_IRP,
+			 l_PacketBuffer, 
+			 IO_NETWORK_INCREMENT);
 	  }
-	}
+	else
+	  break;
+      }
   }
   __except (EXCEPTION_EXECUTE_HANDLER)
-  {
-  }
-
-  while (QueueCount (&l_Extension->m_PacketQueue)
-	 && QueueCount (&l_Extension->m_IrpQueue))
     {
-      CompleteIRP (l_Adapter, QueuePop (&l_Extension->m_IrpQueue),
-		   l_Extension, IO_NETWORK_INCREMENT);
     }
 
-  KeLowerIrql (OldIrql);
+  return NDIS_STATUS_SUCCESS;
 
+ no_queue:
+  NdisFreeMemory (l_PacketBuffer,
+		  TAP_PACKET_SIZE (l_PacketLength),
+		  0);
   return NDIS_STATUS_SUCCESS;
 }
 
@@ -1062,48 +1374,143 @@ AdapterTransmit (IN NDIS_HANDLE p_AdapterContext, IN PNDIS_PACKET p_Packet,
 NTSTATUS
 TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 {
-  PIO_STACK_LOCATION l_IrpSp = IoGetCurrentIrpStackLocation (p_IRP);
+  PIO_STACK_LOCATION l_IrpSp;
   TapExtensionPointer l_Extension;
   NTSTATUS l_Status = STATUS_SUCCESS;
-  TapPacketPointer l_PacketBuffer;
   TapAdapterPointer l_Adapter;
 
   //=======================================================================
   //  If it's not the private data device type, call the original handler
   //=======================================================================
+  l_IrpSp = IoGetCurrentIrpStackLocation (p_IRP);
   if (p_DeviceObject->DeviceType != (FILE_DEVICE_PHYSICAL_NETCARD | 0x8000))
     {
       return (*g_DispatchHook[l_IrpSp->MajorFunction]) (p_DeviceObject,
 							p_IRP);
     }
 
-  //=======================================================================
+  //=============================================================
   //     Only TAP device I/O requests get handled below here
-  //=======================================================================
+  //=============================================================
   l_Extension = (TapExtensionPointer) p_DeviceObject->DeviceExtension;
   l_Adapter = l_Extension->m_Adapter;
 
   p_IRP->IoStatus.Status = STATUS_SUCCESS;
   p_IRP->IoStatus.Information = 0;
 
+  if (l_Extension->m_halt)
+    {
+      DEBUGP (("TapDeviceHook called when TAP device is halted\n"));
+      p_IRP->IoStatus.Status = STATUS_NO_SUCH_DEVICE;
+      IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
+      return STATUS_NO_SUCH_DEVICE;
+    }
+
   switch (l_IrpSp->MajorFunction)
     {
-      //-----------------------------------------------------------
+      //===========================================================
       //                 Ioctl call handlers
-      //-----------------------------------------------------------
+      //===========================================================
     case IRP_MJ_DEVICE_CONTROL:
       {
 	switch (l_IrpSp->Parameters.DeviceIoControl.IoControlCode)
 	  {
 	  case TAP_IOCTL_GET_MAC:
 	    {
-	      if (l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength >=
-		  sizeof (g_MAC))
+	      if (l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength
+		  >= sizeof (MACADDR))
 		{
-		  NdisMoveMemory (p_IRP->AssociatedIrp.SystemBuffer,
-				  l_Adapter->m_MAC, sizeof (g_MAC));
-		  p_IRP->IoStatus.Information = sizeof (g_MAC);
+		  COPY_MAC (p_IRP->AssociatedIrp.SystemBuffer,
+			    l_Adapter->m_MAC);
+		  p_IRP->IoStatus.Information = sizeof (MACADDR);
 		}
+	      else
+		{
+		  p_IRP->IoStatus.Status = l_Status = STATUS_BUFFER_TOO_SMALL;
+		}
+	      break;
+	    }
+	  case TAP_IOCTL_GET_VERSION:
+	    {
+	      const ULONG size = sizeof (ULONG) * 3;
+	      if (l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength
+		  >= size)
+		{
+		  ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[0]
+		    = TAP_DRIVER_MAJOR_VERSION;
+		  ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[1]
+		    = TAP_DRIVER_MINOR_VERSION;
+		  ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[2]
+#if DBG
+		    = 1;
+#else
+		    = 0;
+#endif
+		  p_IRP->IoStatus.Information = size;
+		}
+	      else
+		{
+		  p_IRP->IoStatus.Status = l_Status = STATUS_BUFFER_TOO_SMALL;
+		}
+
+	      break;
+	    }
+	  case TAP_IOCTL_GET_MTU:
+	    {
+	      const ULONG size = sizeof (ULONG) * 1;
+	      if (l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength
+		  >= size)
+		{
+		  ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[0]
+		    = l_Adapter->m_MTU;
+		  p_IRP->IoStatus.Information = size;
+		}
+	      else
+		{
+		  p_IRP->IoStatus.Status = l_Status = STATUS_BUFFER_TOO_SMALL;
+		}
+
+	      break;
+	    }
+	  case TAP_IOCTL_GET_INFO:
+	    {
+	      char state[4];
+	      if (l_Adapter->m_InterfaceIsRunning)
+		state[0] = 'A';
+	      else
+		state[0] = 'a';
+	      if (l_Adapter->m_TapIsRunning)
+		state[1] = 'T';
+	      else
+		state[1] = 't';
+	      state[2] = l_Adapter->m_DeviceState;
+	      state[3] = '\0';
+
+	      p_IRP->IoStatus.Status = l_Status = RtlStringCchPrintfExA (
+	        ((LPTSTR) (p_IRP->AssociatedIrp.SystemBuffer)),
+		l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength,
+		NULL,
+		NULL,
+		STRSAFE_FILL_BEHIND_NULL | STRSAFE_IGNORE_NULLS,
+		"State=%s Err=[%s/%d] #O=%d Tx=[%d,%d] Rx=[%d,%d] IrpQ=[%d,%d,%d] PktQ=[%d,%d,%d]",
+		state,
+		l_Adapter->m_LastErrorFilename,
+		l_Adapter->m_LastErrorLineNumber,
+		(int)l_Adapter->m_NumTapOpens,
+		(int)l_Adapter->m_Tx,
+		(int)l_Adapter->m_TxErr,
+		(int)l_Adapter->m_Rx,
+		(int)l_Adapter->m_RxErr,
+		(int)l_Extension->m_IrpQueue->size,
+		(int)l_Extension->m_IrpQueue->max_size,
+		(int)IRP_QUEUE_SIZE,
+		(int)l_Extension->m_PacketQueue->size,
+		(int)l_Extension->m_PacketQueue->max_size,
+		(int)PACKET_QUEUE_SIZE
+		);
+
+	      p_IRP->IoStatus.Information
+		= l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength;
 
 	      break;
 	    }
@@ -1112,11 +1519,14 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 	  case TAP_IOCTL_GET_LASTMAC:
 	    {
 	      if (l_IrpSp->Parameters.DeviceIoControl.OutputBufferLength >=
-		  sizeof (g_MAC))
+		  sizeof (MACADDR))
 		{
-		  NdisMoveMemory (p_IRP->AssociatedIrp.SystemBuffer, g_MAC,
-				  sizeof (g_MAC));
-		  p_IRP->IoStatus.Information = sizeof (g_MAC);
+		  COPY_MAC (p_IRP->AssociatedIrp.SystemBuffer, g_MAC);
+		  p_IRP->IoStatus.Information = sizeof (MACADDR);
+		}
+	      else
+		{
+		  p_IRP->IoStatus.Status = l_Status = STATUS_BUFFER_TOO_SMALL;
 		}
 
 	      break;
@@ -1137,12 +1547,51 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		    ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[2];
 		  l_Adapter->m_RxErr =
 		    ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[3];
-		  p_IRP->IoStatus.Information = 1;	// Simple boolean value
+		  p_IRP->IoStatus.Information = 1; // Simple boolean value
 		}
-
+	      else
+		{
+		  p_IRP->IoStatus.Status = l_Status = STATUS_INVALID_PARAMETER;
+		}
+	      
 	      break;
 	    }
 #endif
+	  case TAP_IOCTL_CONFIG_POINT_TO_POINT:
+	    {
+	      if (l_IrpSp->Parameters.DeviceIoControl.InputBufferLength >=
+		  (sizeof (IPADDR) * 2))
+		{
+		  MACADDR dest;
+		  GenerateRelatedMAC (dest, l_Adapter->m_MAC);
+
+		  NdisAcquireSpinLock (&l_Adapter->m_Lock);
+
+		  l_Adapter->m_PointToPoint = TRUE;
+
+		  l_Adapter->m_localIP =
+		    ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[0];
+		  l_Adapter->m_remoteIP =
+		    ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[1];
+
+		  COPY_MAC (l_Adapter->m_TapToUser.src, l_Adapter->m_MAC);
+		  COPY_MAC (l_Adapter->m_TapToUser.dest, dest);
+		  COPY_MAC (l_Adapter->m_UserToTap.src, dest);
+		  COPY_MAC (l_Adapter->m_UserToTap.dest, l_Adapter->m_MAC);
+
+		  l_Adapter->m_TapToUser.proto = l_Adapter->m_UserToTap.proto = htons (ETH_P_IP);
+
+		  NdisReleaseSpinLock (&l_Adapter->m_Lock);
+
+		  p_IRP->IoStatus.Information = 1; // Simple boolean value
+		}
+	      else
+		{
+		  p_IRP->IoStatus.Status = l_Status = STATUS_INVALID_PARAMETER;
+		}
+	      
+	      break;
+	    }
 
 	  default:
 	    {
@@ -1155,94 +1604,123 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 	break;
       }
 
-      //-----------------------------------------------------------
+      //===========================================================
       // User mode thread issued a read request on the tap device
       // If there are packets waiting to be read, then the request
       // will be satisfied here. If not, then the request will be
       // queued and satisfied by any packet that is not used to
       // satisfy requests ahead of it.
-      //-----------------------------------------------------------
+      //===========================================================
     case IRP_MJ_READ:
       {
-	// Save IRP accessible copy of buffer length
+	TapPacketPointer l_PacketBuffer;
+	BOOLEAN pending = FALSE;
+
+	// Save IRP-accessible copy of buffer length
 	p_IRP->IoStatus.Information = l_IrpSp->Parameters.Read.Length;
 
 	if (p_IRP->MdlAddress == NULL)
 	  {
-	    DbgPrint ("[%s] MdlAddress is NULL for IRP_MJ_READ\n",
-		      l_Adapter->m_Name);
+	    DEBUGP (("[%s] MdlAddress is NULL for IRP_MJ_READ\n",
+		      l_Adapter->m_Name));
+	    NOTE_ERROR (l_Adapter);
 	    p_IRP->IoStatus.Status = l_Status = STATUS_INVALID_PARAMETER;
 	    p_IRP->IoStatus.Information = 0;
 	    IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
+	    break;
 	  }
 	else if ((p_IRP->AssociatedIrp.SystemBuffer =
 		  MmGetSystemAddressForMdlSafe
 		  (p_IRP->MdlAddress, NormalPagePriority)) == NULL)
 	  {
-	    DbgPrint ("[%s] Could not map address in IRP_MJ_READ\n",
-		      l_Adapter->m_Name);
+	    DEBUGP (("[%s] Could not map address in IRP_MJ_READ\n",
+		      l_Adapter->m_Name));
+	    NOTE_ERROR (l_Adapter);
 	    p_IRP->IoStatus.Status = l_Status = STATUS_INSUFFICIENT_RESOURCES;
 	    p_IRP->IoStatus.Information = 0;
 	    IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
+	    break;
 	  }
 	else if (!l_Adapter->m_InterfaceIsRunning)
 	  {
-	    DbgPrint ("[%s] Interface is down in IRP_MJ_READ\n",
-		      l_Adapter->m_Name);
+	    DEBUGP (("[%s] Interface is down in IRP_MJ_READ\n",
+		      l_Adapter->m_Name));
+	    NOTE_ERROR (l_Adapter);
 	    p_IRP->IoStatus.Status = l_Status = STATUS_UNSUCCESSFUL;
 	    p_IRP->IoStatus.Information = 0;
 	    IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
+	    break;
 	  }
-	else
+
+	//==================================
+	// Can we provide immediate service?
+	//==================================
+
+	l_PacketBuffer = NULL;
+
+	NdisAcquireSpinLock (&l_Adapter->m_QueueLock);
+
+	if (IS_UP (l_Adapter)
+	    && QueueCount (l_Extension->m_PacketQueue)
+	    && QueueCount (l_Extension->m_IrpQueue) == 0)
 	  {
-	    KIRQL OldIrql;
-
-	    KeRaiseIrql (DISPATCH_LEVEL, &OldIrql);
-
-	    if (OldIrql == DISPATCH_LEVEL)
-	      DbgPrint ("[%s] Was at DISPATCH_LEVEL in MJ_READ\n",
-			l_Adapter->m_Name);
-
-	    if (QueueCount (&l_Extension->m_PacketQueue)
-		&& QueueCount (&l_Extension->m_IrpQueue) == 0)
-	      {
-		// Immediate service
-		TapPacketPointer l_PacketBuffer;
-		l_PacketBuffer = QueuePeek (&l_Extension->m_PacketQueue);
-		l_Status = CompleteIRP (l_Adapter, p_IRP, l_Extension, IO_NO_INCREMENT);
-	      }
-	    else if (QueuePush (&l_Extension->m_IrpQueue, p_IRP) == p_IRP)
-	      {
-		// Attempt to pend read request
-		IoSetCancelRoutine (p_IRP, CancelIRP);
-		l_Status = STATUS_PENDING;
-		IoMarkIrpPending (p_IRP);
-	      }
-	    else // Can't queue anymore IRP's
-	      {
-		DbgPrint ("[%s] TAP [%s] read IRP overrun\n",
-			  l_Adapter->m_Name, l_Adapter->m_TapName);
-		p_IRP->IoStatus.Status = l_Status = STATUS_UNSUCCESSFUL;
-		p_IRP->IoStatus.Information = 0;
-		IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
-	      }
-
-	    KeLowerIrql (OldIrql);
+	    l_PacketBuffer = (TapPacketPointer)
+	      QueuePop (l_Extension->m_PacketQueue);
 	  }
+
+	NdisReleaseSpinLock (&l_Adapter->m_QueueLock);
+
+	if (l_PacketBuffer)
+	  {
+	    l_Status = CompleteIRP (l_Adapter,
+				    p_IRP,
+				    l_PacketBuffer,
+				    IO_NO_INCREMENT);
+	    break;
+	  }
+
+	//=============================
+	// Attempt to pend read request
+	//=============================
+
+	NdisAcquireSpinLock (&l_Adapter->m_QueueLock);
+
+	if (IS_UP (l_Adapter)
+	    && QueuePush (l_Extension->m_IrpQueue, p_IRP) == (PIRP) p_IRP)
+	  {
+	    IoSetCancelRoutine (p_IRP, CancelIRPCallback);
+	    l_Status = STATUS_PENDING;
+	    IoMarkIrpPending (p_IRP);
+	    pending = TRUE;
+	  }
+
+	NdisReleaseSpinLock (&l_Adapter->m_QueueLock);
+
+	if (pending)
+	  break;
+
+	// Can't queue anymore IRP's
+	DEBUGP (("[%s] TAP [%s] read IRP overrun\n",
+		 l_Adapter->m_Name, l_Adapter->m_TapName));
+	NOTE_ERROR (l_Adapter);
+	p_IRP->IoStatus.Status = l_Status = STATUS_UNSUCCESSFUL;
+	p_IRP->IoStatus.Information = 0;
+	IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
 	break;
       }
 
-      //-----------------------------------------------------------
-      // User mode thread issued a write request on the tap device
-      // The request will always get satisfied here. The call may
-      // fail if there are too many pending packets (queue full)
-      //-----------------------------------------------------------
+      //==============================================================
+      // User mode issued a WriteFile request on the TAP file handle.
+      // The request will always get satisfied here.  The call may
+      // fail if there are too many pending packets (queue full).
+      //==============================================================
     case IRP_MJ_WRITE:
       {
 	if (p_IRP->MdlAddress == NULL)
 	  {
-	    DbgPrint ("[%s] MdlAddress is NULL for IRP_MJ_WRITE\n",
-		      l_Adapter->m_Name);
+	    DEBUGP (("[%s] MdlAddress is NULL for IRP_MJ_WRITE\n",
+		      l_Adapter->m_Name));
+	    NOTE_ERROR (l_Adapter);
 	    p_IRP->IoStatus.Status = l_Status = STATUS_INVALID_PARAMETER;
 	    p_IRP->IoStatus.Information = 0;
 	  }
@@ -1250,24 +1728,30 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		  MmGetSystemAddressForMdlSafe
 		  (p_IRP->MdlAddress, NormalPagePriority)) == NULL)
 	  {
-	    DbgPrint ("[%s] Could not map address in IRP_MJ_WRITE\n",
-		      l_Adapter->m_Name);
+	    DEBUGP (("[%s] Could not map address in IRP_MJ_WRITE\n",
+		      l_Adapter->m_Name));
+	    NOTE_ERROR (l_Adapter);
 	    p_IRP->IoStatus.Status = l_Status = STATUS_INSUFFICIENT_RESOURCES;
 	    p_IRP->IoStatus.Information = 0;
 	  }
 	else if (!l_Adapter->m_InterfaceIsRunning)
 	  {
-	    DbgPrint ("[%s] Interface is down in IRP_MJ_WRITE\n",
-		      l_Adapter->m_Name);
+	    DEBUGP (("[%s] Interface is down in IRP_MJ_WRITE\n",
+		      l_Adapter->m_Name));
+	    NOTE_ERROR (l_Adapter);
 	    p_IRP->IoStatus.Status = l_Status = STATUS_UNSUCCESSFUL;
 	    p_IRP->IoStatus.Information = 0;
 	  }
-	else if ((p_IRP->IoStatus.Information =
-		  l_IrpSp->Parameters.Write.Length) >=
-		 ETHERNET_HEADER_SIZE)
+	else if (!l_Adapter->m_PointToPoint && ((l_IrpSp->Parameters.Write.Length) >= ETHERNET_HEADER_SIZE))
 	  {
 	    __try
 	      {
+		p_IRP->IoStatus.Information = l_IrpSp->Parameters.Write.Length;
+
+		DEBUG_PACKET ("IRP_MJ_WRITE",
+			      (unsigned char *) p_IRP->AssociatedIrp.SystemBuffer,
+			      l_IrpSp->Parameters.Write.Length);
+
 		NdisMEthIndicateReceive
 		  (l_Adapter->m_MiniportAdapterHandle,
 		   (NDIS_HANDLE) l_Adapter,
@@ -1277,38 +1761,71 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		   ETHERNET_HEADER_SIZE,
 		   l_IrpSp->Parameters.Write.Length - ETHERNET_HEADER_SIZE,
 		   l_IrpSp->Parameters.Write.Length - ETHERNET_HEADER_SIZE);
+		
+		NdisMEthIndicateReceiveComplete (l_Adapter->m_MiniportAdapterHandle);
 
-		NdisMEthIndicateReceiveComplete (l_Adapter->
-						 m_MiniportAdapterHandle);
 		p_IRP->IoStatus.Status = l_Status = STATUS_SUCCESS;
-#ifndef NEED_TAP_IOCTL_SET_STATISTICS
-		++l_Adapter->m_Rx;
-#endif
 	      }
 	      __except (EXCEPTION_EXECUTE_HANDLER)
 	      {
-		DbgPrint ("[%s] NdisMEthIndicateReceive failed in IRP_MJ_WRITE\n",
-			  l_Adapter->m_Name);
+		DEBUGP (("[%s] NdisMEthIndicateReceive failed in IRP_MJ_WRITE\n",
+			 l_Adapter->m_Name));
+		NOTE_ERROR (l_Adapter);
+		p_IRP->IoStatus.Status = l_Status = STATUS_UNSUCCESSFUL;
+		p_IRP->IoStatus.Information = 0;
+	      }
+	  }
+	else if (l_Adapter->m_PointToPoint && ((l_IrpSp->Parameters.Write.Length) >= IP_HEADER_SIZE))
+	  {
+	    __try
+	      {
+		p_IRP->IoStatus.Information = l_IrpSp->Parameters.Write.Length;
+
+		NdisMEthIndicateReceive
+		  (l_Adapter->m_MiniportAdapterHandle,
+		   (NDIS_HANDLE) l_Adapter,
+		   (unsigned char *) &l_Adapter->m_UserToTap,
+		   sizeof (l_Adapter->m_UserToTap),
+		   (unsigned char *) p_IRP->AssociatedIrp.SystemBuffer,
+		   l_IrpSp->Parameters.Write.Length,
+		   l_IrpSp->Parameters.Write.Length);
+
+		NdisMEthIndicateReceiveComplete (l_Adapter->m_MiniportAdapterHandle);
+
+		p_IRP->IoStatus.Status = l_Status = STATUS_SUCCESS;
+	      }
+	      __except (EXCEPTION_EXECUTE_HANDLER)
+	      {
+		DEBUGP (("[%s] NdisMEthIndicateReceive failed in IRP_MJ_WRITE (P2P)\n",
+			 l_Adapter->m_Name));
+		NOTE_ERROR (l_Adapter);
 		p_IRP->IoStatus.Status = l_Status = STATUS_UNSUCCESSFUL;
 		p_IRP->IoStatus.Information = 0;
 	      }
 	  }
 	else
 	  {
-	    DbgPrint ("[%s] Bad buffer size in IRP_MJ_WRITE, len=%d\n",
+	    DEBUGP (("[%s] Bad buffer size in IRP_MJ_WRITE, len=%d\n",
 			  l_Adapter->m_Name,
-			  l_IrpSp->Parameters.Write.Length);
+			  l_IrpSp->Parameters.Write.Length));
+	    NOTE_ERROR (l_Adapter);
 	    p_IRP->IoStatus.Information = 0;	// ETHERNET_HEADER_SIZE;
 	    p_IRP->IoStatus.Status = l_Status = STATUS_BUFFER_TOO_SMALL;
 	  }
 
+#ifndef NEED_TAP_IOCTL_SET_STATISTICS
+	if (l_Status == STATUS_SUCCESS)
+	  INCREMENT_STAT (l_Adapter->m_Rx);
+	else
+	  INCREMENT_STAT (l_Adapter->m_RxErr);
+#endif
 	IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
 	break;
       }
 
-      //-----------------------------------------------------------
-      //   User mode thread has called open() on the tap device
-      //-----------------------------------------------------------
+      //--------------------------------------------------------------
+      //   User mode thread has called CreateFile() on the tap device
+      //--------------------------------------------------------------
     case IRP_MJ_CREATE:
       {
 	if (l_Adapter->m_TapIsRunning
@@ -1317,23 +1834,36 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 #endif
 	    )
 	  {
-	    DbgPrint
-	      ("[%s] [TAP] release [%d.%d] open request (m_TapOpens=%d)\n",
+	    BOOLEAN first_open;
+
+	    DEBUGP
+	      (("[%s] [TAP] release [%d.%d] open request (m_TapOpens=%d)\n",
 	       l_Adapter->m_Name, TAP_DRIVER_MAJOR_VERSION,
-	       TAP_DRIVER_MINOR_VERSION, l_Adapter->m_TapOpens);
+	       TAP_DRIVER_MINOR_VERSION, l_Adapter->m_TapOpens));
+
+	    NdisAcquireSpinLock (&l_Adapter->m_Lock);
 	    ++l_Adapter->m_TapOpens;
-	    if (l_Adapter->m_TapOpens == 1)
+	    first_open = (l_Adapter->m_TapOpens == 1);
+	    if (first_open)
+	      ResetPointToPointMode (l_Adapter);
+	    NdisReleaseSpinLock (&l_Adapter->m_Lock);
+
+	    if (first_open)
 	      {
 		NdisMIndicateStatus (l_Adapter->m_MiniportAdapterHandle,
 				     NDIS_STATUS_MEDIA_CONNECT, NULL, 0);
 		NdisMIndicateStatusComplete (l_Adapter->
 					     m_MiniportAdapterHandle);
 	      }
+	    INCREMENT_STAT (l_Adapter->m_NumTapOpens);
+	    p_IRP->IoStatus.Status = l_Status = STATUS_SUCCESS;
+	    p_IRP->IoStatus.Information = 0;
 	  }
 	else
 	  {
-	    DbgPrint ("[%s] TAP is presently unavailable (m_TapOpens=%d)\n",
-		      l_Adapter->m_Name, l_Adapter->m_TapOpens);
+	    DEBUGP (("[%s] TAP is presently unavailable (m_TapOpens=%d)\n",
+		      l_Adapter->m_Name, l_Adapter->m_TapOpens));
+	    NOTE_ERROR (l_Adapter);
 	    p_IRP->IoStatus.Status = l_Status = STATUS_UNSUCCESSFUL;
 	    p_IRP->IoStatus.Information = 0;
 	  }
@@ -1343,39 +1873,49 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
       }
       
       //-----------------------------------------------------------
-      //        User mode thread close() on the tap device
+      //  User mode thread called CloseHandle() on the tap device
       //-----------------------------------------------------------
     case IRP_MJ_CLOSE:
       {
-	DbgPrint ("[%s] [TAP] release [%d.%d] close request\n",
+	BOOLEAN fully_closed = FALSE;
+	
+	DEBUGP (("[%s] [TAP] release [%d.%d] close request\n",
 		  l_Adapter->m_Name, TAP_DRIVER_MAJOR_VERSION,
-		  TAP_DRIVER_MINOR_VERSION);
+		  TAP_DRIVER_MINOR_VERSION));
 
-	while (QueueCount (&l_Extension->m_PacketQueue))
-	  QueuePop (&l_Extension->m_PacketQueue); // Exhaust packet queue
-
-	// If we were going to CancelIrp() all the IRPs in queue,
-	// we would do it here :-)
+	NdisAcquireSpinLock (&l_Adapter->m_Lock);
 	if (l_Adapter->m_TapOpens)
 	  {
 	    --l_Adapter->m_TapOpens;
 	    if (l_Adapter->m_TapOpens == 0)
 	      {
-		NdisMIndicateStatus (l_Adapter->m_MiniportAdapterHandle,
-				     NDIS_STATUS_MEDIA_DISCONNECT, NULL, 0);
-		NdisMIndicateStatusComplete (l_Adapter->
-					     m_MiniportAdapterHandle);
+		fully_closed = TRUE;
+		ResetPointToPointMode (l_Adapter);
 	      }
 	  }
+	NdisReleaseSpinLock (&l_Adapter->m_Lock);
+
+	if (fully_closed)
+	  {
+	    FlushQueues (l_Adapter);
+
+	    NdisMIndicateStatus (l_Adapter->m_MiniportAdapterHandle,
+				 NDIS_STATUS_MEDIA_DISCONNECT, NULL, 0);
+	    NdisMIndicateStatusComplete (l_Adapter->
+					 m_MiniportAdapterHandle);
+	  }
+
 	IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
 	break;
       }
-      
+
       //-----------------------------------------------------------
       // Something screwed up if it gets here ! It won't die, though
       //-----------------------------------------------------------
     default:
       {
+	//NOTE_ERROR (l_Adapter);
+	p_IRP->IoStatus.Status = l_Status = STATUS_UNSUCCESSFUL;
 	IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
 	break;
       }
@@ -1384,91 +1924,296 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
   return l_Status;
 }
 
-//====================================================================
-//                               IRP Management Routines
-//====================================================================
+//=============================================================
+// CompleteIRP is normally called with an adapter -> userspace
+// network packet and an IRP (Pending I/O request) from userspace.
+//
+// The IRP will normally represent a queued overlapped read
+// operation from userspace that is in a wait state.
+//
+// Use the ethernet packet to satisfy the IRP.
+//=============================================================
+
 NTSTATUS
-CompleteIRP (TapAdapterPointer p_Adapter, IN PIRP p_IRP,
-	     IN TapExtensionPointer p_Extension, IN CCHAR PriorityBoost)
+CompleteIRP (TapAdapterPointer p_Adapter,
+             IN PIRP p_IRP,
+	     IN TapPacketPointer p_PacketBuffer,
+	     IN CCHAR PriorityBoost)
 {
   NTSTATUS l_Status = STATUS_UNSUCCESSFUL;
-  TapPacketPointer l_PacketBuffer;
 
-  // The topmost packet buffer is invalid !
-  if ((l_PacketBuffer = QueuePeek (&p_Extension->m_PacketQueue)) == 0)
+  int offset;
+  int len;
+
+  MYASSERT (p_IRP);
+  MYASSERT (p_PacketBuffer);
+
+  IoSetCancelRoutine (p_IRP, NULL);  // Disable cancel routine
+
+  // While p_PacketBuffer always contains a
+  // full ethernet packet, including the
+  // ethernet header, in point-to-point mode,
+  // we only want to return the IPv4
+  // component.
+
+  if (p_PacketBuffer->m_SizeFlags & TP_POINT_TO_POINT)
     {
-      QueuePop (&p_Extension->m_PacketQueue);
+      offset = ETHERNET_HEADER_SIZE;
+      len = (int) (p_PacketBuffer->m_SizeFlags & TP_SIZE_MASK) - ETHERNET_HEADER_SIZE;
     }
-  else if (p_IRP)		// isn't p_IRP always set here?
+  else
     {
-      IoSetCancelRoutine (p_IRP, NULL);	// Disable cancel routine
-
-      if (p_IRP->IoStatus.Information < l_PacketBuffer->m_Size)
-	{
-	  p_IRP->IoStatus.Information = 0;	// l_PacketBuffer->m_Size;
-	  p_IRP->IoStatus.Status = STATUS_BUFFER_OVERFLOW;
-	}
-      else
-	{
-	  p_IRP->IoStatus.Information = l_PacketBuffer->m_Size;
-	  p_IRP->IoStatus.Status = l_Status = STATUS_SUCCESS;
-	  QueuePop (&p_Extension->m_PacketQueue);
-
-	  __try
-	  {
-	    NdisMoveMemory (p_IRP->AssociatedIrp.SystemBuffer,
-			    l_PacketBuffer->m_Data, l_PacketBuffer->m_Size);
-	  }
-	  __except (EXCEPTION_EXECUTE_HANDLER)
-	  {
-	    p_IRP->IoStatus.Status = STATUS_UNSUCCESSFUL;
-	    p_IRP->IoStatus.Information = 0;
-	  }
-
-	  __try
-	  {
-	    NdisFreeMemory (l_PacketBuffer,
-			    sizeof (TapPacket) + l_PacketBuffer->m_Size, 0);
-	  }
-	  __except (EXCEPTION_EXECUTE_HANDLER)
-	  {
-	  }
-	}
-
-      if (l_Status == STATUS_SUCCESS)
-	{
-	  IoCompleteRequest (p_IRP, PriorityBoost);
-#ifndef NEED_TAP_IOCTL_SET_STATISTICS
-	  ++p_Adapter->m_Tx;
-#endif
-	}
-      else
-	IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
+      offset = 0;
+      len = (p_PacketBuffer->m_SizeFlags & TP_SIZE_MASK);
     }
+
+  if (len < 0 || (int) p_IRP->IoStatus.Information < len)
+    {
+      p_IRP->IoStatus.Information = 0;
+      p_IRP->IoStatus.Status = STATUS_BUFFER_OVERFLOW;
+      NOTE_ERROR (p_Adapter);
+    }
+  else
+    {
+      p_IRP->IoStatus.Information = len;
+      p_IRP->IoStatus.Status = l_Status = STATUS_SUCCESS;
+
+      __try
+	{
+	  NdisMoveMemory (p_IRP->AssociatedIrp.SystemBuffer,
+			  p_PacketBuffer->m_Data + offset,
+			  len);
+	}
+      __except (EXCEPTION_EXECUTE_HANDLER)
+	{
+	  NOTE_ERROR (p_Adapter);
+	  p_IRP->IoStatus.Status = STATUS_UNSUCCESSFUL;
+	  p_IRP->IoStatus.Information = 0;
+	}
+    }
+
+  __try
+    {
+      NdisFreeMemory (p_PacketBuffer,
+		      TAP_PACKET_SIZE (p_PacketBuffer->m_SizeFlags & TP_SIZE_MASK),
+		      0);
+    }
+  __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+  
+  if (l_Status == STATUS_SUCCESS)
+    {
+      IoCompleteRequest (p_IRP, PriorityBoost);
+    }
+  else
+    IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
 
   return l_Status;
 }
 
+//==============================================
+// IRPs get cancelled for a number of reasons.
+//
+// The TAP device could be closed by userspace
+// when there are still pending read operations.
+//
+// The user could disable the TAP adapter in the
+// network connections control panel, while the
+// device is still open by a process.
+//==============================================
 VOID
-CancelIRP (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
+CancelIRPCallback (IN PDEVICE_OBJECT p_DeviceObject,
+		   IN PIRP p_IRP)
+{
+  CancelIRP (p_DeviceObject, p_IRP, TRUE);
+}
+
+VOID
+CancelIRP (IN PDEVICE_OBJECT p_DeviceObject,
+	   IN PIRP p_IRP,
+	   BOOLEAN callback)
 {
   TapExtensionPointer l_Extension =
     (TapExtensionPointer) p_DeviceObject->DeviceExtension;
 
-  if (p_IRP)
-    if (QueueExtract (&l_Extension->m_IrpQueue, p_IRP) == p_IRP)
-      {
-	IoSetCancelRoutine (p_IRP, NULL);
-	IoReleaseCancelSpinLock (p_IRP->CancelIrql);
-	p_IRP->IoStatus.Status = STATUS_CANCELLED;
-	p_IRP->IoStatus.Information = 0;
-	IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
-      }
+  BOOLEAN exists = FALSE;
+
+  MYASSERT (p_IRP);
+
+  if (!l_Extension->m_halt)
+    {
+      NdisAcquireSpinLock (&l_Extension->m_Adapter->m_Lock);
+      exists = (QueueExtract (l_Extension->m_IrpQueue, p_IRP) == p_IRP);
+      NdisReleaseSpinLock (&l_Extension->m_Adapter->m_Lock);
+    }
+  else
+    exists = TRUE;
+
+  if (exists)
+    {
+      IoSetCancelRoutine (p_IRP, NULL);
+      p_IRP->IoStatus.Status = STATUS_CANCELLED;
+      p_IRP->IoStatus.Information = 0;
+    }
+     
+  if (callback)
+    IoReleaseCancelSpinLock (p_IRP->CancelIrql);
+
+  if (exists)
+    IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
 }
 
-//=========================================================================
+//====================================
+// Exhaust packet and IRP queues.
+//====================================
+VOID
+FlushQueues (TapAdapterPointer p_Adapter)
+{
+  PIRP l_IRP;
+  TapPacketPointer l_PacketBuffer;
+  int n_IRP=0, n_Packet=0;
+  TapExtensionPointer l_Extension;
+
+  MYASSERT (p_Adapter);
+  MYASSERT (p_Adapter->m_TapDevice);
+
+  l_Extension = (TapExtensionPointer)
+    p_Adapter->m_TapDevice->DeviceExtension;
+
+  while (TRUE)
+    {
+      NdisAcquireSpinLock (&p_Adapter->m_QueueLock);
+      l_IRP = QueuePop (l_Extension->m_IrpQueue);
+      NdisReleaseSpinLock (&p_Adapter->m_QueueLock);
+      if (l_IRP)
+	{
+	  ++n_IRP;
+	  CancelIRP (p_Adapter->m_TapDevice, l_IRP, FALSE);
+	}
+      else
+	break;
+    }
+
+  while (TRUE)
+    {
+      NdisAcquireSpinLock (&p_Adapter->m_QueueLock);
+      l_PacketBuffer = QueuePop (l_Extension->m_PacketQueue);
+      NdisReleaseSpinLock (&p_Adapter->m_QueueLock);
+      if (l_PacketBuffer)
+	{
+	  ++n_Packet;
+	  MemFree (l_PacketBuffer, TAP_PACKET_SIZE (l_PacketBuffer->m_SizeFlags & TP_SIZE_MASK));
+	}
+      else
+	break;
+    }
+
+  DEBUGP ((
+	   "[%s] [TAP] FlushQueues n_IRP=[%d,%d,%d] n_Packet=[%d,%d,%d]\n",
+	   p_Adapter->m_Name,
+	   n_IRP,
+	   l_Extension->m_IrpQueue->max_size,
+	   IRP_QUEUE_SIZE,
+	   n_Packet,
+	   l_Extension->m_PacketQueue->max_size,
+	   PACKET_QUEUE_SIZE
+	   ));
+}
+
+//===================================================
+// Generate a return ARP message for
+// point-to-point IPv4 mode.
+//===================================================
+
+void ProcessARP (TapAdapterPointer p_Adapter, const PARP_PACKET src)
+{
+  //-----------------------------------------------
+  // Is this the kind of packet we are looking for?
+  //-----------------------------------------------
+  if (src->m_Proto == htons (ETH_P_ARP)
+      && MAC_EQUAL (src->m_MAC_Source, p_Adapter->m_MAC)
+      && MAC_EQUAL (src->m_ARP_MAC_Source, p_Adapter->m_MAC)
+      && MAC_EQUAL (src->m_MAC_Destination, p_Adapter->m_MAC_Broadcast)
+      && src->m_ARP_Operation == htons (ARP_REQUEST)
+      && src->m_MAC_AddressType == htons (MAC_ADDR_TYPE)
+      && src->m_MAC_AddressSize == sizeof (MACADDR)
+      && src->m_PROTO_AddressType == htons (ETH_P_IP)
+      && src->m_PROTO_AddressSize == sizeof (IPADDR)
+      && src->m_ARP_IP_Source == p_Adapter->m_localIP
+      && src->m_ARP_IP_Destination == p_Adapter->m_remoteIP)
+    {
+      ARP_PACKET arp;
+      NdisZeroMemory (&arp, sizeof (arp));
+
+      //----------------------------------------------
+      // Initialize ARP reply fields
+      //----------------------------------------------
+      arp.m_Proto = htons (ETH_P_ARP);
+      arp.m_MAC_AddressType = htons (MAC_ADDR_TYPE);
+      arp.m_PROTO_AddressType = htons (ETH_P_IP);
+      arp.m_MAC_AddressSize = sizeof (MACADDR);
+      arp.m_PROTO_AddressSize = sizeof (IPADDR);
+      arp.m_ARP_Operation = htons (ARP_REPLY);
+
+      //----------------------------------------------
+      // ARP addresses
+      //----------------------------------------------      
+      COPY_MAC (arp.m_MAC_Source, p_Adapter->m_TapToUser.dest);
+      COPY_MAC (arp.m_MAC_Destination, p_Adapter->m_TapToUser.src);
+      COPY_MAC (arp.m_ARP_MAC_Source, p_Adapter->m_TapToUser.dest);
+      COPY_MAC (arp.m_ARP_MAC_Destination, p_Adapter->m_TapToUser.src);
+      arp.m_ARP_IP_Source = p_Adapter->m_remoteIP;
+      arp.m_ARP_IP_Destination = p_Adapter->m_localIP;
+
+      DEBUG_PACKET ("ProcessARP",
+		    (unsigned char *) &arp,
+		    sizeof (arp));
+
+      __try
+	{
+	  //------------------------------------------------------------
+	  // NdisMEthIndicateReceive and NdisMEthIndicateReceiveComplete
+	  // could potentially be called reentrantly both here and in
+	  // TapDeviceHook/IRP_MJ_WRITE.
+	  //
+	  // The DDK docs imply that this is okay.
+	  //------------------------------------------------------------
+	  NdisMEthIndicateReceive
+	    (p_Adapter->m_MiniportAdapterHandle,
+	     (NDIS_HANDLE) p_Adapter,
+	     (unsigned char *) &arp,
+	     ETHERNET_HEADER_SIZE,
+	     ((unsigned char *) &arp) + ETHERNET_HEADER_SIZE,
+	     sizeof (arp) - ETHERNET_HEADER_SIZE,
+	     sizeof (arp) - ETHERNET_HEADER_SIZE);
+		
+	  NdisMEthIndicateReceiveComplete (p_Adapter->m_MiniportAdapterHandle);
+	}
+      __except (EXCEPTION_EXECUTE_HANDLER)
+	{
+	  DEBUGP (("[%s] NdisMEthIndicateReceive failed in ProcessARP\n",
+		   p_Adapter->m_Name));
+	  NOTE_ERROR (p_Adapter);
+	}
+    }
+}
+
+//===================================================================
+// Go back to default TAP mode from Point-To-Point mode
+//===================================================================
+void ResetPointToPointMode (TapAdapterPointer p_Adapter)
+{
+  p_Adapter->m_PointToPoint = FALSE;
+  p_Adapter->m_localIP = 0;
+  p_Adapter->m_remoteIP = 0;
+  NdisZeroMemory (&p_Adapter->m_TapToUser, sizeof (p_Adapter->m_TapToUser));
+  NdisZeroMemory (&p_Adapter->m_UserToTap, sizeof (p_Adapter->m_UserToTap));
+}
+
+//===================================================================
 //                             Dispatch Table Managemement
-//=========================================================================
+//===================================================================
 VOID
 HookDispatchFunctions ()
 {
@@ -1484,214 +2229,6 @@ HookDispatchFunctions ()
 	g_DispatchHook[l_Index] = g_TapDriverObject->MajorFunction[l_Index];
 	g_TapDriverObject->MajorFunction[l_Index] = TapDeviceHook;
       }
-}
-
-//=====================================================================
-//                         Linked List Management Routines
-//=====================================================================
-LROOT
-ListAlloc (ULONG p_Limit)
-{
-  return ListActivate ((LROOT) MemAlloc (sizeof (struct LROOTSTRUCT)),
-		       p_Limit);
-}
-
-VOID
-ListFree (LROOT p_Root)
-{
-  if (p_Root)
-    {
-      ListDeactivate (p_Root);
-      MemFree ((PVOID) p_Root, sizeof (struct LROOTSTRUCT));
-    }
-}
-
-LROOT
-ListActivate (LROOT p_Root, ULONG p_Limit)
-{
-  if (p_Root)
-    {
-      p_Root->m_First = p_Root->m_Last = 0;
-      p_Root->m_Limit = p_Limit;
-      p_Root->m_Count = 0;
-    }
-
-  return p_Root;
-}
-
-VOID
-ListDeactivate (LROOT p_Root)
-{
-  if (p_Root)
-    while (p_Root->m_Count)
-      ListRemove (p_Root, LMODE_QUEUE);
-}
-
-LITEM
-ListAdd (LROOT p_Root, LITEM p_Payload)
-{
-  LITEM l_Return = 0;
-  LNODE l_Node;
-
-  if (p_Root)
-    {
-      if (p_Root->m_Count >= p_Root->m_Limit && p_Root->m_Limit)
-	;
-      else if ((l_Node = (LNODE) MemAlloc (sizeof (struct LNODESTRUCT))) == 0)
-	;
-      else if (p_Root->m_First)
-	{
-	  (l_Node->m_Previous = p_Root->m_Last)->m_Next = l_Node;
-	  l_Return = l_Node->m_Payload = p_Payload;
-	  p_Root->m_Last = l_Node;
-	  ++p_Root->m_Count;
-	}
-      else
-	{
-	  l_Return = l_Node->m_Payload = p_Payload;
-	  p_Root->m_First = p_Root->m_Last = l_Node;
-	  l_Node->m_Next = l_Node->m_Previous = 0;
-	  p_Root->m_Count = 1;
-	}
-    }
-
-  return l_Return;
-}
-
-LITEM
-ListRemove (LROOT p_Root, LMODE p_Mode)
-{
-  LITEM l_Return = 0;
-  LNODE l_Node;
-
-  if (p_Root)
-    {
-      if (p_Root->m_Count == 0)
-	;
-      else
-	if ((l_Node =
-	     (p_Mode == LMODE_QUEUE ? p_Root->m_First : p_Root->m_Last)) == 0)
-	p_Root->m_Count = 0;
-      else
-	{
-	  if (l_Node->m_Next && p_Mode == LMODE_QUEUE)
-	    (p_Root->m_First = l_Node->m_Next)->m_Previous = 0;
-	  else if (l_Node->m_Previous && p_Mode == LMODE_STACK)
-	    (p_Root->m_Last = l_Node->m_Previous)->m_Next = 0;
-	  else
-	    p_Root->m_First = p_Root->m_Last = 0;
-
-	  l_Return = l_Node->m_Payload;
-	  MemFree ((PVOID) l_Node, sizeof (struct LNODESTRUCT));  // DEBUG
-	  --p_Root->m_Count;
-	}
-    }
-
-  return l_Return;
-}
-
-LITEM
-ListExtract (LROOT p_Root, LITEM p_Payload)
-{
-  LITEM l_Return = 0;
-  LNODE l_Node = 0;
-
-  if (p_Root)
-    {
-      if (p_Root->m_Count)
-	{
-	  for (l_Node = p_Root->m_First;
-	       l_Node && l_Node->m_Payload != p_Payload;
-	       l_Node = l_Node->m_Next);
-	}
-
-      if (l_Node)
-	{
-	  if (l_Node->m_Previous)
-	    l_Node->m_Previous->m_Next = l_Node->m_Next;
-	  if (l_Node->m_Next)
-	    l_Node->m_Next->m_Previous = l_Node->m_Previous;
-	  if (p_Root->m_Last == l_Node)
-	    p_Root->m_Last = l_Node->m_Previous;
-	  if (p_Root->m_First == l_Node)
-	    p_Root->m_First = l_Node->m_Next;
-	  l_Return = l_Node->m_Payload;
-	  MemFree ((PVOID) l_Node, sizeof (struct LNODESTRUCT));
-	  --p_Root->m_Count;
-	}
-    }
-
-  return l_Return;
-}
-
-LITEM
-ListPeek (LROOT p_Root, LMODE p_Mode)
-{
-  LITEM l_Return = 0;
-
-  if (p_Root)
-    {
-      if (p_Root->m_Count == 0)
-	;
-      else if (p_Root->m_First && p_Mode == LMODE_QUEUE)
-	l_Return = p_Root->m_First->m_Payload;
-      else if (p_Root->m_Last && p_Mode == LMODE_STACK)
-	l_Return = p_Root->m_Last->m_Payload;
-      else
-	l_Return = (LITEM) (p_Root->m_Count = 0);
-    }
-
-  return l_Return;
-}
-
-ULONG
-ListCount (LROOT p_Root)
-{
-  return (p_Root ? p_Root->m_Count : 0);
-}
-
-//======================================================================
-//                               Memory Management
-//======================================================================
-PVOID
-MemAlloc (ULONG p_Size)
-{
-  PVOID l_Return = 0;
-
-  if (p_Size)
-    {
-      __try
-      {
-	static NDIS_PHYSICAL_ADDRESS l_HighestAcceptableMax =
-	  NDIS_PHYSICAL_ADDRESS_CONST (-1, -1);
-	if (NdisAllocateMemory (&l_Return, p_Size, 0, l_HighestAcceptableMax)
-	    != NDIS_STATUS_SUCCESS)
-	  l_Return = 0;
-	else
-	  NdisZeroMemory (l_Return, p_Size);
-      }
-      __except (EXCEPTION_EXECUTE_HANDLER)
-      {
-	l_Return = 0;
-      }
-    }
-
-  return l_Return;
-}
-
-VOID
-MemFree (PVOID p_Addr, ULONG p_Size)
-{
-  if (p_Addr && p_Size)
-    {
-      __try
-      {
-	NdisFreeMemory (p_Addr, p_Size, 0);
-      }
-      __except (EXCEPTION_EXECUTE_HANDLER)
-      {
-      }
-    }
 }
 
 //======================================================================

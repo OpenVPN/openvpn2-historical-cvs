@@ -69,7 +69,7 @@
  * MTU Defaults for TAP devices
  */
 #define TAP_MTU_DEFAULT        1500
-#define TAP_MTU_EXTRA_DEFAULT  64 
+#define TAP_MTU_EXTRA_DEFAULT  32
 
 /*
  * Dynamic MTU parameters (based on frame.link_mtu).
@@ -144,6 +144,7 @@ struct frame {
  * This is the size to "ifconfig" the tun or tap device.
  */
 #define TUN_MTU_SIZE(f)          ((f)->link_mtu - TUN_LINK_DELTA(f))
+#define TUN_MTU_SIZE_DYNAMIC(f)  ((f)->dynamic.mtu - TUN_LINK_DELTA(f))
 
 /*
  * This is the maximum packet size that we need to be able to
@@ -190,7 +191,8 @@ void frame_finalize (struct frame *frame,
 
 void frame_finalize_derivative (struct frame *frame, const struct frame *src);
 void frame_dynamic_finalize (struct frame *frame);
-void frame_set_mtu_dynamic (struct frame *frame, int mtu_dynamic);
+void frame_set_mtu_dynamic (struct frame *frame, int mtu);
+void frame_set_mtu_dynamic_upper_bound (struct frame *frame, int mtu, bool tun);
 bool frame_mtu_change_pct (struct frame *frame, int pct);
 void frame_subtract_extra (struct frame *frame, const struct frame *src);
 void frame_print (const struct frame *frame, int level, const char *prefix, bool long_form);

@@ -1,11 +1,15 @@
 /*
  *  TAP-Win32 -- A kernel driver to provide virtual tap device functionality
- *               on Windows.  Derived from the CIPE-Win32 project at
- *               http://cipe-win32.sourceforge.net/
+ *               on Windows.  Originally derived from the CIPE-Win32
+ *               project by Damion K. Wilson, with extensive modifications by
+ *               James Yonan.
  *
- *  Copyright (C) 2003 Damion K. Wilson
+ *  All source code which derives from the CIPE-Win32 project is
+ *  Copyright (C) Damion K. Wilson, 2003, and is released under the
+ *  GPL version 2 (see below).
  *
- *  Modifications by James Yonan in accordance with the GPL.
+ *  All other source code is Copyright (C) James Yonan, 2003,
+ *  and is released under the GPL version 2 (see below).
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,45 +30,6 @@
 #ifndef TAP_PROTOTYPES_DEFINED
 #define TAP_PROTOTYPES_DEFINED
 
-//===========================================================================================
-//
-//===========================================================================================
-LROOT ListAlloc         (ULONG p_Limit);
-VOID  ListFree          (LROOT p_Root);
-LROOT ListActivate      (LROOT p_Root, ULONG p_Limit);
-VOID  ListDeactivate    (LROOT p_Root);
-LITEM ListAdd           (LROOT p_Root, LITEM p_Payload);
-LITEM ListExtract       (LROOT p_Root, LITEM p_Payload);
-LITEM ListRemove        (LROOT p_Root, LMODE p_Mode);
-LITEM ListPeek          (LROOT p_Root, LMODE p_Mode);
-ULONG ListCount         (LROOT p_Root);
-
-#define QueueNew        ListAlloc
-#define QueueDelete     ListFree
-#define QueuePush(a,b)  ListAdd (a,b)
-#define QueuePop(a)     ListRemove (a, LMODE_QUEUE)
-#define QueuePeek(a)    ListPeek (a, LMODE_QUEUE)
-#define QueueCount(a)   ListCount (a)
-#define QueueExtract    ListExtract
-
-#define StackNew        ListAlloc
-#define StackDelete     ListFree
-#define StackPush(a,b)  ListAdd (a, b)
-#define StackPop(a)     ListRemove (a, LMODE_STACK)
-#define StackPeek(a)    ListPeek (a, LMODE_STACK)
-#define StackCount(a)   ListCount (a)
-#define StackExtract    ListExtract
-
-#define Push(a,b)       QueuePush(a,b)
-#define Pull(a)         QueuePop(a)
-#define Pop(a)          StackPop(a)
-#define Peek(a)         QueuePeek(a)
-#define Count(a)        QueueCount(a)
-#define Extract         ListExtract
-
-//===========================================================================================
-//
-//===========================================================================================
 NTSTATUS DriverEntry
    (
     IN PDRIVER_OBJECT p_DriverObject,
@@ -81,19 +46,19 @@ NDIS_STATUS AdapterCreate
     IN NDIS_HANDLE p_ConfigurationHandle
    );
 
-VOID AdapterDestroy
+VOID AdapterHalt
    (
     IN NDIS_HANDLE p_AdapterContext
+   );
+
+VOID AdapterFreeResources
+   (
+    TapAdapterPointer p_Adapter
    );
 
 NDIS_STATUS AdapterReset
    (
     OUT PBOOLEAN p_AddressingReset,
-    IN NDIS_HANDLE p_AdapterContext
-   );
-
-VOID AdapterStop
-   (
     IN NDIS_HANDLE p_AdapterContext
    );
 
@@ -134,17 +99,64 @@ NDIS_STATUS AdapterReceive
     IN UINT p_ToTransfer
    );
 
-NTSTATUS TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP);
-NDIS_STATUS CreateTapDevice (TapAdapterPointer p_Adapter);
-VOID DestroyTapDevice (TapAdapterPointer p_Adapter);
+NTSTATUS TapDeviceHook
+   (
+    IN PDEVICE_OBJECT p_DeviceObject,
+    IN PIRP p_IRP
+   );
+
+NDIS_STATUS CreateTapDevice
+   (
+    TapAdapterPointer p_Adapter
+   );
+
+VOID DestroyTapDevice
+   (
+    TapAdapterPointer p_Adapter
+   );
+
+VOID TapDeviceFreeResources
+   (
+    TapAdapterPointer p_Adapter
+    );
+
+NTSTATUS CompleteIRP
+   (
+    TapAdapterPointer p_Adapter,
+    IN PIRP p_IRP,
+    IN TapPacketPointer p_PacketBuffer,
+    IN CCHAR PriorityBoost
+   );
+
+VOID CancelIRPCallback
+   (
+    IN PDEVICE_OBJECT p_DeviceObject,
+    IN PIRP p_IRP
+   );
+
+VOID CancelIRP
+   (
+    IN PDEVICE_OBJECT p_DeviceObject,
+    IN PIRP p_IRP,
+    BOOLEAN callback
+   );
+
+VOID FlushQueues
+   (
+    TapAdapterPointer p_Adapter
+   );
+
+void ResetPointToPointMode
+   (
+    TapAdapterPointer p_Adapter
+   );
+
+void ProcessARP
+   (
+    TapAdapterPointer p_Adapter,
+    const PARP_PACKET src
+   );
+
 VOID HookDispatchFunctions();
-
-NTSTATUS CompleteIRP (TapAdapterPointer p_Adapter, IN PIRP p_IRP,
-		      IN TapExtensionPointer p_Extension, IN CCHAR PriorityBoost);
-
-VOID CancelIRP (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP);
-
-VOID  MemFree  (PVOID p_Addr, ULONG p_Size);
-PVOID MemAlloc (ULONG p_Size);
 
 #endif

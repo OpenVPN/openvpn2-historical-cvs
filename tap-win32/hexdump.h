@@ -1,11 +1,15 @@
 /*
  *  TAP-Win32 -- A kernel driver to provide virtual tap device functionality
- *               on Windows.  Derived from the CIPE-Win32 project at
- *               http://cipe-win32.sourceforge.net/
+ *               on Windows.  Originally derived from the CIPE-Win32
+ *               project by Damion K. Wilson, with extensive modifications by
+ *               James Yonan.
  *
- *  Copyright (C) 2003 Damion K. Wilson
+ *  All source code which derives from the CIPE-Win32 project is
+ *  Copyright (C) Damion K. Wilson, 2003, and is released under the
+ *  GPL version 2 (see below).
  *
- *  Modifications by James Yonan in accordance with the GPL.
+ *  All other source code is Copyright (C) James Yonan, 2003,
+ *  and is released under the GPL version 2 (see below).
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -41,8 +45,8 @@ extern "C" {
 #   include <winnt.h>
 #   include <memory.h>
 
-#   ifndef DbgPrint
-#      define DbgPrint DbgMessage
+#   ifndef DEBUGP
+#      define DEBUGP(fmt) { DbgMessage fmt; }
 #   endif
 
     extern void (*DbgMessage)(char *p_Format, ...);

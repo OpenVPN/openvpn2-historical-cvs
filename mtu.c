@@ -144,9 +144,28 @@ frame_finalize_derivative (struct frame *frame, const struct frame *src)
  * mtu_dynamic can be a value or MTU_SET_TO_MIN or MTU_SET_TO_MAX.
  */
 void
-frame_set_mtu_dynamic (struct frame *frame, int mtu_dynamic)
+frame_set_mtu_dynamic (struct frame *frame, int mtu)
 {
-  frame->dynamic.mtu_initial = mtu_dynamic;
+  frame->dynamic.mtu_initial = mtu;
+}
+
+/*
+ * Set the tun MTU dynamically.
+ */
+void
+frame_set_mtu_dynamic_upper_bound (struct frame *frame, int mtu, bool tun)
+{
+  ASSERT (mtu > 0);
+  ASSERT (frame->dynamic.mtu > 0);
+
+  if (tun)
+    mtu += TUN_LINK_DELTA (frame);
+
+  frame->dynamic.mtu = constrain_int (
+      frame->dynamic.mtu,
+      frame->dynamic.mtu_min,
+      min_int (mtu, frame->dynamic.mtu)
+      );
 }
 
 /*

@@ -72,9 +72,9 @@ static const char usage_message[] =
   "%s\n"
   "\n"
   "General Options:\n"
+  "--config file   : Read configuration options from file.\n"
   "--help          : Show options.\n"
   "--version       : Show copyright and version information.\n"
-  "--config file   : Read configuration options from file.\n"
   "\n"
   "Tunnel Options:\n"
   "--local host    : Local host name or ip address.\n"
@@ -91,20 +91,32 @@ static const char usage_message[] =
   "--lport port    : TCP/UDP port # for local (default=%d).\n"
   "--rport port    : TCP/UDP port # for remote (default=%d).\n"
   "--nobind        : Do not bind to local address and port.\n"
-  "--dev tunX|tapX : TUN/TAP device (X can be omitted for dynamic device in\n"
-  "                  Linux 2.4+).\n"
+  "--dev tunX|tapX : TUN/TAP device (X can be omitted for dynamic device.\n"
   "--dev-type dt   : Which device type are we using? (dt = tun or tap) Use\n"
   "                  this option only if the TUN/TAP device used with --dev\n"
   "                  does not begin with \"tun\" or \"tap\".\n"
   "--dev-node node : Explicitly set the device node rather than using\n"
   "                  /dev/net/tun, /dev/tun, /dev/tap, etc.\n"
   "--tun-ipv6      : Build tun link capable of forwarding IPv6 traffic.\n"
-  "--ifconfig l r  : Configure tun device to use IP address l as a local\n"
-  "                  endpoint and r as a remote endpoint.  l & r should be\n"
-  "                  swapped on the other peer.  l & r must be private\n"
+  "--ifconfig l rn : TUN: configure device to use IP address l as a local\n"
+  "                  endpoint and rn as a remote endpoint.  l & rn should be\n"
+  "                  swapped on the other peer.  l & rn must be private\n"
   "                  addresses outside of the subnets used by either peer.\n"
-  "                  Implies --link-mtu %d if neither --link-mtu or --tun-mtu\n"
-  "                  explicitly specified.\n"
+  "                  TAP: configure device to use IP address l as a local\n"
+  "                  endpoint and rn as a subnet mask.\n"
+  "--route network [netmask] [gateway] [metric] :\n"
+  "                  Add route to routing table after connection\n"
+  "                  is established.  Multiple routes can be specified.\n"
+  "                  netmask default: 255.255.255.255\n"
+  "                  gateway default: taken from --route-gateway or --ifconfig\n"
+  "                  Specify default by leaving blank or setting to \"nil\".\n"
+  "--route-gateway gw : Specify a default gateway for use with --route.\n"
+  "--route-delay n : Delay n seconds after connection initiation before\n"
+  "                  adding routes.\n"
+  "--route-up cmd  : Execute shell cmd after routes are added.\n"
+  "--route-noauto  : Don't add routes automatically.  Instead pass routes to\n"
+  "                  --route-up script using environmental variables.\n"
+  "--setenv name value : Set a custom environmental variable to pass to script.\n"
   "--shaper n      : Restrict output to peer to n bytes per second.\n"
   "--inactive n    : Exit after n seconds of inactivity on TUN/TAP device.\n"
   "--ping-exit n   : Exit if n seconds pass without reception of remote ping.\n"
@@ -120,25 +132,23 @@ static const char usage_message[] =
   "--passtos       : TOS passthrough (applies to IPv4 only).\n"
 #endif
   "--tun-mtu n     : Take the TUN/TAP device MTU to be n and derive the\n"
-  "                  TCP/UDP MTU from it (default=%d).\n"
+  "                  TCP/UDP MTU from it (default TAP=%d).\n"
   "--tun-mtu-extra n : Assume that TUN/TAP device might return as many\n"
-  "                  as n bytes\n"
-  "                  more than the tun-mtu size on read (default=%d).\n"
+  "                  as n bytes more than the tun-mtu size on read\n"
+  "                  (default TUN=0 TAP=%d).\n"
   "--link-mtu n    : Take the TCP/UDP device MTU to be n and derive the tun MTU\n"
-  "                  from it (disabled by default).\n"
+  "                  from it (default TUN=%d).\n"
   "--mtu-disc type : Should we do Path MTU discovery on TCP/UDP channel?\n"
   "                  'no'    -- Never send DF (Don't Fragment) frames\n"
   "                  'maybe' -- Use per-route hints\n"
   "                  'yes'   -- Always DF (Don't Fragment)\n"
 #ifdef FRAGMENT_ENABLE
-  "--mtu-dynamic [min] [max] : EXPERIMENTAL -- Enable internal datagram\n"
-  "                  fragmentation so that no UDP datagrams are sent which\n"
-  "                  are larger than max bytes.  Currently, dynamic MTU\n"
-  "                  sizing is not yet implemented, so min should equal max.\n"
+  "--fragment max  : Enable internal datagram fragmentation so that no UDP\n"
+  "                  datagrams are sent which are larger than max bytes.\n"
   "                  Adds 4 bytes of overhead per datagram.\n"
-  "--mtu-noicmp    : Don't automatically generate 'Fragmentation needed but\n"
-  "                  DF set' IPv4 ICMP messages.\n" 
 #endif
+  "--mssfix [n]    : Set upper bound on TCP MSS, default = tun-mtu size\n"
+  "                  or --fragment max value, whichever is lower.\n"
   "--mlock         : Disable Paging -- ensures key material and tunnel\n"
   "                  data will never be written to disk.\n"
   "--up cmd        : Shell cmd to execute after successful tun device open.\n"
@@ -259,6 +269,8 @@ static const char usage_message[] =
   "\n"
   "Windows Specific:\n"
   "--show-adapters : Show all TAP-Win32 adapters.\n"
+  "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n" 
+  "--no-arp-del    : Don't do an 'arp -d *' after TAP-Win32 open.\n"
   "--pause-exit    : When run from a console window, pause before exiting.\n"
 #endif
   "\n"
@@ -321,6 +333,7 @@ init_options (struct options *o)
 #define SHOW_PARM(name, value, format) msg(D_SHOW_PARMS, "  " #name " = " format, (value))
 #define SHOW_STR(var)  SHOW_PARM(var, (o->var ? o->var : "[UNDEF]"), "'%s'")
 #define SHOW_INT(var)  SHOW_PARM(var, o->var, "%d")
+#define SHOW_UNSIGNED(var)  SHOW_PARM(var, o->var, "0x%08x")
 #define SHOW_BOOL(var) SHOW_PARM(var, (o->var ? "ENABLED" : "DISABLED"), "%s");
 
 void
@@ -332,8 +345,6 @@ setenv_settings (const struct options *o)
   setenv_int ("local_port", o->local_port);
   setenv_str ("remote", o->remote);
   setenv_int ("remote_port", o->remote_port);
-  setenv_str ("ifconfig_local", o->ifconfig_local);
-  setenv_str ("ifconfig_remote", o->ifconfig_remote);
 }
 
 void
@@ -372,7 +383,7 @@ show_settings (const struct options *o)
   SHOW_STR (dev_node);
   SHOW_BOOL (tun_ipv6);
   SHOW_STR (ifconfig_local);
-  SHOW_STR (ifconfig_remote);
+  SHOW_STR (ifconfig_remote_netmask);
 #ifdef HAVE_GETTIMEOFDAY
   SHOW_INT (shaper);
 #endif
@@ -402,6 +413,9 @@ show_settings (const struct options *o)
   SHOW_BOOL (persist_local_ip);
   SHOW_BOOL (persist_remote_ip);
   SHOW_BOOL (persist_key);
+
+  SHOW_BOOL (mssfix_defined);
+  SHOW_INT (mssfix);
   
 #if PASSTOS_CAPABILITY
   SHOW_BOOL (passtos);
@@ -424,11 +438,18 @@ show_settings (const struct options *o)
   SHOW_INT (verbosity);
   SHOW_INT (mute);
   SHOW_BOOL (gremlin);
+  SHOW_BOOL (tuntap_flags);
 
 #ifdef USE_LZO
   SHOW_BOOL (comp_lzo);
   SHOW_BOOL (comp_lzo_adaptive);
 #endif
+
+  SHOW_STR (route_script);
+  SHOW_STR (route_default_gateway);
+  SHOW_BOOL (route_noauto);
+  SHOW_INT (route_delay);
+  print_route_options (&o->routes, D_SHOW_PARMS);
 
 #ifdef USE_CRYPTO
   SHOW_STR (shared_secret_file);
@@ -567,19 +588,22 @@ usage (void)
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   fprintf (fp, usage_message,
-	   title_string, o.local_port, o.remote_port, o.link_mtu,
-	   o.tun_mtu, o.tun_mtu_extra,
-	   o.verbosity, o.authname, o.ciphername, o.tls_timeout,
-	   o.renegotiate_seconds, o.handshake_window, o.transition_window);
+	   title_string, o.local_port, o.remote_port,
+	   TAP_MTU_DEFAULT, o.tun_mtu_extra, o.link_mtu,
+	   o.verbosity,
+	   o.authname, o.ciphername,
+	   o.tls_timeout, o.renegotiate_seconds,
+	   o.handshake_window, o.transition_window);
 #elif defined(USE_CRYPTO)
   fprintf (fp, usage_message,
-	   title_string, o.local_port, o.remote_port, o.link_mtu,
-	   o.tun_mtu, o.tun_mtu_extra,
-	   o.verbosity, o.authname, o.ciphername);
+	   title_string, o.local_port, o.remote_port,
+	   TAP_MTU_DEFAULT, o.tun_mtu_extra, o.link_mtu,
+	   o.verbosity,
+	   o.authname, o.ciphername);
 #else
   fprintf (fp, usage_message,
-	   title_string, o.local_port, o.remote_port, o.link_mtu,
-	   o.tun_mtu, o.tun_mtu_extra,
+	   title_string, o.local_port, o.remote_port,
+	   TAP_MTU_DEFAULT, o.tun_mtu_extra, o.link_mtu,
 	   o.verbosity);
 #endif
   fflush(fp);
@@ -719,7 +743,7 @@ parse_line (char *line, char *p[], int n, const char *file, int line_num)
 }
 
 static int
-add_option (struct options *options, int i, char *p1, char *p2, char *p3,
+add_option (struct options *options, int i, char *p[],
 	    const char* file, int line, int level);
 
 static void
@@ -742,251 +766,294 @@ read_config_file (struct options *options, const char* file, int level,
   line_num = 0;
   while (fgets(line, sizeof (line), fp))
     {
-      char *p[3];
-      int nargs;
+      char *p[MAX_PARMS];
       CLEAR (p);
       ++line_num;
-      nargs = parse_line (line, p, 3, file, line_num);
-      if (nargs)
+      if (parse_line (line, p, SIZE (p), file, line_num))
 	{
-	  char *p0 = p[0];
-	  if (strlen (p0) >= 3 && !strncmp (p0, "--", 2))
-	    p0 += 2;
-	  add_option (options, 0, p0, p[1], p[2], file, line_num, level);
+	  if (strlen (p[0]) >= 3 && !strncmp (p[0], "--", 2))
+	    p[0] += 2;
+	  add_option (options, 0, p, file, line_num, level);
 	}
     }
   fclose (fp);
 }
 
+void
+parse_argv (struct options* options, int argc, char *argv[])
+{
+  int i, j;
+
+  /* usage message */
+  if (argc <= 1)
+    usage ();
+
+  /* parse command line */
+  for (i = 1; i < argc; ++i)
+    {
+      char *p[MAX_PARMS];
+      CLEAR (p);
+      p[0] = argv[i];
+      if (strncmp(p[0], "--", 2))
+	{
+	  msg (M_WARN|M_NOPREFIX, "I'm trying to parse \"%s\" as an --option parameter but I don't see a leading '--'", p[0]);
+	  usage_small ();
+	}
+      p[0] += 2;
+
+      for (j = 1; j < MAX_PARMS; ++j)
+	{
+	  if (i + j < argc)
+	    {
+	      char *arg = argv[i + j];
+	      if (strncmp (arg, "--", 2))
+		p[j] = arg;
+	      else
+		break;
+	    }
+	}
+      i = add_option (options, i, p, NULL, 0, 0);
+    }
+}
+
 static int
-add_option (struct options *options, int i, char *p1, char *p2, char *p3,
+add_option (struct options *options, int i, char *p[],
 	    const char* file, int line, int level)
 {
+  ASSERT (MAX_PARMS >= 5);
+
   if (!file)
     {
       file = "[CMD-LINE]";
       line = 1;
     }
-  if (streq (p1, "help"))
+  if (streq (p[0], "help"))
     {
       usage ();
     }
-  if (streq (p1, "version"))
+  if (streq (p[0], "version"))
     {
       usage_version ();
     }
-  else if (streq (p1, "config") && p2)
+  else if (streq (p[0], "config") && p[1])
     {
       ++i;
 
       /* save first config file only in options */
       if (!options->config)
-	options->config = p2;
+	options->config = p[1];
 
-      read_config_file (options, p2, level, file, line);
+      read_config_file (options, p[1], level, file, line);
     }
-  else if (streq (p1, "dev") && p2)
+  else if (streq (p[0], "dev") && p[1])
     {
       ++i;
-      options->dev = p2;
+      options->dev = p[1];
     }
-  else if (streq (p1, "dev-type") && p2)
+  else if (streq (p[0], "dev-type") && p[1])
     {
       ++i;
-      options->dev_type = p2;
+      options->dev_type = p[1];
     }
-  else if (streq (p1, "dev-node") && p2)
+  else if (streq (p[0], "dev-node") && p[1])
     {
       ++i;
-      options->dev_node = p2;
+      options->dev_node = p[1];
     }
-  else if (streq (p1, "tun-ipv6"))
+  else if (streq (p[0], "tun-ipv6"))
     {
       options->tun_ipv6 = true;
     }
-  else if (streq (p1, "ifconfig") && p2 && p3)
+  else if (streq (p[0], "ifconfig") && p[1] && p[2])
     {
-      options->ifconfig_local = p2;
-      options->ifconfig_remote = p3;
+      options->ifconfig_local = p[1];
+      options->ifconfig_remote_netmask = p[2];
       i += 2;
     }
-  else if (streq (p1, "local") && p2)
+  else if (streq (p[0], "local") && p[1])
     {
       ++i;
-      options->local = p2;
+      options->local = p[1];
     }
-  else if (streq (p1, "remote") && p2)
+  else if (streq (p[0], "remote") && p[1])
     {
       ++i;
-      options->remote = p2;
+      options->remote = p[1];
     }
-  else if (streq (p1, "resolv-retry") && p2)
+  else if (streq (p[0], "resolv-retry") && p[1])
     {
       ++i;
-      options->resolve_retry_seconds = positive (atoi (p2));
+      options->resolve_retry_seconds = positive (atoi (p[1]));
     }
-  else if (streq (p1, "ipchange") && p2)
+  else if (streq (p[0], "ipchange") && p[1])
     {
       ++i;
-      options->ipchange = comma_to_space (p2);
+      options->ipchange = comma_to_space (p[1]);
     }
-  else if (streq (p1, "float"))
+  else if (streq (p[0], "float"))
     {
       options->remote_float = true;
     }
-  else if (streq (p1, "gremlin"))
+  else if (streq (p[0], "gremlin"))
     {
       options->gremlin = true;
     }
-  else if (streq (p1, "user") && p2)
+  else if (streq (p[0], "user") && p[1])
     {
       ++i;
-      options->username = p2;
+      options->username = p[1];
     }
-  else if (streq (p1, "group") && p2)
+  else if (streq (p[0], "group") && p[1])
     {
       ++i;
-      options->groupname = p2;
+      options->groupname = p[1];
     }
-  else if (streq (p1, "chroot") && p2)
+  else if (streq (p[0], "chroot") && p[1])
     {
       ++i;
-      options->chroot_dir = p2;
+      options->chroot_dir = p[1];
     }
-  else if (streq (p1, "cd") && p2)
+  else if (streq (p[0], "cd") && p[1])
     {
       ++i;
-      options->cd_dir = p2;
-      if (openvpn_chdir (p2))
-	msg (M_ERR, "cd to '%s' failed", p2);
+      options->cd_dir = p[1];
+      if (openvpn_chdir (p[1]))
+	msg (M_ERR, "cd to '%s' failed", p[1]);
     }
-  else if (streq (p1, "writepid") && p2)
+  else if (streq (p[0], "writepid") && p[1])
     {
       ++i;
-      options->writepid = p2;
+      options->writepid = p[1];
     }
-  else if (streq (p1, "up") && p2)
+  else if (streq (p[0], "up") && p[1])
     {
       ++i;
-      options->up_script = p2;
+      options->up_script = p[1];
     }
-  else if (streq (p1, "down") && p2)
+  else if (streq (p[0], "down") && p[1])
     {
       ++i;
-      options->down_script = p2;
+      options->down_script = p[1];
     }
-  else if (streq (p1, "up-restart"))
+  else if (streq (p[0], "up-restart"))
     {
       options->up_restart = true;
     }
-  else if (streq (p1, "daemon"))
+  else if (streq (p[0], "daemon"))
     {
       if (!options->daemon) {
 	options->daemon = true;
-	open_syslog (p2);
-	if (p2)
+	open_syslog (p[1]);
+	if (p[1])
 	  ++i;
       }
     }
-  else if (streq (p1, "inetd"))
+  else if (streq (p[0], "inetd"))
     {
       if (!options->inetd)
 	{
 	  options->inetd = true;
 	  save_inetd_socket_descriptor ();
-	  open_syslog (p2);
-	  if (p2)
+	  open_syslog (p[1]);
+	  if (p[1])
 	    ++i;
 	}
     }
-  else if (streq (p1, "log") && p2)
+  else if (streq (p[0], "log") && p[1])
     {
       ++i;
       options->log = true;
-      redirect_stdout_stderr (p2, false);
+      redirect_stdout_stderr (p[1], false);
     }
-  else if (streq (p1, "log-append") && p2)
+  else if (streq (p[0], "log-append") && p[1])
     {
       ++i;
       options->log = true;
-      redirect_stdout_stderr (p2, true);
+      redirect_stdout_stderr (p[1], true);
     }
-  else if (streq (p1, "mlock"))
+  else if (streq (p[0], "mlock"))
     {
       options->mlock = true;
     }
-  else if (streq (p1, "verb") && p2)
+  else if (streq (p[0], "verb") && p[1])
     {
       ++i;
-      options->verbosity = positive (atoi (p2));
+      options->verbosity = positive (atoi (p[1]));
     }
-  else if (streq (p1, "mute") && p2)
+  else if (streq (p[0], "mute") && p[1])
     {
       ++i;
-      options->mute = positive (atoi (p2));
+      options->mute = positive (atoi (p[1]));
     }
-  else if ((streq (p1, "link-mtu") || streq (p1, "udp-mtu")) && p2)
+  else if ((streq (p[0], "link-mtu") || streq (p[0], "udp-mtu")) && p[1])
     {
       ++i;
-      options->link_mtu = positive (atoi (p2));
+      options->link_mtu = positive (atoi (p[1]));
       options->link_mtu_defined = true;
     }
-  else if (streq (p1, "tun-mtu") && p2)
+  else if (streq (p[0], "tun-mtu") && p[1])
     {
       ++i;
-      options->tun_mtu = positive (atoi (p2));
+      options->tun_mtu = positive (atoi (p[1]));
       options->tun_mtu_defined = true;
     }
-  else if (streq (p1, "tun-mtu-extra") && p2)
+  else if (streq (p[0], "tun-mtu-extra") && p[1])
     {
       ++i;
-      options->tun_mtu_extra = positive (atoi (p2));
+      options->tun_mtu_extra = positive (atoi (p[1]));
       options->tun_mtu_extra_defined = true;
     }
 #ifdef FRAGMENT_ENABLE
-  else if (streq (p1, "mtu-dynamic"))
+  else if (streq (p[0], "mtu-dynamic"))
     {
       options->mtu_dynamic = true;
-      if (p2)
+      if (p[1])
 	{
-	  if ((options->mtu_min = positive (atoi (p2))))
+	  if ((options->mtu_min = positive (atoi (p[1]))))
 	    options->mtu_min_defined = true;
 	  ++i;
 	}
-      if (p3)
+      if (p[2])
 	{
-	  if ((options->mtu_max = positive (atoi (p3))))
+	  if ((options->mtu_max = positive (atoi (p[2]))))
 	    options->mtu_max_defined = true;
 	  ++i;
 	}
     }
-  else if (streq (p1, "mtu-noicmp"))
+  else if (streq (p[0], "mtu-noicmp"))
     {
       options->mtu_icmp = false;
     }
-#endif
-  else if (streq (p1, "mtu-disc") && p2)
+  else if (streq (p[0], "fragment") && p[1])
     {
       ++i;
-      options->mtu_discover_type = translate_mtu_discover_type_name (p2);
+      options->mtu_dynamic = true;
+      options->mtu_max = positive (atoi (p[1]));
+      options->mtu_max_defined = true;
     }
-  else if (streq (p1, "nice") && p2)
+#endif
+  else if (streq (p[0], "mtu-disc") && p[1])
     {
       ++i;
-      options->nice = atoi (p2);
+      options->mtu_discover_type = translate_mtu_discover_type_name (p[1]);
+    }
+  else if (streq (p[0], "nice") && p[1])
+    {
+      ++i;
+      options->nice = atoi (p[1]);
     }
 #ifdef USE_PTHREAD
-  else if (streq (p1, "nice-work") && p2)
+  else if (streq (p[0], "nice-work") && p[1])
     {
       ++i;
-      options->nice_work = atoi (p2);
+      options->nice_work = atoi (p[1]);
     }
 #endif
-  else if (streq (p1, "shaper") && p2)
+  else if (streq (p[0], "shaper") && p[1])
     {
 #ifdef HAVE_GETTIMEOFDAY
       ++i;
-      options->shaper = atoi (p2);
+      options->shaper = atoi (p[1]);
       if (options->shaper < SHAPER_MIN || options->shaper > SHAPER_MAX)
 	{
 	  msg (M_WARN, "bad shaper value, must be between %d and %d",
@@ -998,301 +1065,354 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
       usage_small ();
 #endif /* HAVE_GETTIMEOFDAY */
     }
-  else if (streq (p1, "port") && p2)
+  else if (streq (p[0], "port") && p[1])
     {
       ++i;
-      options->local_port = options->remote_port = atoi (p2);
+      options->local_port = options->remote_port = atoi (p[1]);
       if (options->local_port <= 0 || options->remote_port <= 0)
 	{
-	  msg (M_WARN, "Bad port number: %s", p2);
+	  msg (M_WARN, "Bad port number: %s", p[1]);
 	  usage_small ();
 	}
     }
-  else if (streq (p1, "lport") && p2)
+  else if (streq (p[0], "lport") && p[1])
     {
       ++i;
-      options->local_port = atoi (p2);
+      options->local_port = atoi (p[1]);
       if (options->local_port <= 0)
 	{
-	  msg (M_WARN, "Bad local port number: %s", p2);
+	  msg (M_WARN, "Bad local port number: %s", p[1]);
 	  usage_small ();
 	}
     }
-  else if (streq (p1, "rport") && p2)
+  else if (streq (p[0], "rport") && p[1])
     {
       ++i;
-      options->remote_port = atoi (p2);
+      options->remote_port = atoi (p[1]);
       if (options->remote_port <= 0)
 	{
-	  msg (M_WARN, "Bad remote port number: %s", p2);
+	  msg (M_WARN, "Bad remote port number: %s", p[1]);
 	  usage_small ();
 	}
     }
-  else if (streq (p1, "nobind"))
+  else if (streq (p[0], "nobind"))
     {
       options->bind_local = false;
     }
-  else if (streq (p1, "inactive") && p2)
+  else if (streq (p[0], "inactive") && p[1])
     {
       ++i;
-      options->inactivity_timeout = positive (atoi (p2));
+      options->inactivity_timeout = positive (atoi (p[1]));
     }
-  else if (streq (p1, "proto") && p2)
+  else if (streq (p[0], "proto") && p[1])
     {
       ++i;
-      options->proto = ascii2proto (p2);
+      options->proto = ascii2proto (p[1]);
       if (options->proto < 0)
 	{
 	  msg (M_WARN, "Bad protocol: '%s'.  Allowed protocols with --proto option: %s",
-	       p2,
+	       p[1],
 	       proto2ascii_all());
 	  usage_small ();
 	}
     }
-  else if (streq (p1, "ping") && p2)
+  else if (streq (p[0], "ping") && p[1])
     {
       ++i;
-      options->ping_send_timeout = positive (atoi (p2));
+      options->ping_send_timeout = positive (atoi (p[1]));
     }
-  else if (streq (p1, "ping-exit") && p2)
+  else if (streq (p[0], "ping-exit") && p[1])
     {
       ++i;
       if (options->ping_rec_timeout_action)
 	ping_rec_err();
-      options->ping_rec_timeout = positive (atoi (p2));
+      options->ping_rec_timeout = positive (atoi (p[1]));
       options->ping_rec_timeout_action = PING_EXIT;
     }
-  else if (streq (p1, "ping-restart") && p2)
+  else if (streq (p[0], "ping-restart") && p[1])
     {
       ++i;
       if (options->ping_rec_timeout_action)
 	ping_rec_err();
-      options->ping_rec_timeout = positive (atoi (p2));
+      options->ping_rec_timeout = positive (atoi (p[1]));
       options->ping_rec_timeout_action = PING_RESTART;
     }
-  else if (streq (p1, "ping-timer-rem"))
+  else if (streq (p[0], "ping-timer-rem"))
     {
       options->ping_timer_remote = true;
     }
-  else if (streq (p1, "persist-tun"))
+  else if (streq (p[0], "persist-tun"))
     {
       options->persist_tun = true;
     }
-  else if (streq (p1, "persist-key"))
+  else if (streq (p[0], "persist-key"))
     {
       options->persist_key = true;
     }
-  else if (streq (p1, "persist-local-ip"))
+  else if (streq (p[0], "persist-local-ip"))
     {
       options->persist_local_ip = true;
     }
-  else if (streq (p1, "persist-remote-ip"))
+  else if (streq (p[0], "persist-remote-ip"))
     {
       options->persist_remote_ip = true;
     }
+  else if (streq (p[0], "route") && p[1])
+    {
+      ++i;
+      if (p[2])
+	++i;
+      if (p[3])
+	++i;
+      if (p[4])
+	++i;
+      add_route_to_option_list (&options->routes, p[1], p[2], p[3], p[4]);
+    }
+  else if (streq (p[0], "route-gateway") && p[1])
+    {
+      ++i;
+      options->route_default_gateway = p[1];      
+    }
+  else if (streq (p[0], "route-delay") && p[1])
+    {
+      ++i;
+      options->route_delay = positive (atoi (p[1]));      
+    }
+  else if (streq (p[0], "route-up") && p[1])
+    {
+      ++i;
+      options->route_script = p[1];
+    }
+  else if (streq (p[0], "route_noauto"))
+    {
+      options->route_noauto = true;
+    }
+  else if (streq (p[0], "setenv") && p[1] && p[2])
+    {
+      i += 2;
+      setenv_str (p[1], p[2]);
+    }
+  else if (streq (p[0], "mssfix"))
+    {
+      options->mssfix_defined = true;
+      if (p[1])
+	{
+	  ++i;
+	  options->mssfix = positive (atoi (p[1]));
+	}
+    }
 #ifdef WIN32
-  else if (streq (p1, "show-adapters"))
+  else if (streq (p[0], "show-adapters"))
     {
       show_tap_win32_adapters ();
       openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
     }
-  else if (streq (p1, "pause-exit"))
+  else if (streq (p[0], "show-valid-subnets"))
+    {
+      show_valid_win32_tun_subnets ();
+      openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
+    }
+  else if (streq (p[0], "pause-exit"))
     {
       set_pause_exit_win32 ();
     }
+  else if (streq (p[0], "no-arp-del"))
+    {
+      options->tuntap_flags |= TUNTAP_FLAGS_WIN32_NO_ARP_DEL;
+    }
 #endif
 #if PASSTOS_CAPABILITY
-  else if (streq (p1, "passtos"))
+  else if (streq (p[0], "passtos"))
     {
       options->passtos = true;
     }
 #endif
 #ifdef USE_LZO
-  else if (streq (p1, "comp-lzo"))
+  else if (streq (p[0], "comp-lzo"))
     {
       options->comp_lzo = true;
     }
-  else if (streq (p1, "comp-noadapt"))
+  else if (streq (p[0], "comp-noadapt"))
     {
       options->comp_lzo_adaptive = false;
     }
 #endif /* USE_LZO */
 #ifdef USE_CRYPTO
-  else if (streq (p1, "show-ciphers"))
+  else if (streq (p[0], "show-ciphers"))
     {
       options->show_ciphers = true;
     }
-  else if (streq (p1, "show-digests"))
+  else if (streq (p[0], "show-digests"))
     {
       options->show_digests = true;
     }
-  else if (streq (p1, "secret") && p2)
+  else if (streq (p[0], "secret") && p[1])
     {
       ++i;
-      options->shared_secret_file = p2;
+      options->shared_secret_file = p[1];
     }
-  else if (streq (p1, "genkey"))
+  else if (streq (p[0], "genkey"))
     {
       options->genkey = true;
     }
-  else if (streq (p1, "auth") && p2)
+  else if (streq (p[0], "auth") && p[1])
     {
       ++i;
       options->authname_defined = true;
-      options->authname = p2;
+      options->authname = p[1];
       if (streq (options->authname, "none"))
 	{
 	  options->authname_defined = false;
 	  options->authname = NULL;
 	}
     }
-  else if (streq (p1, "auth"))
+  else if (streq (p[0], "auth"))
     {
       options->authname_defined = true;
     }
-  else if (streq (p1, "cipher") && p2)
+  else if (streq (p[0], "cipher") && p[1])
     {
       ++i;
       options->ciphername_defined = true;
-      options->ciphername = p2;
+      options->ciphername = p[1];
       if (streq (options->ciphername, "none"))
 	{
 	  options->ciphername_defined = false;
 	  options->ciphername = NULL;
 	}
     }
-  else if (streq (p1, "cipher"))
+  else if (streq (p[0], "cipher"))
     {
       options->ciphername_defined = true;
     }
-  else if (streq (p1, "no-replay"))
+  else if (streq (p[0], "no-replay"))
     {
       options->packet_id = false;
     }
-  else if (streq (p1, "no-iv"))
+  else if (streq (p[0], "no-iv"))
     {
       options->iv = false;
     }
-  else if (streq (p1, "replay-persist") && p2)
+  else if (streq (p[0], "replay-persist") && p[1])
     {
       ++i;
-      options->packet_id_file = p2;
+      options->packet_id_file = p[1];
     }
-  else if (streq (p1, "test-crypto"))
+  else if (streq (p[0], "test-crypto"))
     {
       options->test_crypto = true;
     }
 #ifdef HAVE_EVP_CIPHER_CTX_SET_KEY_LENGTH
-  else if (streq (p1, "keysize") && p2)
+  else if (streq (p[0], "keysize") && p[1])
     {
       ++i;
-      options->keysize = atoi (p2) / 8;
+      options->keysize = atoi (p[1]) / 8;
       if (options->keysize < 0 || options->keysize > MAX_CIPHER_KEY_LENGTH)
 	{
-	  msg (M_WARN, "Bad keysize: %s", p2);
+	  msg (M_WARN, "Bad keysize: %s", p[1]);
 	  usage_small ();
 	}
     }
 #endif
 #ifdef USE_SSL
-  else if (streq (p1, "show-tls"))
+  else if (streq (p[0], "show-tls"))
     {
       options->show_tls_ciphers = true;
     }
-  else if (streq (p1, "tls-server"))
+  else if (streq (p[0], "tls-server"))
     {
       options->tls_server = true;
     }
-  else if (streq (p1, "tls-client"))
+  else if (streq (p[0], "tls-client"))
     {
       options->tls_client = true;
     }
-  else if (streq (p1, "ca") && p2)
+  else if (streq (p[0], "ca") && p[1])
     {
       ++i;
-      options->ca_file = p2;
+      options->ca_file = p[1];
     }
-  else if (streq (p1, "dh") && p2)
+  else if (streq (p[0], "dh") && p[1])
     {
       ++i;
-      options->dh_file = p2;
+      options->dh_file = p[1];
     }
-  else if (streq (p1, "cert") && p2)
+  else if (streq (p[0], "cert") && p[1])
     {
       ++i;
-      options->cert_file = p2;
+      options->cert_file = p[1];
     }
-  else if (streq (p1, "key") && p2)
+  else if (streq (p[0], "key") && p[1])
     {
       ++i;
-      options->priv_key_file = p2;
+      options->priv_key_file = p[1];
     }
-  else if (streq (p1, "askpass"))
+  else if (streq (p[0], "askpass"))
     {
       options->askpass = true;
     }
-  else if (streq (p1, "single-session"))
+  else if (streq (p[0], "single-session"))
     {
       options->single_session = true;
     }
-  else if (streq (p1, "disable-occ"))
+  else if (streq (p[0], "disable-occ"))
     {
       options->disable_occ = true;
     }
-  else if (streq (p1, "tls-cipher") && p2)
+  else if (streq (p[0], "tls-cipher") && p[1])
     {
       ++i;
-      options->cipher_list = p2;
+      options->cipher_list = p[1];
     }
-  else if (streq (p1, "tls-verify") && p2)
+  else if (streq (p[0], "tls-verify") && p[1])
     {
       ++i;
-      options->tls_verify = comma_to_space (p2);
+      options->tls_verify = comma_to_space (p[1]);
     }
-  else if (streq (p1, "tls_timeout") && p2)
+  else if (streq (p[0], "tls_timeout") && p[1])
     {
       ++i;
-      options->tls_timeout = positive (atoi (p2));
+      options->tls_timeout = positive (atoi (p[1]));
     }
-  else if (streq (p1, "reneg-bytes") && p2)
+  else if (streq (p[0], "reneg-bytes") && p[1])
     {
       ++i;
-      options->renegotiate_bytes = positive (atoi (p2));
+      options->renegotiate_bytes = positive (atoi (p[1]));
     }
-  else if (streq (p1, "reneg-pkts") && p2)
+  else if (streq (p[0], "reneg-pkts") && p[1])
     {
       ++i;
-      options->renegotiate_packets = positive (atoi (p2));
+      options->renegotiate_packets = positive (atoi (p[1]));
     }
-  else if (streq (p1, "reneg-sec") && p2)
+  else if (streq (p[0], "reneg-sec") && p[1])
     {
       ++i;
-      options->renegotiate_seconds = positive (atoi (p2));
+      options->renegotiate_seconds = positive (atoi (p[1]));
     }
-  else if (streq (p1, "hand-window") && p2)
+  else if (streq (p[0], "hand-window") && p[1])
     {
       ++i;
-      options->handshake_window = positive (atoi (p2));
+      options->handshake_window = positive (atoi (p[1]));
     }
-  else if (streq (p1, "tran-window") && p2)
+  else if (streq (p[0], "tran-window") && p[1])
     {
       ++i;
-      options->transition_window = positive (atoi (p2));
+      options->transition_window = positive (atoi (p[1]));
     }
-  else if (streq (p1, "tls-auth") && p2)
+  else if (streq (p[0], "tls-auth") && p[1])
     {
       ++i;
-      options->tls_auth_file = p2;
+      options->tls_auth_file = p[1];
     }
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
 #ifdef TUNSETPERSIST
-  else if (streq (p1, "rmtun"))
+  else if (streq (p[0], "rmtun"))
     {
       options->persist_config = true;
       options->persist_mode = 0;
     }
-  else if (streq (p1, "mktun"))
+  else if (streq (p[0], "mktun"))
     {
       options->persist_config = true;
       options->persist_mode = 1;
@@ -1301,48 +1421,10 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
   else
     {
       if (file)
-	msg (M_WARN|M_NOPREFIX, "Unrecognized option or missing parameter(s) in %s:%d: %s", file, line, p1);
+	msg (M_WARN|M_NOPREFIX, "Unrecognized option or missing parameter(s) in %s:%d: %s", file, line, p[0]);
       else
-	msg (M_WARN|M_NOPREFIX, "Unrecognized option or missing parameter(s): --%s", p1);
+	msg (M_WARN|M_NOPREFIX, "Unrecognized option or missing parameter(s): --%s", p[0]);
       usage_small ();
     }
   return i;
-}
-
-void
-parse_argv (struct options* options, int argc, char *argv[])
-{
-  int i;
-
-  /* usage message */
-  if (argc <= 1)
-    usage ();
-
-  /* parse command line */
-  for (i = 1; i < argc; ++i)
-    {
-      char *p1 = argv[i];
-      char *p2 = NULL;
-      char *p3 = NULL;
-
-      if (strncmp(p1, "--", 2))
-	{
-	  msg (M_WARN|M_NOPREFIX, "I'm trying to parse \"%s\" as an --option parameter but I don't see a leading '--'", p1);
-	  usage_small ();
-	}
-      p1 += 2;
-      if (i + 1 < argc)
-	{
-	  p2 = argv[i + 1];
-	  if (!strncmp (p2, "--", 2))
-	    p2 = NULL;
-	}
-      if (i + 2 < argc && p2)
-	{
-	  p3 = argv[i + 2];
-	  if (!strncmp (p3, "--", 2))
-	    p3 = NULL;
-	}
-      i = add_option (options, i, p1, p2, p3, NULL, 0, 0);
-    }
 }

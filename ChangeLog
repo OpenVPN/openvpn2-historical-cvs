@@ -2,10 +2,15 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.11 2003/08/29 05:59:22 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.12 2003/09/23 08:36:57 jimyonan Exp $
 	
 Upcoming version 1.5.0
 
+* Protocol compatibility is maintained with the 1.4.x and
+  1.3.x series.  If you are connecting to a 1.3.x peer,
+  you must use the --disable-occ option on the 1.3.x peer
+  if you are using TLS mode.  See Compatibility Notes
+  on web site for more info.
 * Added TCP support via the new --proto option (beta1).
 * Renamed udp-centric options such as --udp-mtu to
   --link-mtu (old option names preserved for compatibility)
@@ -85,11 +90,55 @@ Upcoming version 1.5.0
 * On Windows, check that the current user is a member of
   the Administrator group before attempting install
   or uninstall (beta7).
-* Protocol compatibility is maintained with the 1.4.x and
-  1.3.x series.  If you are connecting to a 1.3.x peer,
-  you must use the --disable-occ option on the 1.3.x peer
-  if you are using TLS mode.  See Compatibility Notes
-  on web site for more info.
+* Extended the --ifconfig option to work on tap devices
+  as well as tun devices (beta8).
+* Implemented the --ifconfig option for Windows, by calling
+  the netsh tool (beta8).
+* By default, do an "arp -d *" on Windows after TAP-Win32
+  open to refresh the MAC cache.  This behaviour can
+  be disabled with --no-arp-del (beta8).
+* On Windows, allow the --dev-node parameter (which
+  specifies the name of the TAP-Win32 adapter) to
+  be omitted in cases where there is a single
+  TAP-Win32 adapter on the system which can be assumed
+  to be the default (beta8).
+* Modified the diagnostic --verb 5 debugging level
+  to print 'R' for TCP/UDP read, 'W' for TCP/UDP write,
+  'r' for TUN/TAP read, and 'w' for TUN/TAP write (beta8).
+* Conditionalize OpenBSD read_tun and write_tun based
+  on tun or tap mode (beta8).
+* Added IPv6 tun support to OpenBSD (Thomas Glanzmann)
+  (beta8).
+* Make the --enable-mtu-dynamic ./configure option
+  enabled by default (beta8).
+* Deprecated the --mtu-dynamic run-time option, in
+  favor of --fragment (beta8).
+* DNS names can now be used as --ifconfig parameters (beta8).
+* Significant work on TAP-Win32 driver to bring up to
+  SMP standards (beta8).
+* On Windows, fixed dangling IRP problem if TAP-Win32
+  driver is unloaded or disabled, while a user-space
+  process has it open.
+* On Windows, if --tun-mtu is not specified, it will be
+  read from the TAP-Win32 driver via ioctl (beta8).
+* On Windows, added TAP-Win32 driver status info to
+  "F2" keyboard signal (only when run from
+  a console window) (beta8).
+* Added --mssfix option to control TCP MSS size
+  (YANO Hirokuni) (beta8).
+* Renamed --mtu-dynamic option to --fragment to more
+  accurately reflect its function.  Fragment accepts
+  a single parameter which is the upper limit on
+  acceptable UDP packet size (beta8).
+* Changed default --tun-mtu-extra parameter to 32
+  from 64 (beta8).
+* Eliminated reference to malloc.o in configure.ac
+  (beta8).
+* Added tun device emulation to the TAP-Win32
+  driver (beta8).
+* Added --route and related options (beta8).
+* Added init script for SuSE Linux (Frank Plohmann)
+* (beta8).
 
 2003.08.04 -- Version 1.4.3
 

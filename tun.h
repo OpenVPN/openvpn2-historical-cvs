@@ -32,6 +32,7 @@
 #include "error.h"
 #include "mtu.h"
 #include "io.h"
+#include "proto.h"
 
 /*
  * Define a TUN/TAP dev.
@@ -39,42 +40,80 @@
 
 struct tuntap
 {
+  int type; /* DEV_TYPE_x as defined in proto.h */
+
+  bool ipv6;
+  char actual[256]; /* actual name of TUN/TAP dev, usually including unit number */
+
+  /* ifconfig parameters */
+  in_addr_t local;
+  in_addr_t remote_netmask;
+  in_addr_t broadcast;
+
 #ifdef WIN32
-  /* these macros are called in the context of the openvpn() function */
-# define TUNTAP_SET_READ(tt)  { if (tt->hand != NULL) { \
-                                  wait_add (&event_wait, tt->reads.overlapped.hEvent); \
-                                  tun_read_queue (tt, 0); }}
-# define TUNTAP_SET_WRITE(tt) { if (tt->hand != NULL) wait_add (&event_wait, tt->writes.overlapped.hEvent); }
-# define TUNTAP_ISSET(tt, set)     (tt->hand != NULL && wait_trigger (&event_wait, tt->set.overlapped.hEvent))
-# define TUNTAP_SETMAXFD(tt)
-# define TUNTAP_READ_STAT(tt)  (tt->hand != NULL ? overlapped_io_state_ascii (&tt->reads,  "tr") : "trX")
-# define TUNTAP_WRITE_STAT(tt) (tt->hand != NULL ? overlapped_io_state_ascii (&tt->writes, "tw") : "twX")
   HANDLE hand;
   struct overlapped_io reads;
   struct overlapped_io writes;
-
 #else
-
-  /* these macros are called in the context of the openvpn() function */
-# define TUNTAP_SET_READ(tt)   { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.reads);    }
-# define TUNTAP_SET_WRITE(tt)  { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.writes);    }
-# define TUNTAP_ISSET(tt, set)      (tt->fd >= 0 && FD_ISSET (tt->fd, &event_wait.set))
-# define TUNTAP_SETMAXFD(tt)   { if (tt->fd >= 0)   wait_update_maxfd (&event_wait, tt->fd); }
-# define TUNTAP_READ_STAT(tt)  (TUNTAP_ISSET (tt, reads) ?  "TR" : "tr")
-# define TUNTAP_WRITE_STAT(tt) (TUNTAP_ISSET (tt, writes) ? "TW" : "tw")
   int fd;   /* file descriptor for TUN/TAP dev */
 #endif
+
 #ifdef TARGET_SOLARIS
   int ip_fd;
 #endif
-  bool ipv6;
-  char actual[256]; /* actual name of TUN/TAP dev, usually including unit number */
+
+  /* Some TUN/TAP drivers like to be ioctled for mtu
+   after open */
+  int post_open_mtu;
 };
+
+/*
+ * These macros are called in the context of the openvpn() function,
+ * and help to abstract away the differences between Win32 and Posix.
+ */
+
+#ifdef WIN32
+
+#define TUNTAP_SET_READ(tt)  \
+  { if (tt->hand != NULL) { \
+      wait_add (&event_wait, tt->reads.overlapped.hEvent); \
+      tun_read_queue (tt, 0); }}
+
+#define TUNTAP_SET_WRITE(tt) \
+  { if (tt->hand != NULL) \
+      wait_add (&event_wait, tt->writes.overlapped.hEvent); }
+
+#define TUNTAP_ISSET(tt, set) \
+  (tt->hand != NULL \
+  && wait_trigger (&event_wait, tt->set.overlapped.hEvent))
+
+#define TUNTAP_SETMAXFD(tt)
+
+#define TUNTAP_READ_STAT(tt) \
+   (tt->hand != NULL \
+   ? overlapped_io_state_ascii (&tt->reads,  "tr") : "trX")
+
+#define TUNTAP_WRITE_STAT(tt) \
+   (tt->hand != NULL \
+   ? overlapped_io_state_ascii (&tt->writes, "tw") : "twX")
+
+#else
+
+#define TUNTAP_SET_READ(tt)   { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.reads); }
+#define TUNTAP_SET_WRITE(tt)  { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.writes); }
+#define TUNTAP_ISSET(tt, set)      (tt->fd >= 0 && FD_ISSET (tt->fd, &event_wait.set))
+#define TUNTAP_SETMAXFD(tt)   { if (tt->fd >= 0)   wait_update_maxfd (&event_wait, tt->fd); }
+#define TUNTAP_READ_STAT(tt)  (TUNTAP_ISSET (tt, reads) ?  "TR" : "tr")
+#define TUNTAP_WRITE_STAT(tt) (TUNTAP_ISSET (tt, writes) ? "TW" : "tw")
+
+#endif
 
 void clear_tuntap (struct tuntap *tuntap);
 
 void open_tun (const char *dev, const char *dev_type, const char *dev_node,
-	  bool ipv6, int mtu, struct tuntap *tt);
+	       bool ipv6, struct tuntap *tt);
+
+void open_tun_post_config (struct tuntap *tt, unsigned int flags);
 
 void close_tun (struct tuntap *tt);
 
@@ -83,15 +122,23 @@ int write_tun (struct tuntap* tt, uint8_t *buf, int len);
 int read_tun (struct tuntap* tt, uint8_t *buf, int len);
 
 void tuncfg (const char *dev, const char *dev_type, const char *dev_node,
-	  bool ipv6, int persist_mode);
+	     bool ipv6, int persist_mode);
 
-void do_ifconfig (const char *dev, const char *dev_type,
-		  const char *ifconfig_local, const char *ifconfig_remote,
+const char *guess_tuntap_dev (const char *dev, const char *dev_type,
+			      const char *dev_node);
+
+void do_ifconfig (struct tuntap *tt,
+		  const char *dev,       /* --dev option */
+		  const char *dev_type,  /* --dev-type option */
+		  const char *actual,    /* actual device name */
+		  const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
+		  const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
 		  int tun_mtu);
 
 const char *dev_component_in_dev_node (const char *dev_node);
 
 bool is_dev_type (const char *dev, const char *dev_type, const char *match_type);
+int dev_type_enum (const char *dev, const char *dev_type);
 const char *dev_type_string (const char *dev, const char *dev_type);
 
 /*
@@ -136,6 +183,8 @@ ifconfig_order(void)
   return IFCONFIG_AFTER_TUN_OPEN;
 #elif defined(TARGET_NETBSD)
   return IFCONFIG_AFTER_TUN_OPEN;
+#elif defined(WIN32)
+  return IFCONFIG_BEFORE_TUN_OPEN;
 #else
   return IFCONFIG_DEFAULT;
 #endif
@@ -143,14 +192,44 @@ ifconfig_order(void)
 
 #ifdef WIN32
 
+#define TUNTAP_FLAGS_WIN32_NO_ARP_DEL 0x00000001
+
 #define TUN_PASS_BUFFER
 
+#define GET_DEV_UID_NORMAL           0
+#define GET_DEV_UID_DEFAULT          1
+#define GET_DEV_UID_ENUMERATE        2
+#define GET_DEV_UID_MAX              3
+
+const char *get_device_guid (const char *name,
+			     char *actual_name,
+			     int actual_name_size,
+			     int op);
+
+void verify_255_255_255_252 (in_addr_t local, in_addr_t remote);
+
 void show_tap_win32_adapters (void);
+void show_valid_win32_tun_subnets (void);
+const char *tap_win32_getinfo (struct tuntap *tt);
 
 void tun_frame_init (struct frame *frame, struct tuntap *tt);
 int tun_read_queue (struct tuntap *tt, int maxsize);
 int tun_write_queue (struct tuntap *tt, struct buffer *buf);
 int tun_finalize (HANDLE h, struct overlapped_io *io, struct buffer *buf);
+
+static inline bool
+tuntap_stop (int status)
+{
+  /*
+   * This corresponds to the STATUS_NO_SUCH_DEVICE
+   * error in tapdrvr.c.
+   */
+  if (status < 0)
+    {
+      return openvpn_errno () == ERROR_FILE_NOT_FOUND;
+    }
+  return false;
+}
 
 static inline int
 tun_write_win32 (struct tuntap *tt, struct buffer *buf)
@@ -188,5 +267,11 @@ write_tun_buffered (struct tuntap *tt, struct buffer *buf)
 #else
 
 static inline void tun_frame_init (struct frame *frame, struct tuntap *tt) {}
+
+static inline bool
+tuntap_stop (int status)
+{
+  return false;
+}
 
 #endif

@@ -1,11 +1,15 @@
 /*
  *  TAP-Win32 -- A kernel driver to provide virtual tap device functionality
- *               on Windows.  Derived from the CIPE-Win32 project at
- *               http://cipe-win32.sourceforge.net/
+ *               on Windows.  Originally derived from the CIPE-Win32
+ *               project by Damion K. Wilson, with extensive modifications by
+ *               James Yonan.
  *
- *  Copyright (C) 2003 Damion K. Wilson
+ *  All source code which derives from the CIPE-Win32 project is
+ *  Copyright (C) Damion K. Wilson, 2003, and is released under the
+ *  GPL version 2 (see below).
  *
- *  Modifications by James Yonan in accordance with the GPL.
+ *  All other source code is Copyright (C) James Yonan, 2003,
+ *  and is released under the GPL version 2 (see below).
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,35 +30,15 @@
 #ifndef TAP_TYPES_DEFINED
 #define TAP_TYPES_DEFINED
 
-//===========================================================================================
-//
-//===========================================================================================
-typedef PVOID LITEM;
+typedef struct _Queue
+{
+  ULONG base;
+  ULONG size;
+  ULONG capacity;
+  ULONG max_size;
+  PVOID data[];
+} Queue;
 
-typedef enum 
-   {
-    LMODE_STACK,
-    LMODE_QUEUE
-   }
-LMODE;
-
-typedef struct LNODESTRUCT
-   {
-    struct LNODESTRUCT *m_Next, *m_Previous;
-    LITEM m_Payload;
-   }
-*LNODE;
-
-typedef struct LROOTSTRUCT
-   {
-    ULONG m_Count, m_Limit;
-    LNODE m_First, m_Last;
-   }
-*LROOT;
-
-//===========================================================================================
-//
-//===========================================================================================
 typedef struct _TapAdapter;
 typedef struct _TapPacket;
 
@@ -72,33 +56,64 @@ TapAdapterQuery, *TapAdapterQueryPointer;
 
 typedef struct _TapExtension
    {
-    struct LROOTSTRUCT m_PacketQueue, m_IrpQueue;
-    struct _TapAdapter *m_Adapter;
+     struct _TapAdapter *m_Adapter;
+     Queue *m_PacketQueue, *m_IrpQueue;
+     BOOLEAN m_halt;
    }
 TapExtension, *TapExtensionPointer;
 
+
 typedef struct _TapPacket
    {
-    ULONG m_Size;
-    UCHAR m_Data [1]; // Do NOT rearrange the order here, m_Buffer MUST be last !!
+#   define TAP_PACKET_SIZE(data_size) (sizeof (TapPacket) + (data_size))
+#   define TP_POINT_TO_POINT 0x80000000
+#   define TP_SIZE_MASK      (~TP_POINT_TO_POINT)
+    ULONG m_SizeFlags;
+    UCHAR m_Data []; // m_Data must be the last struct member
    }
 TapPacket, *TapPacketPointer;
 
 typedef struct _TapAdapter
-   {
-    unsigned char m_MAC [6], *m_Name, *m_TapName;
-    BOOLEAN m_TapIsRunning, m_InterfaceIsRunning;
-    NDIS_HANDLE m_MiniportAdapterHandle;
-    ULONG m_Rx, m_Tx, m_RxErr, m_TxErr;
-    UNICODE_STRING m_UnicodeLinkName;
-    PDEVICE_OBJECT m_TapDevice;
-    NDIS_SPIN_LOCK m_Lock;
-    NDIS_MEDIUM m_Medium;
-    ULONG m_Lookahead;
-    ULONG m_TapOpens;
-    ULONG m_MTU;
-   }
-TapAdapter, *TapAdapterPointer;
+{
+  MACADDR m_MAC;
+  BOOLEAN m_TapIsRunning, m_InterfaceIsRunning;
+  unsigned char *m_Name, *m_TapName;
+  NDIS_HANDLE m_MiniportAdapterHandle;
+  LONG m_Rx, m_Tx, m_RxErr, m_TxErr;
+  UNICODE_STRING m_UnicodeLinkName;
+  PDEVICE_OBJECT m_TapDevice;
+  NDIS_SPIN_LOCK m_Lock;
+  NDIS_SPIN_LOCK m_QueueLock;
+  NDIS_MEDIUM m_Medium;
+  ULONG m_Lookahead;
+  ULONG m_TapOpens;
+  ULONG m_MTU;
+
+  // Info for point-to-point mode
+  BOOLEAN m_PointToPoint;
+  IPADDR m_localIP;
+  IPADDR m_remoteIP;
+  ETH_HEADER m_TapToUser;
+  ETH_HEADER m_UserToTap;
+  MACADDR m_MAC_Broadcast;
+
+  // Used for device status ioctl only
+  const char *m_LastErrorFilename;
+  int m_LastErrorLineNumber;
+  LONG m_NumTapOpens;
+  char m_DeviceState;
+
+  // Help to tear down the adapter by keeping
+  // some state information on allocated
+  // resources.
+  BOOLEAN m_CalledAdapterFreeResources;
+  BOOLEAN m_CalledTapDeviceFreeResources;
+  BOOLEAN m_RegisteredAdapterShutdownHandler;
+  BOOLEAN m_AllocatedSpinlocks;
+  BOOLEAN m_DeviceExtensionIsAccessible;
+  BOOLEAN m_CreatedSymbolLink;
+  BOOLEAN m_CreatedUnicodeLinkName;
+
+} TapAdapter, *TapAdapterPointer;
 
 #endif
-

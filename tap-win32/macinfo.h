@@ -1,11 +1,15 @@
 /*
  *  TAP-Win32 -- A kernel driver to provide virtual tap device functionality
- *               on Windows.  Derived from the CIPE-Win32 project at
- *               http://cipe-win32.sourceforge.net/
+ *               on Windows.  Originally derived from the CIPE-Win32
+ *               project by Damion K. Wilson, with extensive modifications by
+ *               James Yonan.
  *
- *  Copyright (C) 2003 Damion K. Wilson
+ *  All source code which derives from the CIPE-Win32 project is
+ *  Copyright (C) Damion K. Wilson, 2003, and is released under the
+ *  GPL version 2 (see below).
  *
- *  Modifications by James Yonan in accordance with the GPL.
+ *  All other source code is Copyright (C) James Yonan, 2003,
+ *  and is released under the GPL version 2 (see below).
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -53,8 +57,10 @@ extern "C" {
 //                          MAC Address Manipulation Routines
 //===================================================================================
 unsigned char HexStringToDecimalInt (unsigned char p_Character);
-void ConvertMacInfo (unsigned char *p_Destination, unsigned char *p_Source, unsigned long p_Length);
-void GenerateRandomMac (unsigned char *mac, unsigned char *adapter_name);
+void ConvertMacInfo (MACADDR p_Destination, unsigned char *p_Source, unsigned long p_Length);
+void GenerateRandomMac (MACADDR mac, unsigned char *adapter_name);
+
+#define COPY_MAC(dest, src) memcpy(dest, src, sizeof (MACADDR));
 
 #ifdef __cplusplus
 }

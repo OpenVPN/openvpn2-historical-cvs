@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [1.5-beta7], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [1.5-beta7.6], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -60,9 +60,9 @@ AC_ARG_ENABLE(strict,
 )
 
 AC_ARG_ENABLE(mtu-dynamic,
-   [  --enable-mtu-dynamic    Enable dynamic MTU support],
+   [  --disable-mtu-dynamic    Disable dynamic MTU support],
    [DYNAMIC_MTU="$enableval"],
-   [DYNAMIC_MTU="no"]
+   [DYNAMIC_MTU="yes"]
 )
 
 AC_ARG_ENABLE(strict-options,
@@ -99,6 +99,13 @@ AC_ARG_WITH(ifconfig-path,
    [AC_PATH_PROG([IFCONFIG], [ifconfig], [ifconfig], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])]
 )
 AC_DEFINE_UNQUOTED(IFCONFIG_PATH, "$IFCONFIG", [Path to ifconfig tool])
+
+AC_ARG_WITH(route-path,
+   [  --with-route-path=PATH  Path to route tool],
+   [ROUTE="$withval"],
+   [AC_PATH_PROG([ROUTE], [route], [route], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])]
+)
+AC_DEFINE_UNQUOTED(ROUTE_PATH, "$ROUTE", [Path to route tool])
 
 AC_ARG_WITH(leak-check,
    [  --with-leak-check=TYPE  Build with memory leak checking, TYPE = dmalloc or ssl],
@@ -274,7 +281,6 @@ AC_CACHE_SAVE
 
 dnl Required library functions
 AC_FUNC_MEMCMP
-AC_FUNC_MALLOC
 
 AC_CHECK_FUNCS(socket recv recvfrom send sendto listen dnl
 	       accept connect bind select gethostbyname dnl

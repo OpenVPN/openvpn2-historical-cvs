@@ -297,4 +297,111 @@ generate_window_title (const char *title)
     }
 }
 
+/* semaphore functions */
+
+void
+semaphore_clear (struct semaphore *s)
+{
+  CLEAR (*s);
+}
+
+void
+semaphore_open (struct semaphore *s, const char *name)
+{
+  s->locked = false;
+  s->name = name;
+  s->hand = CreateSemaphore(NULL, 1, 1, name);
+  if (s->hand == NULL)
+    msg (M_ERR, "Cannot create Win32 semaphore '%s'", name);
+  msg (D_SEMAPHORE, "Created Win32 semaphore '%s'", s->name);
+}
+
+bool
+semaphore_lock (struct semaphore *s, int timeout_milliseconds)
+{
+  DWORD status;
+  bool ret;
+
+  ASSERT (s->hand);
+  ASSERT (!s->locked);
+
+  msg (M_INFO, "Attempting to lock Win32 semaphore '%s' prior to net shell command (timeout = %d sec)",
+       s->name,
+       timeout_milliseconds / 1000);
+  status = WaitForSingleObject (s->hand, timeout_milliseconds);
+  if (status == WAIT_FAILED)
+    msg (M_ERR, "Wait failed on Win32 semaphore '%s'", s->name);
+  ret = (status == WAIT_TIMEOUT) ? false : true;
+  if (ret)
+    {
+      msg (D_SEMAPHORE, "Locked Win32 semaphore '%s'", s->name);
+      s->locked = true;
+    }
+  else
+    {
+      msg (D_SEMAPHORE, "Wait on Win32 semaphore '%s' timed out after %d milliseconds",
+	   s->name,
+	   timeout_milliseconds);
+    }
+  return ret;
+}
+
+void
+semaphore_release (struct semaphore *s)
+{
+  ASSERT (s->hand);
+  ASSERT (s->locked);
+  msg (D_SEMAPHORE, "Releasing Win32 semaphore '%s'", s->name);
+  if (!ReleaseSemaphore(s->hand, 1, NULL))
+    msg (M_WARN | M_ERRNO, "ReleaseSemaphore failed on Win32 semaphore '%s'",
+	 s->name);
+  s->locked = false;
+}
+
+void
+semaphore_close (struct semaphore *s)
+{
+  if (s->hand)
+    {
+      if (s->locked)
+	semaphore_release (s);
+      msg (D_SEMAPHORE, "Closing Win32 semaphore '%s'", s->name);
+      CloseHandle (s->hand);
+      s->hand = NULL;
+    }
+}
+
+/*
+ * Special global semaphore used to protect network
+ * shell commands from simultaneous instantiation.
+ */
+
+struct semaphore netcmd_semaphore;
+
+void
+netcmd_semaphore_init (void)
+{
+  semaphore_open (&netcmd_semaphore, "openvpn_netcmd");
+}
+
+void
+netcmd_semaphore_close (void)
+{
+  semaphore_close (&netcmd_semaphore);
+}
+
+void
+netcmd_semaphore_lock (void)
+{
+  const int timeout_seconds = 60;
+  if (!semaphore_lock (&netcmd_semaphore, timeout_seconds * 1000))
+    msg (M_FATAL, "Cannot lock net command semaphore"); 
+}
+
+void
+netcmd_semaphore_release (void)
+{
+  semaphore_release (&netcmd_semaphore);
+}
+
 #endif

@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "27 August 2003"
+.TH openvpn 8 "18 September 2003"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -93,84 +93,91 @@ openvpn \- secure IP tunnel daemon.
 .in +4
 .ti -4
 .B openvpn
+[\ \fB\-\-askpass\fR\ ]
+[\ \fB\-\-auth\fR\ \fIalg\fR\ ]
+[\ \fB\-\-ca\fR\ \fIfile\fR\ ]
+[\ \fB\-\-cd\fR\ \fIdir\fR\ ]
+[\ \fB\-\-cert\fR\ \fIfile\fR\ ]
+[\ \fB\-\-chroot\fR\ \fIdir\fR\ ]
+[\ \fB\-\-cipher\fR\ \fIalg\fR\ ]
+[\ \fB\-\-comp\-lzo\fR\ ]
+[\ \fB\-\-comp\-noadapt\fR\ ]
 [\ \fB\-\-config\fR\ \fIfile\fR\ ]
-[\ \fB\-\-local\fR\ \fIhost\fR\ ]
-[\ \fB\-\-remote\fR\ \fIhost\fR\ ]
-[\ \fB\-\-proto\fR\ \fIp\fR\ ]
-[\ \fB\-\-resolv\-retry\fR\ \fIn\fR\ ]
-[\ \fB\-\-float\fR\ ]
-[\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
-[\ \fB\-\-port\fR\ \fIport\fR\ ]
-[\ \fB\-\-lport\fR\ \fIport\fR\ ]
-[\ \fB\-\-rport\fR\ \fIport\fR\ ]
-[\ \fB\-\-nobind\fR\ ]
-[\ \fB\-\-dev\fR\ \fItunX\ |\ tapX\ |\ null\fR\ ]
-[\ \fB\-\-tun\-ipv6\fR\ ]
-[\ \fB\-\-dev\-type\fR\ \fIdevice\-type\fR\ ]
-[\ \fB\-\-dev\-node\fR\ \fInode\fR\ ]
+[\ \fB\-\-daemon\fR\ ]
 [\ \fB\-\-dev\-name\fR\ \fIname\fR\ ]
+[\ \fB\-\-dev\-node\fR\ \fInode\fR\ ]
+[\ \fB\-\-dev\-type\fR\ \fIdevice\-type\fR\ ]
+[\ \fB\-\-dev\fR\ \fItunX\ |\ tapX\ |\ null\fR\ ]
+[\ \fB\-\-dh\fR\ \fIfile\fR\ ]
+[\ \fB\-\-disable\-occ\fR\ ]
+[\ \fB\-\-down\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-float\fR\ ]
+[\ \fB\-\-fragment\fR\ \fImax\fR\ ]
+[\ \fB\-\-gremlin\fR\ ]
+[\ \fB\-\-group\fR\ \fIgroup\fR\ ]
+[\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
 [\ \fB\-\-ifconfig\fR\ \fIl\ r\fR\ ]
-[\ \fB\-\-link\-mtu\fR\ \fIn\fR\ ]
-[\ \fB\-\-tun\-mtu\fR\ \fIn\fR\ ]
-[\ \fB\-\-tun\-mtu\-extra\fR\ \fIn\fR\ ]
-[\ \fB\-\-mtu\-disc\fR\ \fItype\fR\ ]
-[\ \fB\-\-mtu\-dynamic\fR\ \fI[min]\ [max]\fR\ ]
-[\ \fB\-\-shaper\fR\ \fIn\fR\ ]
 [\ \fB\-\-inactive\fR\ \fIn\fR\ ]
-[\ \fB\-\-ping\fR\ \fIn\fR\ ]
-[\ \fB\-\-ping\-exit\fR\ \fIn\fR\ ]
-[\ \fB\-\-ping\-restart\fR\ \fIn\fR\ ]
-[\ \fB\-\-ping\-timer\-rem\fR\ ]
-[\ \fB\-\-persist\-tun\fR\ ]
+[\ \fB\-\-inetd\fR\ ]
+[\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-key\fR\ \fIfile\fR\ ]
+[\ \fB\-\-keysize\fR\ \fIn\fR\ ]
+[\ \fB\-\-link\-mtu\fR\ \fIn\fR\ ]
+[\ \fB\-\-local\fR\ \fIhost\fR\ ]
+[\ \fB\-\-log\-append\fR\ \fIfile\fR\ ]
+[\ \fB\-\-log\fR\ \fIfile\fR\ ]
+[\ \fB\-\-lport\fR\ \fIport\fR\ ]
+[\ \fB\-\-mlock\fR\ ]
+[\ \fB\-\-mssfix\fR\ \fImax\fR\ ]
+[\ \fB\-\-mtu\-disc\fR\ \fItype\fR\ ]
+[\ \fB\-\-mute\fR\ \fIn\fR\ ]
+[\ \fB\-\-nice\-work\fR\ \fIn\fR\ ]
+[\ \fB\-\-nice\fR\ \fIn\fR\ ]
+[\ \fB\-\-no\-iv\fR\ ]
+[\ \fB\-\-no\-replay\fR\ ]
+[\ \fB\-\-nobind\fR\ ]
+[\ \fB\-\-passtos\fR\ ]
 [\ \fB\-\-persist\-key\fR\ ]
 [\ \fB\-\-persist\-local\-ip\fR\ ]
 [\ \fB\-\-persist\-remote\-ip\fR\ ]
-[\ \fB\-\-mlock\fR\ ]
-[\ \fB\-\-up\fR\ \fIcmd\fR\ ]
-[\ \fB\-\-down\fR\ \fIcmd\fR\ ]
-[\ \fB\-\-up\-restart\fR\ ]
-[\ \fB\-\-user\fR\ \fIuser\fR\ ]
-[\ \fB\-\-group\fR\ \fIgroup\fR\ ]
-[\ \fB\-\-cd\fR\ \fIdir\fR\ ]
-[\ \fB\-\-chroot\fR\ \fIdir\fR\ ]
-[\ \fB\-\-daemon\fR\ ]
-[\ \fB\-\-passtos\fR\ ]
-[\ \fB\-\-inetd\fR\ ]
-[\ \fB\-\-log\fR\ \fIfile\fR\ ]
-[\ \fB\-\-log\-append\fR\ \fIfile\fR\ ]
-[\ \fB\-\-writepid\fR\ \fIfile\fR\ ]
-[\ \fB\-\-nice\fR\ \fIn\fR\ ]
-[\ \fB\-\-nice\-work\fR\ \fIn\fR\ ]
-[\ \fB\-\-verb\fR\ \fIn\fR\ ]
-[\ \fB\-\-mute\fR\ \fIn\fR\ ]
-[\ \fB\-\-gremlin\fR\ ]
-[\ \fB\-\-comp\-lzo\fR\ ]
-[\ \fB\-\-comp\-noadapt\fR\ ]
-[\ \fB\-\-secret\fR\ \fIfile\fR\ ]
-[\ \fB\-\-auth\fR\ \fIalg\fR\ ]
-[\ \fB\-\-cipher\fR\ \fIalg\fR\ ]
-[\ \fB\-\-keysize\fR\ \fIn\fR\ ]
-[\ \fB\-\-no\-replay\fR\ ]
-[\ \fB\-\-replay\-persist\fR\ \fIfile\fR\ ]
-[\ \fB\-\-no\-iv\fR\ ]
-[\ \fB\-\-tls\-server\fR\ ]
-[\ \fB\-\-tls\-client\fR\ ]
-[\ \fB\-\-ca\fR\ \fIfile\fR\ ]
-[\ \fB\-\-dh\fR\ \fIfile\fR\ ]
-[\ \fB\-\-cert\fR\ \fIfile\fR\ ]
-[\ \fB\-\-key\fR\ \fIfile\fR\ ]
-[\ \fB\-\-tls\-cipher\fR\ \fIl\fR\ ]
-[\ \fB\-\-tls\-timeout\fR\ \fIn\fR\ ]
+[\ \fB\-\-persist\-tun\fR\ ]
+[\ \fB\-\-ping\-exit\fR\ \fIn\fR\ ]
+[\ \fB\-\-ping\-restart\fR\ \fIn\fR\ ]
+[\ \fB\-\-ping\-timer\-rem\fR\ ]
+[\ \fB\-\-ping\fR\ \fIn\fR\ ]
+[\ \fB\-\-port\fR\ \fIport\fR\ ]
+[\ \fB\-\-proto\fR\ \fIp\fR\ ]
+[\ \fB\-\-remote\fR\ \fIhost\fR\ ]
 [\ \fB\-\-reneg\-bytes\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-pkts\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-sec\fR\ \fIn\fR\ ]
-[\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
-[\ \fB\-\-tran\-window\fR\ \fIn\fR\ ]
+[\ \fB\-\-replay\-persist\fR\ \fIfile\fR\ ]
+[\ \fB\-\-resolv\-retry\fR\ \fIn\fR\ ]
+[\ \fB\-\-route\fR\ \fInetwork\ [netmask]\ [gateway]\ [metric]\fR\ ]
+[\ \fB\-\-route\-delay\fR\ \fIn\fR\ ]
+[\ \fB\-\-route\-gateway\fR\ \fIgw\fR\ ]
+[\ \fB\-\-route\-noauto\fR\ ]
+[\ \fB\-\-route\-up\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-rport\fR\ \fIport\fR\ ]
+[\ \fB\-\-secret\fR\ \fIfile\fR\ ]
+[\ \fB\-\-setenv\fR\ \fIname\ value\fR\ ]
+[\ \fB\-\-shaper\fR\ \fIn\fR\ ]
 [\ \fB\-\-single\-session\fR\ ]
 [\ \fB\-\-tls\-auth\fR\ \fIf\fR\ ]
-[\ \fB\-\-askpass\fR\ ]
+[\ \fB\-\-tls\-cipher\fR\ \fIl\fR\ ]
+[\ \fB\-\-tls\-client\fR\ ]
+[\ \fB\-\-tls\-server\fR\ ]
+[\ \fB\-\-tls\-timeout\fR\ \fIn\fR\ ]
 [\ \fB\-\-tls\-verify\fR\ \fIcmd\fR\ ]
-[\ \fB\-\-disable\-occ\fR\ ]
+[\ \fB\-\-tran\-window\fR\ \fIn\fR\ ]
+[\ \fB\-\-tun\-ipv6\fR\ ]
+[\ \fB\-\-tun\-mtu\-extra\fR\ \fIn\fR\ ]
+[\ \fB\-\-tun\-mtu\fR\ \fIn\fR\ ]
+[\ \fB\-\-up\-restart\fR\ ]
+[\ \fB\-\-up\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-user\fR\ \fIuser\fR\ ]
+[\ \fB\-\-verb\fR\ \fIn\fR\ ]
+[\ \fB\-\-writepid\fR\ \fIfile\fR\ ]
 .in -4
 .ti +4
 .hy
@@ -549,9 +556,19 @@ option.
 .B --dev tunX | tapX | null
 TUN/TAP virtual network device (
 .B X
-can be omitted for dynamic device in
-Linux 2.4.7+).  See examples section below
+can be omitted for a dynamic device.)
+
+See examples section below
 for an example on setting up a TUN device.
+
+You must use either tun devices on both ends of the connection
+or tap devices on both ends.  You cannot mix them, as they
+represent different underlying protocols.
+
+.B tun
+devices encapsulate IPv4 while
+.B tap
+devices encapsulate ethernet 802.3.
 .TP
 .B --dev-type device-type
 Which device type are we using?
@@ -596,81 +613,151 @@ option under Windows can also be used
 to enumerate all available TAP-Win32
 adapters.
 .TP
-.B --ifconfig l r
-Configure the TUN device to use IP address
+.B --ifconfig l rn
+Set TUN/TAP adapter parameters. 
 .B l
-as a local endpoint and
-.B r
-as a remote endpoint.
-.B l
-&
-.B r
-should be swapped on the other peer.
-.B l
-&
-.B r
-must be private
-addresses outside of the subnets used by either peer.
-This option implies
-.B --link-mtu 1300
-if neither
-.B --link-mtu
-or
-.B --tun-mtu
-is explicitly specified.
+is the IP address of the local VPN endpoint.
+For TUN devices,
+.B rn
+is the IP address of the remote VPN endpoint.
+For TAP devices,
+.B rn
+is the subnet mask of the virtual ethernet segment
+which is being created or connected to.
 
-This option will
-configure the tunnel endpoints using the
+For TUN devices, which facilitate virtual
+point-to-point IP connections,
+the proper usage of
+.B --ifconfig
+is to use two private IP addresses
+which are not a member of any
+existing subnet which is in use.
+The IP addresses may be consecutive
+and should have their order reversed
+on the remote peer.  After the VPN
+is established, by pinging
+.B rn,
+you will be pinging across the VPN.
+
+For TAP devices, which provide
+the ability to create virtual
+ethernet segments,
+.B --ifconfig
+is used to set an IP address and
+subnet mask just as a physical
+ethernet adapter would be
+similarly configured.  If you are
+attempting to connect to a remote
+ethernet bridge, the IP address
+and subnet should be set to values
+which would be valid on the
+the bridged ethernet segment (note
+also that DHCP can be used for the
+same purpose).
+
+This option, while primarily a proxy for the
 .BR ifconfig (8)
-command, eliminating the need to have an
-.B --up
-script.  However, you will still need an
-.B --up
-script if you will be adding routes
-to the tunnel.
+command, is designed to simplify TUN/TAP
+tunnel configuration by providing a
+standard interface to the different
+ifconfig implementations on different
+platforms.
+
+.B --ifconfig
+parameters which are IP addresses can
+also be specified as a DNS or /etc/hosts
+file resolvable name.
+.TP
+.B --route network [netmask] [gateway] [metric]
+Add route to routing table after connection is established.
+Multiple routes can be specified.  Routes will be
+automatically torn down in reverse order prior to
+tun/tap device close.
+
+This option is intended as
+a convenience proxy for the
+.BR route (8)
+shell command,
+while at the same time providing portable semantics
+across OpenVPN's platform space.
+
+.B netmask
+default -- 255.255.255.255
+
+.B gateway
+default -- taken from
+.B --route-gateway
+or the second parameter to
+.B --ifconfig
+when
+.B --dev tun
+is specified.
+
+The default can be specified by leaving an option blank or setting
+it to "default".
 
 The
-.B --ifconfig
-option can be used in conjunction with an
-.B --up
-script in which case the local and remote
-endpoints will be passed as parameters to
-the script.
+.B network
+and
+.B gateway
+parameters can
+also be specified as a DNS or /etc/hosts
+file resolvable name.
+.TP
+.B --route-gateway gw
+Specify a default gateway
+.B gw
+for use with
+.B --route.
+.TP
+.B --route-delay n
+Delay
+.B n
+seconds after connection initiation before adding routes.
+This is designed for scenarios where DHCP is used to set
+tap adapter addresses.  The delay will give the DHCP handshake
+time to complete before routes are added.
 
-In addition, the
-.B --ifconfig
-option will set the link MTU to 1300
-and derive the tunnel MTU automatically.  You can
-override the link MTU value of 1300 by using
-the
-.B --link-mtu
-option to explicitly specify a different value.
+A better solution would be to poll the virtual adapter, waiting
+for its IP address to become defined, but unfortunately there
+is no platform independent mechanism for doing this.
+.TP
+.B --route-up cmd
+Execute shell command
+.B cmd
+after routes are added, subject to
+.B --route-delay.
 
-One of the nice features of the 
-.B --ifconfig
-option is that it knows how to run the
-.BR ifconfig (8)
-tool on each of the operating systems
-which OpenVPN supports, allowing you
-to specify the option consistently
-across platforms, while OpenVPN deals
-with formatting the appropriate
-.BR ifconfig (8)
-command for your platform.
+See the "Environmental Variables" section below for
+additional parameters passed as environmental variables.
+
+Note that
+.B cmd
+can be a shell command with multiple arguments.
+.TP
+.B --route-noauto
+Don't add or remove routes automatically.  Instead pass routes to
+.B --route-up
+script using environmental variables.
 .TP
 .B --link-mtu n
 Take the link device MTU to be n and derive the TUN MTU
-from it (default=1300 when the
-.B --ifconfig
-option is used).  This is a conservative value that was chosen
+from it (default=1300 for TUN devices).  The
+default is a conservative
+value that was chosen
 because it has a higher probability of working correctly.
 However, for many
 cases, using a value of 1472 will maximize performance for TUN devices
 over IPv4.
 
+Fundamentally,
+.B --link-mtu
+sets an upper bound on the size of UDP packets which are sent
+between OpenVPN peers.
+
 Prior to OpenVPN 1.5, this option was named
-.B --udp-mtu
--- while deprecated, this name will still be supported
+.B --udp-mtu.
+While deprecated, this name will still be supported
 for compatibility.
 
 This option should only be used for TUN style tunnels.  TAP tunnels
@@ -687,6 +774,13 @@ Typically, the link MTU should be set to a value between 1300 and 1500.
 The optimal size for link MTU is the largest
 MTU that can be handled by every router on the link path.
 The link MTU value should be equal on both peers.
+
+MTU problems often manifest themselves as connections which
+hang during periods of active usage.  The
+.B --fragment
+and
+.B --mssfix
+options are provided as workarounds to such problems.
 
 OpenVPN
 adds a small amount of overhead to each tunnel packet before
@@ -709,21 +803,11 @@ to the script.
 Take the TUN device MTU to be
 .B n
 and derive the link MTU
-from it (default=1300).
+from it (default=1500 for TAP devices).
 
 See
 .B --link-mtu
 above more more information on MTU.
-
-Using the
-.B --ifconfig
-option is the recommended method of configuring
-a TUN device MTU automatically.
-
-However, for TUN devices which are used to bridge ethernet segments,
-it is recommended that you set this parameter to 1500 and then also add
-.B --tun-mtu-extra 64
-to your command line or config file.
 .TP
 .B --tun-mtu-extra n
 Assume that the TUN/TAP device might return as many as
@@ -732,8 +816,8 @@ bytes more than the
 .B --tun-mtu
 size on read.  This parameter defaults to 0, which is sufficient for
 most TUN devices.  TAP devices may introduce additional overhead in excess
-of the MTU size, and a setting of 64 would be a conservative choice for
-TAP device usage.  This parameter only controls internal OpenVPN buffer sizing,
+of the MTU size, and a setting of 64 is the default when TAP devices are used.
+This parameter only controls internal OpenVPN buffer sizing,
 so there is no transmission overhead associated with using a larger value.
 .TP
 .B --mtu-disc type
@@ -750,24 +834,34 @@ as Linux that supports the necessary system call to set.
 -- Always DF (Don't Fragment)
 .br
 .TP
-.B --mtu-dynamic [min] [max]
-EXPERIMENTAL -- Enable internal datagram fragmentation so
+.B --fragment max
+Enable internal datagram fragmentation so
 that no UDP datagrams are sent which
 are larger than
 .B max
-bytes.  Currently, dynamic MTU
-sizing is not yet implemented, so
-.B min
-should equal
-.B max.
+bytes.
 
-Adds 4 bytes of overhead per datagram.
+The
+.B max
+parameter is interpreted in the same way as the
+.B --link-mtu
+parameter, i.e. the UDP packet size after encapsulation
+overhead has been added in, but not including
+the UDP header itself.
 
-Since this option is currently experimental, you must rebuild
-OpenVPN with the
-.B --enable-mtu-dynamic
-configure flag in order to have the capability of using
-this option.
+The
+.B --fragment
+option only makes sense when you are using the UDP protocol
+for OpenVPN peer-to-peer communication, i.e.
+.B --proto udp.
+
+.B --fragment
+adds 4 bytes of overhead per datagram.
+
+See the
+.B --mssfix
+option below for an important companion option to
+.B --fragment.
 
 It should also be noted that this option is not meant to replace
 UDP fragmentation at the IP stack level.  It is only meant as a
@@ -778,6 +872,69 @@ using native IP fragmentation instead.
 Having said that, there are circumstances where using OpenVPN's
 internal fragmentation capability may be your only option, such
 as tunneling a UDP multicast stream which requires fragmentation.
+.TP
+.B --mssfix max
+Announce to TCP sessions running over the tunnel that they should limit
+their send packet sizes such that after OpenVPN has encapsulated them,
+the resulting UDP packet size that OpenVPN sends to its peer will not
+exceed
+.B max
+bytes.
+
+The
+.B max
+parameter is interpreted in the same way as the
+.B --link-mtu
+parameter, i.e. the UDP packet size after encapsulation
+overhead has been added in, but not including
+the UDP header itself.
+
+The
+.B --mssfix
+option only makes sense when you are using the UDP protocol
+for OpenVPN peer-to-peer communication, i.e.
+.B --proto udp.
+
+.B --mssfix
+and
+.B --fragment
+can be ideally used together, where
+.B --mssfix
+will try to keep TCP from needing
+packet fragmentation in the first place,
+and if big packets come through anyhow
+(from protocols other than TCP),
+.B --fragment
+will internally fragment them.
+
+Both
+.B --fragment
+and
+.B --mssfix
+are designed to work around cases where Path MTU discovery
+is broken on the network path between OpenVPN peers.
+
+The usual symptom of such a breakdown is an OpenVPN
+connection which successfully starts, but then stalls
+during active usage.
+
+If
+.B --fragment
+and
+.B --mssfix
+are used together,
+.B --mssfix
+will take its default
+.B max
+parameter from the
+.B --fragment max
+option.
+
+Therefore, one could lower the maximum UDP packet size
+to 1300 (a good first try for solving MTU-related
+connection problems) with the following options:
+
+.B --fragment 1300 --mssfix
 .TP
 .B --shaper n
 Limit bandwidth of outgoing tunnel data to
@@ -1003,9 +1160,17 @@ commands which route IP traffic destined for
 private subnets which exist at the other
 end of the VPN connection into the tunnel.
 
-Execute as:
+For
+.B --dev tun
+execute as:
 
-.B cmd tun_tap_dev tun_mtu udp_mtu ifconfig_local_ip ifconfig_remote_ip [ init | restart ]
+.B cmd tun_dev tun_mtu link_mtu ifconfig_local_ip ifconfig_remote_ip [ init | restart ]
+
+For
+.B --dev tap
+execute as:
+
+.B cmd tap_dev tap_mtu link_mtu ifconfig_local_ip ifconfig_netmask [ init | restart ]
 
 See the "Environmental Variables" section below for
 additional parameters passed as environmental variables.
@@ -1020,11 +1185,7 @@ to build a command line which will be passed to the shell.
 
 Typically,
 .B cmd
-will run a script such as:
-
-.B ifconfig $1 10.4.0.1 pointopoint 10.4.0.2 mtu $2
-
-(Note: remove "pointopoint" from command line on OpenBSD).
+will run a script to add routes to the tunnel.
 
 Normally the up script is called after the TUN/TAP device is opened.
 In this context, the last command line parameter passed to the script
@@ -1096,6 +1257,11 @@ scripts to be called for restarts as well as initial program start.
 This option is described more fully above in the
 .B --up
 option documentation.
+.TP
+.B --setenv name value
+Set a custom environmental variable
+.B name=value
+to pass to script.
 .TP
 .B --user user
 Change the user ID of the OpenVPN process to
@@ -2017,12 +2183,19 @@ Show available TAP-Win32 adapters which can be selected using the
 option.  On non-Windows systems, the
 .BR ifconfig (8)
 command provides similar functionality.
+.TP
+.B --no-arp-del
+By default, the Windows version of OpenVPN executes an "arp -d *"
+command after the TAP-Win32 devices is opened to force the
+refresh of the MAC cache.
+.B --no-arp-del
+will disable this behaviour.
 .SH SCRIPTING AND ENVIRONMENTAL VARIABLES
 Starting with 1.5-beta7, OpenVPN now exports a series
 of environmental variables for use by
-.B --up, --down, --ipchange,
+.B --up, --down, --ipchange, --tls-verify
 or
-.B --tls-verify
+.B --route-up
 scripts.
 .SS Script Order of Execution
 .TP
@@ -2034,6 +2207,13 @@ Executed when we have a still untrusted remote peer.
 .TP
 .B --ipchange
 Executed after connection authentication, or remote IP address change.
+.TP
+.B --route-up
+Executed after connection authentication, either
+immediately after, or some number of seconds after
+as defined by the
+.B --route-delay
+option.
 .TP
 .B --down
 Executed after TCP/UDP and TUN/TAP close.
@@ -2063,17 +2243,65 @@ or
 .B --down
 script execution.
 .TP
+.B ifconfig_broadcast
+The broadcast address for the virtual
+ethernet segment which is derived from the
+.B --ifconfig
+option when
+.B --dev tap
+is used.
+Set prior to OpenVPN calling the
+.I ifconfig
+or
+.I netsh
+(windows version of ifconfig) commands which
+normally occurs prior to
+.B --up
+script execution.
+.TP
 .B ifconfig_local
 The local VPN endpoint IP address specified in the
 .B --ifconfig
 option (first parameter).
-Set on program initiation and reset on SIGHUP.
+Set prior to OpenVPN calling the
+.I ifconfig
+or
+.I netsh
+(windows version of ifconfig) commands which
+normally occurs prior to
+.B --up
+script execution.
 .TP
 .B ifconfig_remote
 The remote VPN endpoint IP address specified in the
 .B --ifconfig
-option (second parameter).
-Set on program initiation and reset on SIGHUP.
+option (second parameter) when
+.B --dev tun
+is used.
+Set prior to OpenVPN calling the
+.I ifconfig
+or
+.I netsh
+(windows version of ifconfig) commands which
+normally occurs prior to
+.B --up
+script execution.
+.TP
+.B ifconfig_netmask
+The subnet mask of the virtual ethernet segment
+that is specified as the second parameter to
+.B --ifconfig
+when
+.B --dev tap
+is being used.
+Set prior to OpenVPN calling the
+.I ifconfig
+or
+.I netsh
+(windows version of ifconfig) commands which
+normally occurs prior to
+.B --up
+script execution.
 .TP
 .B link_mtu
 The maximum packet size (not including the IP header)
@@ -2116,6 +2344,35 @@ or
 .B --rport.
 Set on program initiation and reset on SIGHUP.
 .TP
+.B route_default_gateway
+The default gateway used by
+.B --route
+options, as specified in either the
+.B --route-gateway
+option or the second parameter to
+.B --ifconfig
+when
+.B --dev tun
+is specified.
+
+Set prior to
+.B --route-up
+script execution.
+.TP
+.B route_{parm}_{n}
+A set of variables which define each route to be added.
+
+.B parm
+will be one of "network", "netmask", "gateway", or "metric".
+
+.B n
+is the OpenVPN route number, starting from 1.
+
+If the network or gateway are resolvable DNS names,
+their IP address translations will be recorded rather
+than their names as denoted on the command line
+or configuration file.
+.TP
 .B script_context
 Set to "init" or "restart" prior to up/down script execution.
 For more information, see
@@ -2124,9 +2381,9 @@ documentation for
 .TP
 .B script_type
 One of
-.B up, down, ipchange,
+.B up, down, ipchange, tls-verify,
 or
-.B tls-verify.
+.B --route-up.
 Set prior to execution of any script.
 .TP
 .B signal

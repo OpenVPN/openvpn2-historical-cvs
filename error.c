@@ -37,6 +37,8 @@
 #include "misc.h"
 #include "openvpn.h"
 #include "win32.h"
+#include "socket.h"
+#include "tun.h"
 
 #ifdef USE_CRYPTO
 #include <openssl/err.h>
@@ -331,6 +333,93 @@ redirect_stdout_stderr (const char *file, bool append)
 #endif
 }
 
+/*
+ * Functions used to check return status
+ * of I/O operations.
+ */
+
+unsigned int x_cs_info_level;
+unsigned int x_cs_verbose_level;
+
+void
+reset_check_status ()
+{
+  x_cs_info_level = 0;
+  x_cs_verbose_level = 0;
+}
+
+void
+set_check_status (unsigned int info_level, unsigned int verbose_level)
+{
+  x_cs_info_level = info_level;
+  x_cs_verbose_level = verbose_level;
+}
+
+/*
+ * Called after most socket or tun/tap operations, via the inline
+ * function check_status().
+ *
+ * Decide if we should print an error message, and see if we can
+ * extract any useful info from the error, such as a Path MTU hint
+ * from the OS.
+ */
+void
+x_check_status (int status,
+		const char *description,
+		struct link_socket *sock,
+		struct tuntap *tt)
+{
+  const int my_errno = (sock ? openvpn_errno_socket () : openvpn_errno ());
+  const char *extended_msg = NULL;
+
+  msg (x_cs_verbose_level, "%s %s returned %d",
+       sock ? proto2ascii (sock->proto, true) : "",
+       description,
+       status);
+
+  if (status < 0)
+    {
+#if EXTENDED_SOCKET_ERROR_CAPABILITY
+      /* get extended socket error message and possible PMTU hint from OS */
+      if (sock)
+	{
+	  int mtu;
+	  extended_msg = format_extended_socket_error (sock->sd, &mtu);
+	  if (mtu > 0 && sock->mtu != mtu)
+	    {
+	      sock->mtu = mtu;
+	      sock->mtu_changed = true;
+	    }
+	}
+#elif defined(WIN32)
+      /* get possible driver error from TAP-Win32 driver */
+      extended_msg = tap_win32_getinfo (tt);
+#endif
+      if (my_errno != EAGAIN)
+	{
+	  if (extended_msg)
+	    msg (x_cs_info_level, "%s %s [%s]: %s (code=%d)",
+		 description,
+		 sock ? proto2ascii (sock->proto, true) : "",
+		 extended_msg,
+		 strerror_ts (my_errno),
+		 my_errno);
+	  else
+	    msg (x_cs_info_level, "%s %s: %s (code=%d)",
+		 description,
+		 sock ? proto2ascii (sock->proto, true) : "",
+		 strerror_ts (my_errno),
+		 my_errno);
+
+#ifdef WIN32
+	  Sleep (100); /* 100 milliseconds */
+#else
+	  sleep (0);   /* not enough granularity, so just relinquish time slice */
+#endif
+	}
+    }
+}
+
 void
 openvpn_exit (int status)
 {
@@ -352,8 +441,13 @@ strerror_win32 (int errnum)
    */
 #if 1
   switch (errnum) {
+    /*
+     * When the TAP-Win32 driver returns STATUS_UNSUCCESSFUL, this code
+     * gets returned to user space.
+     */
   case ERROR_GEN_FAILURE:
-    return "I/O failure possibly related to sleep/resume activity (ERROR_GEN_FAILURE)";
+    return "TAP-Win32 I/O failure (ERROR_GEN_FAILURE)";
+
   case ERROR_IO_PENDING:
     return "I/O Operation in progress (ERROR_IO_PENDING)";
   case WSA_IO_INCOMPLETE:

@@ -137,9 +137,7 @@
 #endif
 
 #ifdef HAVE_ARPA_INET_H
-#if !defined(TARGET_OPENBSD) && !defined(__LCLINT__)
 #include <arpa/inet.h>
-#endif
 #endif
 
 #ifdef HAVE_NET_IF_H
@@ -148,7 +146,7 @@
 
 #ifdef TARGET_LINUX
 
-#if defined(HAVE_NETINET_IF_ETHER_H) && !defined(__LCLINT__)
+#if defined(HAVE_NETINET_IF_ETHER_H)
 #include <netinet/if_ether.h>
 #endif
 
@@ -209,6 +207,14 @@
 #include <sys/uio.h>
 #endif
 
+#ifdef HAVE_NETINET_IN_SYSTM_H
+#include <netinet/in_systm.h>
+#endif
+
+#ifdef HAVE_NETINET_IP_H
+#include <netinet/ip.h>
+#endif
+
 #ifdef HAVE_NET_IF_TUN_H
 #include <net/if_tun.h>
 #endif
@@ -245,7 +251,7 @@
 /*
  * Do we have the capability to support the --passtos option?
  */
-#if defined(HAVE_IPHDR) && defined(IPPROTO_IP) && defined(IP_TOS) && defined(HAVE_SETSOCKOPT)
+#if defined(IPPROTO_IP) && defined(IP_TOS) && defined(HAVE_SETSOCKOPT)
 #define PASSTOS_CAPABILITY 1
 #else
 #define PASSTOS_CAPABILITY 0
@@ -274,6 +280,15 @@
  */
 #ifndef O_BINARY
 #define O_BINARY 0
+#endif
+
+/*
+ * Directory separation char
+ */
+#ifdef WIN32
+#define OS_SPECIFIC_DIRSEP '\\'
+#else
+#define OS_SPECIFIC_DIRSEP '/'
 #endif
 
 #endif

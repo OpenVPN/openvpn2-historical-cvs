@@ -147,13 +147,37 @@ interval_action (struct interval* top, time_t current)
 
 struct event_timeout
 {
+  bool defined;
   interval_t n;
   time_t last; /* time of last event */
 };
 
+static inline bool
+event_timeout_defined (const struct event_timeout* et)
+{
+  return et->defined;
+}
+
+static inline void
+event_timeout_clear (struct event_timeout* et)
+{
+  et->defined = false;
+  et->n = 0;
+  et->last = 0;
+}
+
+static inline struct event_timeout
+event_timeout_clear_ret ()
+{
+  struct event_timeout ret;
+  event_timeout_clear (&ret);
+  return ret;
+}
+
 static inline void
 event_timeout_init (struct event_timeout* et, time_t current, interval_t n)
 {
+  et->defined = true;
   et->n = n;
   et->last = current;
 }
@@ -161,13 +185,14 @@ event_timeout_init (struct event_timeout* et, time_t current, interval_t n)
 static inline void
 event_timeout_reset (struct event_timeout* et, time_t current)
 {
-  et->last = current;
+  if (et->defined)
+    et->last = current;
 }
 
 static inline bool
 event_timeout_trigger (struct event_timeout* et, time_t current)
 {
-  if (et->last + et->n <= current)
+  if (et->defined && et->last + et->n <= current)
     {
       msg (D_INTERVAL, "EVENT event_timeout_trigger (%d)", et->n);
       et->last = current;
@@ -179,12 +204,15 @@ event_timeout_trigger (struct event_timeout* et, time_t current)
 static inline void
 event_timeout_wakeup (struct event_timeout* et, time_t current, struct timeval* tv)
 {
-  const int wakeup = max_int ((int) (et->last + et->n - current), 0);
-  if (wakeup < tv->tv_sec)
+  if (et->defined)
     {
-      msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d)", wakeup, et->n);
-      tv->tv_sec = wakeup;
-      tv->tv_usec = 0;
+      const int wakeup = max_int ((int) (et->last + et->n - current), 0);
+      if (wakeup < tv->tv_sec)
+	{
+	  msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d)", wakeup, et->n);
+	  tv->tv_sec = wakeup;
+	  tv->tv_usec = 0;
+	}
     }
 }
 

@@ -195,26 +195,32 @@ run_script (const char *command,
 
 /* remove non-parameter environmental vars except for signal */
 void
-del_env_nonparm (void)
+del_env_nonparm (int n_tls_id)
 {
   setenv_del ("script_context");
   setenv_del ("tun_mtu");
   setenv_del ("link_mtu");
   setenv_del ("dev");
+  
+  setenv_del ("ifconfig_remote");
+  setenv_del ("ifconfig_netmask");
+  setenv_del ("ifconfig_broadcast");
 
   setenv_del ("untrusted_ip");
   setenv_del ("untrusted_port");
   setenv_del ("trusted_ip");
   setenv_del ("trusted_port");
 
-  setenv_del ("tls_id_0");
-  setenv_del ("tls_id_1");
-  setenv_del ("tls_id_2");
-  setenv_del ("tls_id_3");
-  setenv_del ("tls_id_4");
-  setenv_del ("tls_id_5");
-  setenv_del ("tls_id_6");
-  setenv_del ("tls_id_7");
+  /* delete tls_id_{n} values */
+  {
+    int i;
+    char buf[64];
+    for (i = 0; i < n_tls_id; ++i)
+      {
+	openvpn_snprintf (buf, sizeof (buf), "tls_id_%d", i);
+	setenv_del (buf);
+      }
+  }
 }
 
 /* Get the file we will later write our process ID to */
@@ -509,7 +515,7 @@ time_string (time_t t, bool show_usec)
     }
 
   mutex_lock (L_CTIME);
-  buf_printf (&out, "%s", ctime (&tv.tv_sec));
+  buf_printf (&out, "%s", ctime ((const time_t *)&tv.tv_sec));
   mutex_unlock (L_CTIME);
   buf_chomp (&out, '\n');
 
@@ -545,7 +551,7 @@ strerror_ts (int errnum)
  */
 
 #ifdef HAVE_PUTENV
-static char *estrings[40];
+static char *estrings[MAX_ENV_STRINGS];
 
 static bool
 env_string_equal (const char *s1, const char *s2)
@@ -589,7 +595,7 @@ add_env (char *str)
 	  return;
 	}
     }
-  ASSERT (0); /* buffer full */
+  msg (M_FATAL, "OpenVPN environmental variable cache is full (a maximum of %d variables is allowed) -- try increasing MAX_ENV_STRINGS size in misc.h", MAX_ENV_STRINGS);
 }
 
 static void

@@ -74,7 +74,7 @@ void run_script (const char *command,
 		 const char *script_type);
 
 /* remove non-parameter environmental vars except for signal */
-void del_env_nonparm (void);
+void del_env_nonparm (int n_tls_id);
 
 /* workspace for get_pid_file/write_pid */
 struct pid_state {
@@ -132,6 +132,7 @@ void save_inetd_socket_descriptor (void);
 void init_random_seed(void);
 
 /* set/delete environmental variable */
+#define MAX_ENV_STRINGS 200
 void setenv_str (const char *name, const char *value);
 void setenv_int (const char *name, int value);
 void setenv_del (const char *name);

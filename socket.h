@@ -85,7 +85,7 @@ struct link_socket
 # define SOCKET_SET_READ(sock) { if (stream_buf_read_setup (&sock)) { \
                                    wait_add (&event_wait, sock.reads.overlapped.hEvent); \
                                    socket_recv_queue (&sock, 0); }}
-# define SOCKET_SET_WRITE(sock)      { wait_add (&event_wait, sock.writes.overlapped.hEvent); }
+# define SOCKET_SET_WRITE(sock) { wait_add (&event_wait, sock.writes.overlapped.hEvent); }
 # define SOCKET_ISSET(sock, set) ( wait_trigger (&event_wait, sock.set.overlapped.hEvent))
 # define SOCKET_SETMAXFD(sock)
 # define SOCKET_READ_STAT(sock)  (overlapped_io_state_ascii (&sock.reads,  "sr"))
@@ -141,6 +141,7 @@ struct link_socket
 
 #define ECONNRESET WSAECONNRESET
 #define openvpn_close_socket(s) closesocket(s)
+
 int inet_aton (const char *name, struct in_addr *addr);
 
 int socket_recv_queue (struct link_socket *sock, int maxsize);
@@ -204,7 +205,27 @@ const char *print_sockaddr_ex (const struct sockaddr_in *addr,
 
 const char *print_sockaddr (const struct sockaddr_in *addr);
 
-void setenv_sockaddr (const char *name_prefix, const struct sockaddr_in *addr);
+const char *print_in_addr_t (in_addr_t addr, bool empty_if_undef);
+
+void setenv_sockaddr (const char *name_prefix,
+		      const struct sockaddr_in *addr);
+
+/*
+ * DNS resolution
+ */
+
+#define GETADDR_RESOLVE               (1<<0)
+#define GETADDR_FATAL                 (1<<1)
+#define GETADDR_HOST_ORDER            (1<<2)
+#define GETADDR_MENTION_RESOLVE_RETRY (1<<3)
+#define GETADDR_FATAL_ON_SIGNAL       (1<<4)
+#define GETADDR_WARN_ON_SIGNAL        (1<<5)
+
+in_addr_t getaddr (unsigned int flags,
+		   const char *hostname,
+		   int resolve_retry_seconds,
+		   bool *succeeded,
+		   volatile int *signal_received);
 
 /*
  * Transport protocol naming and other details.
@@ -495,24 +516,6 @@ link_socket_write (struct link_socket *sock,
       ASSERT (0);
       return -1; /* NOTREACHED */
     }
-}
-
-/*
- * Check the return status of read/write routines.
- */
-
-extern unsigned int x_cs_info_level;
-extern unsigned int x_cs_verbose_level;
-
-void reset_check_status (void);
-void set_check_status (unsigned int info_level, unsigned int verbose_level);
-void x_check_status (int status, const char *description, struct link_socket *sock);
-
-static inline void
-check_status (int status, const char *description, struct link_socket *sock)
-{
-  if (status < 0 || check_debug_level (x_cs_verbose_level))
-    x_check_status (status, description, sock);
 }
 
 #endif /* SOCKET_H */

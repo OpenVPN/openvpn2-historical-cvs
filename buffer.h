@@ -43,6 +43,7 @@ struct buffer
 #define BLEN(buf)  ((buf)->len)
 #define BDEF(buf)  ((buf)->data != NULL)
 #define BSTR(buf)  ((char *)BPTR(buf))
+#define BCAP(buf)  (buf_forward_capacity (buf))
 
 struct buffer alloc_buf (size_t size);
 struct buffer clone_buf (const struct buffer* buf);
@@ -219,7 +220,7 @@ buf_reverse_capacity (struct buffer *buf)
 static inline uint8_t *
 buf_prepend (struct buffer *buf, int size)
 {
-  if (size > buf->offset)
+  if (size < 0 || size > buf->offset)
     return NULL;
   buf->offset -= size;
   buf->len += size;
@@ -229,7 +230,7 @@ buf_prepend (struct buffer *buf, int size)
 static inline bool
 buf_advance (struct buffer *buf, int size)
 {
-  if (buf->len < size)
+  if (size < 0 || buf->len < size)
     return false;
   buf->offset += size;
   buf->len -= size;
@@ -262,7 +263,7 @@ static inline uint8_t *
 buf_read_alloc (struct buffer *buf, int size)
 {
   uint8_t *ret;
-  if (buf->len < size)
+  if (size < 0 || buf->len < size)
     return NULL;
   ret = BPTR (buf);
   buf->offset += size;
@@ -330,6 +331,8 @@ buf_copy_excess (struct buffer *dest,
 		 struct buffer *src,
 		 int len)
 {
+  if (len < 0)
+    return false;
   if (src->len > len)
     {
       struct buffer b = *src;

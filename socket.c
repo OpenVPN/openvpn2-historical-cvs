@@ -40,82 +40,7 @@
 #include "memdbg.h"
 
 /*
- * Functions used to check return status
- * of I/O operations.
- */
-
-unsigned int x_cs_info_level;
-unsigned int x_cs_verbose_level;
-
-void
-reset_check_status ()
-{
-  x_cs_info_level = 0;
-  x_cs_verbose_level = 0;
-}
-
-void
-set_check_status (unsigned int info_level, unsigned int verbose_level)
-{
-  x_cs_info_level = info_level;
-  x_cs_verbose_level = verbose_level;
-}
-
-/*
- * Called after most socket operations, via the inline function check_status().
- * Decide if we should print an error message, and see if we can extract any useful
- * info from the error, such as a Path MTU hint from the OS.
- */
-void
-x_check_status (int status, const char *description, struct link_socket *sock)
-{
-  const int my_errno = openvpn_errno_socket ();
-  const char *extended_msg = NULL;
-
-  msg (x_cs_verbose_level, "%s %s returned %d",
-       sock ? proto2ascii (sock->proto, true) : "",
-       description,
-       status);
-
-  if (status < 0)
-    {
-#if EXTENDED_SOCKET_ERROR_CAPABILITY
-      /* get extended socket error message and possible PMTU hint from OS */
-      if (sock)
-	{
-	  int mtu;
-	  extended_msg = format_extended_socket_error (sock->sd, &mtu);
-	  if (mtu > 0 && sock->mtu != mtu)
-	    {
-	      sock->mtu = mtu;
-	      sock->mtu_changed = true;
-	    }
-	}
-#endif
-      if (my_errno != EAGAIN)
-	{
-	  if (extended_msg)
-	    msg (x_cs_info_level, "%s %s [%s]: %s (code=%d)",
-		 description,
-		 sock ? proto2ascii (sock->proto, true) : "",
-		 extended_msg,
-		 strerror_ts (my_errno),
-		 my_errno);
-	  else
-	    msg (x_cs_info_level, "%s %s: %s (code=%d)",
-		 description,
-		 sock ? proto2ascii (sock->proto, true) : "",
-		 strerror_ts (my_errno),
-		 my_errno);
-
-	  sleep (0); /* these errors often arrive in herds, so don't
-			lock up the machine on account of them */
-	}
-    }
-}
-
-/*
- * Functions releated to the translation of DNS names to IP addresses.
+ * Functions related to the translation of DNS names to IP addresses.
  */
 
 static const char*
@@ -140,16 +65,25 @@ h_errno_msg(int h_errno_err)
  * If resolve error, try again for
  * resolve_retry_seconds seconds.
  */
-static in_addr_t
-getaddr (const char *hostname,
+in_addr_t
+getaddr (unsigned int flags,
+	 const char *hostname,
 	 int resolve_retry_seconds,
-	 bool fatal,
+	 bool *succeeded,
 	 volatile int *signal_received)
 {
   struct in_addr ia;
   int status;
+  int sigrec = 0;
 
   CLEAR (ia);
+  if (succeeded)
+    *succeeded = false;
+
+  if ((flags & (GETADDR_FATAL_ON_SIGNAL|GETADDR_WARN_ON_SIGNAL))
+      && !signal_received)
+    signal_received = &sigrec;
+
   status = inet_aton (hostname, &ia);
 
   if (!status)
@@ -157,27 +91,54 @@ getaddr (const char *hostname,
       const int fail_wait_interval = 5; /* seconds */
       int resolve_retries = resolve_retry_seconds / fail_wait_interval;
       struct hostent *h;
+      const char *fmt;
 
       CLEAR (ia);
+
+      fmt = "RESOLVE: Cannot resolve host address: %s: %s";
+      if ((flags & GETADDR_MENTION_RESOLVE_RETRY)
+	  && !resolve_retry_seconds)
+	fmt = "RESOLVE: Cannot resolve host address: %s: %s (I would have retried this name query if you had specified the --resolv-retry option.)";
+
+      if (!(flags & GETADDR_RESOLVE))
+	{
+	  if (flags & GETADDR_FATAL)
+	    msg (M_FATAL, "RESOLVE: Cannot parse IP address: %s", hostname);
+	  else
+	    goto done;
+	}
 
       /*
        * Resolve hostname
        */
-      while ( !(h = gethostbyname (hostname)) )
+      while (true)
 	{
-	  msg (((resolve_retries > 0 || !fatal) ? D_RESOLVE_ERRORS : M_FATAL),
-	       "Cannot resolve host address: %s: %s",
-	       hostname, h_errno_msg (h_errno));
-
-	  if (--resolve_retries <= 0 && !fatal)
-	    return ia.s_addr;
+	  /* try hostname lookup */
+	  h = gethostbyname (hostname);
 
 	  if (signal_received)
 	    {
 	      GET_SIGNAL (*signal_received);
 	      if (*signal_received)
-		return ia.s_addr;
+	        goto done;
 	    }
+
+	  /* success? */
+	  if (h)
+	    break;
+
+	  /* resolve lookup failed, should we
+	     continue or fail? */
+	  msg (((resolve_retries > 0
+		 || !(flags & GETADDR_FATAL))
+		? D_RESOLVE_ERRORS : M_FATAL),
+	       fmt,
+	       hostname,
+	       h_errno_msg (h_errno));
+
+	  if (--resolve_retries <= 0
+	      && !(flags & GETADDR_FATAL))
+	    goto done;
 
 	  sleep (fail_wait_interval);
 	}
@@ -188,10 +149,32 @@ getaddr (const char *hostname,
       if (ia.s_addr)
 	{
 	  if (h->h_addr_list[1])
-	    msg (D_RESOLVE_ERRORS, "Warning: %s has multiple addresses", hostname);
+	    msg (D_RESOLVE_ERRORS, "RESOLVE: Warning: %s has multiple addresses", hostname);
 	}
+
+      /* hostname resolve succeeded */
+      if (succeeded)
+	*succeeded = true;
     }
-  return ia.s_addr;
+  else
+    {
+      /* IP address parse succeeded */
+      if (succeeded)
+	*succeeded = true;
+    }
+
+ done:
+  if (signal_received && *signal_received)
+    {
+      int level = 0;
+      if (flags & GETADDR_FATAL_ON_SIGNAL)
+	level = M_FATAL;
+      else if (flags & GETADDR_WARN_ON_SIGNAL)
+	level = M_WARN;
+      msg (level, "RESOLVE: signal received during DNS resolution attempt");
+    }
+
+  return (flags & GETADDR_HOST_ORDER) ? ntohl (ia.s_addr) : ia.s_addr;
 }
 
 static void
@@ -201,7 +184,12 @@ update_remote (const char* host,
 {
   if (host && addr)
     {
-      const in_addr_t new_addr = getaddr (host, 1, false, NULL);
+      const in_addr_t new_addr = getaddr (
+					  GETADDR_RESOLVE,
+					  host,
+					  1,
+					  NULL,
+					  NULL);
       if (new_addr && addr->sin_addr.s_addr != new_addr)
 	{
 	  addr->sin_addr.s_addr = new_addr;
@@ -404,7 +392,14 @@ resolve_bind_local (struct link_socket *sock)
     {
       sock->lsa->local.sin_family = AF_INET;
       sock->lsa->local.sin_addr.s_addr =
-	(sock->local_host ? getaddr (sock->local_host, 0, true, NULL)
+	(sock->local_host ? getaddr (
+				     GETADDR_RESOLVE
+				     | GETADDR_FATAL
+				     | GETADDR_FATAL_ON_SIGNAL,
+				     sock->local_host,
+				     0,
+				     NULL,
+				     NULL)
 	 : htonl (INADDR_ANY));
       sock->lsa->local.sin_port = htons (sock->local_port);
     }
@@ -434,8 +429,14 @@ resolve_remote (struct link_socket *sock,
       sock->lsa->remote.sin_family = AF_INET;
       sock->lsa->remote.sin_addr.s_addr =
 	(sock->remote_host
-	 ? getaddr (sock->remote_host, sock->resolve_retry_seconds,
-		    true, signal_received)
+	 ? getaddr (
+		    GETADDR_RESOLVE
+		    | GETADDR_FATAL
+		    | GETADDR_MENTION_RESOLVE_RETRY,
+		    sock->remote_host,
+		    sock->resolve_retry_seconds,
+		    NULL,
+		    signal_received)
 	 : 0);
       sock->lsa->remote.sin_port = htons (sock->remote_port);
       if (signal_received && *signal_received)
@@ -630,8 +631,8 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
 	  lsa->actual = *addr;
 	  sock->set_outgoing_initial = true;
 	  mutex_unlock (L_SOCK);
-	  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual));
 	  setenv_sockaddr ("trusted", &lsa->actual);
+	  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual));
 	  if (sock->ipchange_command)
 	    {
 	      char command[512];
@@ -879,6 +880,28 @@ print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* sep
 	buf_printf (&out, "%s", separator);
 
       buf_printf (&out, "%d", port);
+    }
+  return BSTR (&out);
+}
+
+/*
+ * Convert an in_addr_t in host byte order
+ * to an ascii dotted quad.
+ */
+const char *
+print_in_addr_t (in_addr_t addr, bool empty_if_undef)
+{
+  struct in_addr ia;
+  struct buffer out = alloc_buf_gc (64);
+
+  if (addr || !empty_if_undef)
+    {
+      CLEAR (ia);
+      ia.s_addr = htonl (addr);
+
+      mutex_lock (L_INET_NTOA);
+      buf_printf (&out, "%s", inet_ntoa (ia));
+      mutex_unlock (L_INET_NTOA);
     }
   return BSTR (&out);
 }

@@ -469,6 +469,7 @@ void
 process_incoming_link (struct context *c)
 {
   struct gc_arena gc = gc_new ();
+
   if (c->c2.buf.len > 0)
     {
       c->c2.link_read_bytes += c->c2.buf.len;
@@ -504,7 +505,8 @@ process_incoming_link (struct context *c)
    */
   if (c->c2.buf.len > 0)
     {
-      link_socket_incoming_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from);
+      if (!link_socket_verify_incoming_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from))
+	link_socket_bad_incoming_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
       mutex_lock (L_TLS);
@@ -1092,8 +1094,18 @@ process_io (struct context *c)
 {
   if (c->c2.select_status > 0)
     {
+      /* TCP/UDP port ready to accept write */
+      if (SOCKET_ISSET (&c->c2.event_wait, &c->c2.link_socket, writes))
+	{
+	  process_outgoing_link (c, &c->c2.link_socket);
+	}
+      /* TUN device ready to accept write */
+      else if (TUNTAP_ISSET (&c->c2.event_wait, &c->c1.tuntap, writes))
+	{
+	  process_outgoing_tun (c, &c->c1.tuntap);
+	}
       /* Incoming data on TCP/UDP port */
-      if (SOCKET_READ_RESIDUAL (&c->c2.link_socket) || SOCKET_ISSET (&c->c2.event_wait, &c->c2.link_socket, reads))
+      else if (SOCKET_READ_RESIDUAL (&c->c2.link_socket) || SOCKET_ISSET (&c->c2.event_wait, &c->c2.link_socket, reads))
 	{
 	  read_incoming_link (c);
 	  if (!IS_SIG (c))
@@ -1113,15 +1125,5 @@ process_io (struct context *c)
 	  process_incoming_tls_thread (c);
 	}
 #endif
-      /* TCP/UDP port ready to accept write */
-      else if (SOCKET_ISSET (&c->c2.event_wait, &c->c2.link_socket, writes))
-	{
-	  process_outgoing_link (c, &c->c2.link_socket);
-	}
-      /* TUN device ready to accept write */
-      else if (TUNTAP_ISSET (&c->c2.event_wait, &c->c1.tuntap, writes))
-	{
-	  process_outgoing_tun (c, &c->c1.tuntap);
-	}
     }
 }

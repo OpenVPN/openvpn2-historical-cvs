@@ -855,11 +855,13 @@ do_init_frame_tls (struct context *c)
 static void
 do_init_buffers (struct context *c)
 {
-  c->c2.read_link_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-  c->c2.read_tun_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-
-  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+  /* CM_CHILD inherits buffers from CM_TOP */
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
     {
+      c->c2.buffers_owned = true;
+      c->c2.read_link_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
+      c->c2.read_tun_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
+
       c->c2.aux_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
 
 #ifdef USE_CRYPTO
@@ -875,6 +877,29 @@ do_init_buffers (struct context *c)
 	}
 #endif
     }
+}
+
+void
+inherit_buffers (struct context *dest, const struct context *src)
+{
+  dest->c2.buffers_owned = false;
+  dest->c2.read_link_buf = src->c2.read_link_buf;
+  dest->c2.read_tun_buf = src->c2.read_tun_buf;
+  
+  dest->c2.aux_buf = src->c2.aux_buf;
+
+#ifdef USE_CRYPTO
+  dest->c2.encrypt_buf = src->c2.encrypt_buf;
+  dest->c2.decrypt_buf = src->c2.decrypt_buf;
+#endif
+
+#ifdef USE_LZO
+  if (dest->options.comp_lzo)
+    {
+      dest->c2.lzo_compress_buf = src->c2.lzo_compress_buf;
+      dest->c2.lzo_decompress_buf = src->c2.lzo_decompress_buf;
+    }
+#endif
 }
 
 /*
@@ -1213,22 +1238,25 @@ do_close_free_buf (struct context *c)
   if (c->c2.free_to_link)
     free_buf (&c->c2.to_link);
 
-  free_buf (&c->c2.read_link_buf);
-  free_buf (&c->c2.read_tun_buf);
-  free_buf (&c->c2.aux_buf);
+  if (c->c2.buffers_owned)
+    {
+      free_buf (&c->c2.read_link_buf);
+      free_buf (&c->c2.read_tun_buf);
+      free_buf (&c->c2.aux_buf);
 
 #ifdef USE_LZO
-  if (c->options.comp_lzo)
-    {
-      free_buf (&c->c2.lzo_compress_buf);
-      free_buf (&c->c2.lzo_decompress_buf);
-    }
+      if (c->options.comp_lzo)
+	{
+	  free_buf (&c->c2.lzo_compress_buf);
+	  free_buf (&c->c2.lzo_decompress_buf);
+	}
 #endif
 
 #ifdef USE_CRYPTO
-  free_buf (&c->c2.encrypt_buf);
-  free_buf (&c->c2.decrypt_buf);
+      free_buf (&c->c2.encrypt_buf);
+      free_buf (&c->c2.decrypt_buf);
 #endif
+    }
 }
 
 /*

@@ -856,44 +856,50 @@ socket_adjust_frame_parameters (struct frame *frame, int proto)
 }
 
 void
-link_socket_set_outgoing_addr (const struct buffer *buf,
-			       struct link_socket *sock,
-			       const struct sockaddr_in *addr)
+link_socket_connection_initiated (const struct buffer *buf,
+				  struct link_socket *sock,
+				  const struct sockaddr_in *addr)
 {
-  mutex_lock (L_SOCK);
-  if (!buf || buf->len > 0)
+  struct gc_arena gc = gc_new ();
+  struct link_socket_addr *lsa = sock->lsa;
+  lsa->actual = *addr; /* Note: skip this line for --force-dest */
+  sock->set_outgoing_initial = true;
+  setenv_sockaddr ("trusted", &lsa->actual);
+  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual, &gc));
+  if (sock->ipchange_command)
     {
-      struct link_socket_addr *lsa = sock->lsa;
-      ASSERT (addr_defined (addr));
-      if ((sock->remote_float
-	   || !addr_defined (&lsa->remote)
-	   || addr_match_proto (addr, &lsa->remote, sock->proto))
-	  && (!addr_match_proto (addr, &lsa->actual, sock->proto)
-	      || !sock->set_outgoing_initial))
-	{
-	  struct gc_arena gc = gc_new ();
-	  lsa->actual = *addr; // JYFIXME: skip this line for --force-dest
-	  sock->set_outgoing_initial = true;
-	  mutex_unlock (L_SOCK);
-	  setenv_sockaddr ("trusted", &lsa->actual);
-	  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual, &gc));
-	  if (sock->ipchange_command)
-	    {
-	      char command[512];
-	      struct buffer out;
-	      setenv_str ("script_type", "ipchange");
-	      buf_set_write (&out, (uint8_t *)command, sizeof (command));
-	      buf_printf (&out, "%s %s",
-			  sock->ipchange_command,
-			  print_sockaddr_ex (&lsa->actual, true, " ", &gc));
-	      msg (D_TLS_DEBUG, "executing ip-change command: %s", command);
-	      system_check (command, "ip-change command failed", false);
-	    }
-	  mutex_lock (L_SOCK);
-	  gc_free (&gc);
-	}
+      struct buffer out = alloc_buf_gc (512, &gc);
+      setenv_str ("script_type", "ipchange");
+      buf_printf (&out, "%s %s",
+		  sock->ipchange_command,
+		  print_sockaddr_ex (&lsa->actual, true, " ", &gc));
+      msg (D_TLS_DEBUG, "executing ip-change command: %s", BSTR (&out));
+      system_check (BSTR (&out), "ip-change command failed", false);
     }
-  mutex_unlock (L_SOCK);
+  gc_free (&gc);
+}
+
+void
+link_socket_bad_incoming_addr (struct buffer *buf,
+			       const struct link_socket *sock,
+			       const struct sockaddr_in *from_addr)
+{
+  struct gc_arena gc = gc_new ();
+
+  msg (D_LINK_ERRORS,
+       "NOTE: Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
+       print_sockaddr (from_addr, &gc),
+       (int)from_addr->sin_family,
+       print_sockaddr (&sock->lsa->remote, &gc));
+  buf->len = 0;
+
+  gc_free (&gc);
+}
+
+void
+link_socket_bad_outgoing_addr (void)
+{
+  msg (D_READ_WRITE, "No outgoing address to send packet");
 }
 
 in_addr_t
@@ -909,68 +915,6 @@ link_socket_current_remote (const struct link_socket *sock)
     }
   else
     return 0;
-}
-
-void
-link_socket_incoming_addr (struct buffer *buf,
-			   const struct link_socket *sock,
-			   const struct sockaddr_in *from_addr)
-{
-  struct gc_arena gc;
-  gc_init (&gc);
-
-  mutex_lock (L_SOCK);
-  if (buf->len > 0)
-    {
-      if (from_addr->sin_family != AF_INET)
-	goto bad;
-      if (!addr_defined (from_addr))
-	goto bad;
-      if (sock->remote_float || !addr_defined (&sock->lsa->remote))
-	goto good;
-      if (addr_match_proto (from_addr, &sock->lsa->remote, sock->proto))
-	goto good;
-    }
-
-bad:
-  msg (D_LINK_ERRORS,
-       "NOTE: Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
-       print_sockaddr (from_addr, &gc),
-       (int)from_addr->sin_family,
-       print_sockaddr (&sock->lsa->remote, &gc));
-  buf->len = 0;
-  mutex_unlock (L_SOCK);
-  gc_free (&gc);
-  return;
-
-good:
-  msg (D_READ_WRITE, "IP Address OK from %s",
-       print_sockaddr (from_addr, &gc));
-  mutex_unlock (L_SOCK);
-  gc_free (&gc);
-  return;
-}
-
-void
-link_socket_get_outgoing_addr (struct buffer *buf,
-			      const struct link_socket *sock,
-			      struct sockaddr_in *addr)
-{
-  mutex_lock (L_SOCK);
-  if (buf->len > 0)
-    {
-      struct link_socket_addr *lsa = sock->lsa;
-      if (addr_defined (&lsa->actual))
-	{
-	  *addr = lsa->actual;
-	}
-      else
-	{
-	  msg (D_READ_WRITE, "No outgoing address to send packet");
-	  buf->len = 0;
-	}
-    }
-  mutex_unlock (L_SOCK);
 }
 
 void

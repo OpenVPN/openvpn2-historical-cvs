@@ -23,6 +23,9 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#ifndef MEMDBG_H
+#define MEMDBG_H
+
 #ifdef DMALLOC /* see ./configure options to enable */
 
 /*
@@ -59,4 +62,5 @@
   _malloc_leap("logfile", msg_line_num, size)
 #endif
 
+#endif
 #endif

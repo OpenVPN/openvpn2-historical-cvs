@@ -311,3 +311,12 @@ string_alloc (const char *str)
   else
     return NULL;
 }
+
+/*
+ * Fail memory allocation
+ */
+void
+alloc_struct_out_of_mem (void)
+{
+  ASSERT (0);
+}

@@ -402,7 +402,7 @@ init_options (struct options *o)
   o->handshake_window = 60;
   o->transition_window = 3600;
 #ifdef USE_PTHREAD
-  o->tls_thread = true; // JYFIXME -- disable multithreading for test purposes
+  o->tls_thread = false; // JYFIXME -- disable multithreading for test purposes
 #endif
 #endif
 #endif

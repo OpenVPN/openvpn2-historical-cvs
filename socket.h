@@ -220,18 +220,6 @@ void socket_adjust_frame_parameters (struct frame *frame, int proto);
 
 void frame_adjust_path_mtu (struct frame *frame, int pmtu, int proto);
 
-void link_socket_set_outgoing_addr (const struct buffer *buf,
-				    struct link_socket *sock,
-				    const struct sockaddr_in *addr);
-
-void link_socket_incoming_addr (struct buffer *buf,
-				const struct link_socket *sock,
-				const struct sockaddr_in *from_addr);
-
-void link_socket_get_outgoing_addr (struct buffer *buf,
-				    const struct link_socket *sock,
-				    struct sockaddr_in *addr);
-
 void link_socket_close (struct link_socket *sock);
 
 const char *print_sockaddr_ex (const struct sockaddr_in *addr,
@@ -254,6 +242,16 @@ void bad_address_length (int actual, int expected);
 in_addr_t link_socket_current_remote (const struct link_socket *sock);
 
 void link_socket_inherit_passive (struct link_socket *dest, const struct link_socket *src, struct link_socket_addr *lsa);
+
+void link_socket_connection_initiated (const struct buffer *buf,
+				       struct link_socket *sock,
+				       const struct sockaddr_in *addr);
+
+void link_socket_bad_incoming_addr (struct buffer *buf,
+				    const struct link_socket *sock,
+				    const struct sockaddr_in *from_addr);
+
+void link_socket_bad_outgoing_addr (void);
 
 /*
  * DNS resolution
@@ -377,6 +375,72 @@ socket_connection_reset (const struct link_socket *sock, int status)
 	}
     }
   return false;
+}
+
+static inline bool
+link_socket_verify_incoming_addr (struct buffer *buf,
+				  const struct link_socket *sock,
+				  const struct sockaddr_in *from_addr)
+{
+  if (buf->len > 0)
+    {
+      if (from_addr->sin_family != AF_INET)
+	return false;
+      if (!addr_defined (from_addr))
+	return false;
+      if (sock->remote_float || !addr_defined (&sock->lsa->remote))
+	return true;
+      if (addr_match_proto (from_addr, &sock->lsa->remote, sock->proto))
+	return true;
+    }
+  else
+    {
+      return false;
+    }
+}
+
+static inline void
+link_socket_get_outgoing_addr (struct buffer *buf,
+			      const struct link_socket *sock,
+			      struct sockaddr_in *addr)
+{
+  if (buf->len > 0)
+    {
+      struct link_socket_addr *lsa = sock->lsa;
+      if (sock->set_outgoing_initial && addr_defined (&lsa->actual))
+	{
+	  addr->sin_addr.s_addr = lsa->actual.sin_addr.s_addr;
+	  addr->sin_port = lsa->actual.sin_port;
+	}
+      else
+	{
+	  link_socket_bad_outgoing_addr ();
+	  buf->len = 0;
+	}
+    }
+}
+
+static inline void
+link_socket_set_outgoing_addr (const struct buffer *buf,
+			       struct link_socket *sock,
+			       const struct sockaddr_in *addr)
+{
+  if (!buf || buf->len > 0)
+    {
+      struct link_socket_addr *lsa = sock->lsa;
+      if (
+	  /* new or changed address? */
+	  ((!sock->set_outgoing_initial)
+	   || !addr_match_proto (addr, &lsa->actual, sock->proto))
+	  /* address undef or address == remote or --float */
+	  && (sock->remote_float
+	      || !addr_defined (&lsa->remote)
+	      || addr_match_proto (addr, &lsa->remote, sock->proto))
+	 )
+	{
+	  link_socket_connection_initiated (buf, sock, addr);
+	}
+    }
 }
 
 /*

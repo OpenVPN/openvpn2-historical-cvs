@@ -299,9 +299,7 @@ multi_inherit_context (struct context *dest, const struct context *src)
   dest->first_time = false;
 
   /* signals */
-  dest->sig = (struct signal_info *) malloc (sizeof (struct signal_info));
-  ASSERT (dest->sig);
-  CLEAR (*dest->sig);
+  ALLOC_STRUCT (dest->sig, struct signal_info, true);
 
   /* c1 init */
   clear_tuntap (&dest->c1.tuntap);
@@ -314,6 +312,7 @@ multi_inherit_context (struct context *dest, const struct context *src)
   /* options */
   dest->options = src->options;
   context_gc_detach (dest, true);
+
 #ifdef USE_PTHREAD
   dest->options.tls_thread = false; // JYFIXME -- point-to-multipoint doesn't support a threaded control channel yet
 #endif
@@ -323,6 +322,10 @@ multi_inherit_context (struct context *dest, const struct context *src)
   if (IS_SIG (dest))
     return;
 
+  /* all instances use top-level parent buffers */
+  inherit_buffers (dest, src);
+
+  /* inherit parent link_socket and tuntap */
   link_socket_inherit_passive (&dest->c2.link_socket, &src->c2.link_socket, &dest->c1.link_socket_addr);
   tuntap_inherit_passive (&dest->c1.tuntap, &src->c1.tuntap);
 }
@@ -346,14 +349,14 @@ multi_open_instance (struct multi_context *m, struct context *t)
   struct multi_instance *mi = multi_instance_get_free (m);
   ASSERT (mi); /* this will fail if we run out of free instances */
 
-  msg (M_INFO, "multi_open_instance called");
+  msg (M_INFO, "DEBUG: multi_open_instance called");
 
   CLEAR (*mi);
   mi->defined = true;
   mroute_list_init (&mi->real);
   mroute_list_init (&mi->virtual);
 
-  /* remember source address for subsequent packets to this instance */
+  /* remember source address for subsequent references to this instance */
   mroute_extract_sockaddr_in (&mi->real.addr, &t->c2.from, true);
 
   multi_inherit_context (&mi->context, t);
@@ -461,8 +464,18 @@ multi_process_io (struct multi_context *m, struct context *t)
 {
   if (t->c2.select_status > 0)
     {
+      /* TCP/UDP port ready to accept write */
+      if (SOCKET_ISSET (&t->c2.event_wait, &t->c2.link_socket, writes))
+	{
+	  multi_process_outgoing_link (m, t);
+	}
+      /* TUN device ready to accept write */
+      else if (TUNTAP_ISSET (&t->c2.event_wait, &t->c1.tuntap, writes))
+	{
+	  multi_process_outgoing_tun (m, t);
+	}
       /* Incoming data on TCP/UDP port */
-      if (SOCKET_ISSET (&t->c2.event_wait, &t->c2.link_socket, reads))
+      else if (SOCKET_ISSET (&t->c2.event_wait, &t->c2.link_socket, reads))
 	{
 	  read_incoming_link (t);
 	  if (!IS_SIG (t))
@@ -474,16 +487,6 @@ multi_process_io (struct multi_context *m, struct context *t)
 	  read_incoming_tun (t);
 	  if (!IS_SIG (t))
 	    multi_process_incoming_tun (m, t);
-	}
-      /* TCP/UDP port ready to accept write */
-      else if (SOCKET_ISSET (&t->c2.event_wait, &t->c2.link_socket, writes))
-	{
-	  multi_process_outgoing_link (m, t);
-	}
-      /* TUN device ready to accept write */
-      else if (TUNTAP_ISSET (&t->c2.event_wait, &t->c1.tuntap, writes))
-	{
-	  multi_process_outgoing_tun (m, t);
 	}
     }
 }

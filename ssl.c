@@ -283,10 +283,16 @@ tmp_rsa_cb (SSL * s, int is_export, int keylength)
  * Extract common name from an X509 subject name.
  */
 
-void // JYFIXME -- make static void
+static void
 extract_common_name (char *out, int size, const char *subject)
 {
-  /* /C=US/ST=CO/L=Denver/O=NTLP/CN=Test-CA/Email=jim@yonan.net */
+  /*
+   * Example subject:
+   *
+   * /C=US/ST=CO/L=Denver/O=NTLP/CN=Test-CA/Email=jim@yonan.net
+   *
+   * The common name is 'Test-CA'
+   */
 
   char c;
   int state = 0;
@@ -419,7 +425,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 		  opt->verify_command,
 		  ctx->error_depth,
 		  subject);
-      msg (D_TLS_DEBUG, "executing verify command: %s", command);
+      msg (D_TLS_DEBUG, "TLS: executing verify command: %s", command);
       ret = openvpn_system (command);
       if (system_ok (ret))
 	{
@@ -482,8 +488,12 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   msg (D_HANDSHAKE, "VERIFY OK: depth=%d, %s", ctx->error_depth, subject);
 
   /* save common name in session object */
-  if (ctx->error_depth == 0)
-    extract_common_name (session->common_name, TLS_CN_LEN, subject);
+  {
+    char common_name[TLS_CN_LEN];
+    if (ctx->error_depth == 0)
+      extract_common_name (common_name, TLS_CN_LEN, subject);
+    session->common_name = string_alloc (common_name);
+  }
   
   return 1;			/* Accept connection */
 }
@@ -501,13 +511,7 @@ const char *
 tls_common_name (struct tls_multi* multi)
 {
   if (multi)
-    {
-      const char *ret = multi->session[TM_ACTIVE].common_name;
-      if (*ret == '\0')
-	return NULL;
-      else
-	return ret;
-    }
+    return multi->session[TM_ACTIVE].common_name;
   else
     return NULL;
 }
@@ -1020,6 +1024,8 @@ key_state_init (struct tls_session *session, struct key_state *ks,
    */
   CLEAR (*ks);
 
+  msg (M_INFO, "CALLED key_state_init"); // JYFIXME
+
   ks->ssl = SSL_new (session->opt->ssl_ctx);
   if (!ks->ssl)
     msg (M_SSLERR, "SSL_new failed");
@@ -1061,15 +1067,23 @@ key_state_init (struct tls_session *session, struct key_state *ks,
   if (!session->key_id)
     session->key_id = 1;
 
+  /* allocate key source material object */
+  ALLOC_STRUCT (ks->key_src, struct key_source2, true);
+
+  /* allocate reliability objects */
+  ALLOC_STRUCT (ks->send_reliable, struct reliable, true);
+  ALLOC_STRUCT (ks->rec_reliable, struct reliable, true);
+  ALLOC_STRUCT (ks->rec_ack, struct reliable_ack, true);
+
   /* allocate buffers */
   ks->plaintext_read_buf = alloc_buf (PLAINTEXT_BUFFER_SIZE);
   ks->plaintext_write_buf = alloc_buf (PLAINTEXT_BUFFER_SIZE);
   ks->ack_write_buf = alloc_buf (BUF_SIZE (&session->opt->frame));
-  reliable_init (&ks->send_reliable, BUF_SIZE (&session->opt->frame),
+  reliable_init (ks->send_reliable, BUF_SIZE (&session->opt->frame),
 		 FRAME_HEADROOM (&session->opt->frame), TLS_RELIABLE_N_SEND_BUFFERS);
-  reliable_init (&ks->rec_reliable, BUF_SIZE (&session->opt->frame),
+  reliable_init (ks->rec_reliable, BUF_SIZE (&session->opt->frame),
 		 FRAME_HEADROOM (&session->opt->frame), TLS_RELIABLE_N_REC_BUFFERS);
-  reliable_set_timeout (&ks->send_reliable, session->opt->packet_timeout);
+  reliable_set_timeout (ks->send_reliable, session->opt->packet_timeout);
 
   /* init packet ID tracker */
   packet_id_init (&ks->packet_id,
@@ -1096,8 +1110,24 @@ key_state_free (struct key_state *ks, bool clear)
   free_buf (&ks->plaintext_read_buf);
   free_buf (&ks->plaintext_write_buf);
   free_buf (&ks->ack_write_buf);
-  reliable_free (&ks->send_reliable);
-  reliable_free (&ks->rec_reliable);
+
+  if (ks->send_reliable)
+    {
+      reliable_free (ks->send_reliable);
+      free (ks->send_reliable);
+    }
+
+  if (ks->rec_reliable)
+    {
+      reliable_free (ks->rec_reliable);
+      free (ks->rec_reliable);
+    }
+
+  if (ks->rec_ack)
+    free (ks->rec_ack);
+
+  if (ks->key_src)
+    free (ks->key_src);
 
   packet_id_free (&ks->packet_id);
 
@@ -1121,7 +1151,7 @@ tls_session_init (struct tls_multi *multi, struct tls_session *session)
 {
   struct gc_arena gc = gc_new ();
 
-  msg (D_TLS_DEBUG, "tls_session_init: entry");
+  msg (D_TLS_DEBUG, "TLS: tls_session_init: entry");
 
   CLEAR (*session);
 
@@ -1161,7 +1191,7 @@ tls_session_init (struct tls_multi *multi, struct tls_session *session)
 
   key_state_init (session, &session->key[KS_PRIMARY], time (NULL));
 
-  msg (D_TLS_DEBUG, "tls_session_init: new session object, sid=%s",
+  msg (D_TLS_DEBUG, "TLS: tls_session_init: new session object, sid=%s",
        session_id_print (&session->session_id, &gc));
 
   gc_free (&gc);
@@ -1178,12 +1208,15 @@ tls_session_free (struct tls_session *session, bool clear)
   for (i = 0; i < KS_SIZE; ++i)
     key_state_free (&session->key[i], false);
 
+  if (session->common_name)
+    free (session->common_name);
+
   if (clear)
     CLEAR (*session);
 }
 
 static void
-move_session(struct tls_multi* multi, int dest, int src, bool reinit_src)
+move_session (struct tls_multi* multi, int dest, int src, bool reinit_src)
 {
   msg (D_TLS_DEBUG_LOW, "TLS: move_session: dest=%s src=%s reinit_src=%d",
        session_index_name(dest),
@@ -1201,7 +1234,7 @@ move_session(struct tls_multi* multi, int dest, int src, bool reinit_src)
   else
     CLEAR (multi->session[src]);
 
-  msg (D_TLS_DEBUG, "move_session: exit");
+  msg (D_TLS_DEBUG, "TLS: move_session: exit");
 }
 
 static void
@@ -1296,13 +1329,16 @@ tls_multi_init (struct tls_options *tls_options)
  * Finalize our computation of frame sizes.
  */
 void
-tls_multi_init_finalize(struct tls_multi* multi, const struct frame* frame)
+tls_multi_init_finalize (struct tls_multi* multi, const struct frame* frame)
 {
   tls_init_control_channel_frame_parameters(frame, &multi->opt.frame);
   
   /* initialize the active and untrusted sessions */
+
   tls_session_init (multi, &multi->session[TM_ACTIVE]);
-  tls_session_init (multi, &multi->session[TM_UNTRUSTED]);
+
+  if (!multi->opt.single_session)
+    tls_session_init (multi, &multi->session[TM_UNTRUSTED]);
 }
 
 /*
@@ -1311,7 +1347,7 @@ tls_multi_init_finalize(struct tls_multi* multi, const struct frame* frame)
  * sets.
  */
 void
-tls_multi_init_set_options(struct tls_multi* multi,
+tls_multi_init_set_options (struct tls_multi* multi,
 			   const char *local,
 			   const char *remote)
 {
@@ -1415,7 +1451,7 @@ write_control_auth (struct tls_session *session,
 
   ASSERT (addr_defined (&ks->remote_addr));
   ASSERT (reliable_ack_write
-	  (&ks->rec_ack, buf, &ks->session_id_remote, max_ack, prepend_ack));
+	  (ks->rec_ack, buf, &ks->session_id_remote, max_ack, prepend_ack));
   ASSERT (session_id_write_prepend (&session->session_id, buf));
   ASSERT (header = buf_prepend (buf, 1));
   *header = ks->key_id | (opcode << P_OPCODE_SHIFT);
@@ -1811,7 +1847,7 @@ key_source2_read (struct key_source2 *k2,
 
 /* true if no in/out acknowledgements pending */
 #define FULL_SYNC \
-  (reliable_empty(&ks->send_reliable) && reliable_ack_empty(&ks->rec_ack))
+  (reliable_empty(ks->send_reliable) && reliable_ack_empty (ks->rec_ack))
 
 /*
  * Move the active key to the lame duck key and reinitialize the
@@ -1886,7 +1922,7 @@ tls_process (struct tls_multi *multi,
     {
       current = time (NULL);
 
-      msg (D_TLS_DEBUG, "tls_process: chg=%d ks=%s lame=%s to_link->len=%d wakeup=%d",
+      msg (D_TLS_DEBUG, "TLS: tls_process: chg=%d ks=%s lame=%s to_link->len=%d wakeup=%d",
 	   state_change,
 	   state_name (ks->state),
 	   state_name (ks_lame->state),
@@ -1907,18 +1943,18 @@ tls_process (struct tls_multi *multi,
 	  /* Initial handshake */
 	  if (ks->state == S_INITIAL)
 	    {
-	      buf = reliable_get_buf_output_sequenced (&ks->send_reliable);
+	      buf = reliable_get_buf_output_sequenced (ks->send_reliable);
 	      if (buf)
 		{
 		  ks->must_negotiate = current + session->opt->handshake_window;
 
 		  /* null buffer */
-		  reliable_mark_active_outgoing (&ks->send_reliable, buf, ks->initial_opcode);
+		  reliable_mark_active_outgoing (ks->send_reliable, buf, ks->initial_opcode);
 		  INCR_GENERATED;
 	      
 		  ks->state = S_PRE_START;
 		  state_change = true;
-		  msg (D_TLS_DEBUG, "Initial Handshake, sid=%s",
+		  msg (D_TLS_DEBUG, "TLS: Initial Handshake, sid=%s",
 		       session_id_print (&session->session_id, &gc));
 		}
 	    }
@@ -1974,12 +2010,12 @@ tls_process (struct tls_multi *multi,
 
 	  /* Reliable buffer to outgoing TCP/UDP (send up to CONTROL_SEND_ACK_MAX ACKs
 	     for previously received packets) */
-	  if (!to_link->len && reliable_can_send (&ks->send_reliable, current))
+	  if (!to_link->len && reliable_can_send (ks->send_reliable, current))
 	    {
 	      int opcode;
 	      struct buffer b;
 
-	      buf = reliable_send (&ks->send_reliable, &opcode, current);
+	      buf = reliable_send (ks->send_reliable, &opcode, current);
 	      ASSERT (buf);
 	      b = *buf;
 	      INCR_SENT;
@@ -1995,7 +2031,7 @@ tls_process (struct tls_multi *multi,
 
 #ifndef TLS_AGGREGATE_ACK
 	  /* Send 1 or more ACKs (each received control packet gets one ACK) */
-	  if (!to_link->len && !reliable_ack_empty (&ks->rec_ack))
+	  if (!to_link->len && !reliable_ack_empty (ks->rec_ack))
 	    {
 	      buf = &ks->ack_write_buf;
 	      ASSERT (buf_init (buf, FRAME_HEADROOM (&multi->opt.frame)));
@@ -2010,7 +2046,7 @@ tls_process (struct tls_multi *multi,
 #endif
 
 	  /* Write incoming ciphertext to TLS object */
-	  buf = reliable_get_buf_sequenced (&ks->rec_reliable);
+	  buf = reliable_get_buf_sequenced (ks->rec_reliable);
 	  if (buf)
 	    {
 	      int status = 0;
@@ -2030,7 +2066,7 @@ tls_process (struct tls_multi *multi,
 		}
 	      if (status == 1)
 		{
-		  reliable_mark_deleted (&ks->rec_reliable, buf, true);
+		  reliable_mark_deleted (ks->rec_reliable, buf, true);
 		  state_change = true;
 		  msg (D_TLS_DEBUG, "Incoming Ciphertext -> TLS");
 		}
@@ -2094,7 +2130,7 @@ tls_process (struct tls_multi *multi,
 					| (session->opt->pass_config_info ? TLS_PASS_CONFIG_INFO : 0)));
 
 		  /* write key source material */
-		  key_source2_randomize_write (&ks->key_src, buf, session->opt->server);
+		  key_source2_randomize_write (ks->key_src, buf, session->opt->server);
 
 		  /* write options string */
 		  ASSERT (optlen >= 0 && optlen < 65536);
@@ -2105,13 +2141,13 @@ tls_process (struct tls_multi *multi,
 		    {
 		      if (!generate_key_expansion (&ks->key,
 						   &session->opt->key_type,
-						   &ks->key_src,
+						   ks->key_src,
 						   &ks->session_id_remote,
 						   &session->session_id,
 						   true))
 			goto error;
 		      
-		      CLEAR (ks->key_src);
+		      CLEAR (*ks->key_src);
 		    }
 		}
 
@@ -2199,7 +2235,7 @@ tls_process (struct tls_multi *multi,
 		    }
 		  
 		  /* get key source material (not actual keys yet) */
-		  if (!key_source2_read (&ks->key_src, buf, session->opt->server))
+		  if (!key_source2_read (ks->key_src, buf, session->opt->server))
 		    {
 		      msg (D_TLS_ERRORS, "TLS Error: Error reading remote data channel key source entropy from plaintext buffer");
 		      goto error;
@@ -2235,13 +2271,13 @@ tls_process (struct tls_multi *multi,
 		    {
 		      if (!generate_key_expansion (&ks->key,
 						   &session->opt->key_type,
-						   &ks->key_src,
+						   ks->key_src,
 						   &session->session_id,
 						   &ks->session_id_remote,
 						   false))
 			goto error;
 		      
-		      CLEAR (ks->key_src);
+		      CLEAR (*ks->key_src);
 		    }
 		}
 
@@ -2271,7 +2307,7 @@ tls_process (struct tls_multi *multi,
 	  /* Outgoing Ciphertext to reliable buffer */
 	  if (ks->state >= S_START)
 	    {
-	      buf = reliable_get_buf_output_sequenced (&ks->send_reliable);
+	      buf = reliable_get_buf_output_sequenced (ks->send_reliable);
 	      if (buf)
 		{
 		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE_DYNAMIC (&multi->opt.frame));
@@ -2283,7 +2319,7 @@ tls_process (struct tls_multi *multi,
 		    }
 		  if (status == 1)
 		    {
-		      reliable_mark_active_outgoing (&ks->send_reliable, buf, P_CONTROL_V1);
+		      reliable_mark_active_outgoing (ks->send_reliable, buf, P_CONTROL_V1);
 		      INCR_GENERATED;
 		      state_change = true;
 		      msg (D_TLS_DEBUG, "Outgoing Ciphertext -> Reliable");
@@ -2299,7 +2335,7 @@ tls_process (struct tls_multi *multi,
 
 #ifdef TLS_AGGREGATE_ACK
   /* Send 1 or more ACKs (each received control packet gets one ACK) */
-  if (!to_link->len && !reliable_ack_empty (&ks->rec_ack))
+  if (!to_link->len && !reliable_ack_empty (ks->rec_ack))
     {
       buf = &ks->ack_write_buf;
       ASSERT (buf_init (buf, FRAME_HEADROOM (&multi->opt.frame)));
@@ -2317,7 +2353,7 @@ tls_process (struct tls_multi *multi,
     if (ks->state >= S_INITIAL)
       {
 	compute_earliest_wakeup (wakeup,
-	  reliable_send_timeout (&ks->send_reliable, current));
+	  reliable_send_timeout (ks->send_reliable, current));
 	
 	if (ks->must_negotiate)
 	  compute_earliest_wakeup (wakeup, ks->must_negotiate - current);
@@ -2337,7 +2373,7 @@ tls_process (struct tls_multi *multi,
 	active = true;
       }
 
-    msg (D_TLS_DEBUG, "tls_process: timeout set to %d", *wakeup);
+    msg (D_TLS_DEBUG, "TLS: tls_process: timeout set to %d", *wakeup);
 
     gc_free (&gc);
     return active;
@@ -2394,7 +2430,7 @@ tls_multi_process (struct tls_multi *multi,
 	ks->remote_addr = to_link_socket->lsa->actual;
 
       msg (D_TLS_DEBUG,
-	   "tls_multi_process: i=%d state=%s, mysid=%s, stored-sid=%s, stored-ip=%s",
+	   "TLS: tls_multi_process: i=%d state=%s, mysid=%s, stored-sid=%s, stored-ip=%s",
 	   i,
 	   state_name (ks->state),
 	   session_id_print (&session->session_id, &gc),
@@ -2417,7 +2453,9 @@ tls_multi_process (struct tls_multi *multi,
 	  if (ks->state == S_ERROR)
 	    {
 	      ++multi->n_errors;
-	      if (i == TM_ACTIVE && ks_lame->state >= S_ACTIVE)
+	      if (i == TM_ACTIVE
+		  && ks_lame->state >= S_ACTIVE
+		  && !multi->opt.single_session)
 		move_session (multi, TM_LAME_DUCK, TM_ACTIVE, true);
 	      else
 		reset_session (multi, session);
@@ -2432,7 +2470,7 @@ tls_multi_process (struct tls_multi *multi,
    * If lame duck session expires, kill it.
    */
   if (lame_duck_must_die (&multi->session[TM_LAME_DUCK], wakeup, current)) {
-    tls_session_free(&multi->session[TM_LAME_DUCK], true);
+    tls_session_free (&multi->session[TM_LAME_DUCK], true);
     msg (D_TLS_DEBUG_LOW, "TLS: tls_multi_process: killed expiring key");
   }
 
@@ -2658,7 +2696,7 @@ tls_thread_create (struct thread_parms *state,
    * end to non-blocking.
    */
   if (socketpair (PF_UNIX, SOCK_DGRAM, 0, state->sd) == -1)
-    msg (M_ERR, "socketpair call failed");
+    msg (M_ERR, "TLS: socketpair call failed");
   set_nonblock (state->sd[TLS_THREAD_MAIN]);
   set_nonblock (state->sd[TLS_THREAD_WORKER]);
   set_cloexec (state->sd[TLS_THREAD_MAIN]);
@@ -2857,7 +2895,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  ++ks->n_packets;
 		  ks->n_bytes += buf->len;
 		  msg (D_TLS_DEBUG,
-		       "tls_pre_decrypt: data channel, key_id=%d, IP=%s",
+		       "TLS: data channel, key_id=%d, IP=%s",
 		       key_id, print_sockaddr (from, &gc));
 		  gc_free (&gc);
 		  return ret;
@@ -2903,7 +2941,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	  /*
 	   * Authenticate Packet
 	   */
-	  msg (D_TLS_DEBUG, "tls_pre_decrypt: control channel, op=%s, IP=%s",
+	  msg (D_TLS_DEBUG, "TLS: control channel, op=%s, IP=%s",
 	       packet_opcode_name (op), print_sockaddr (from, &gc));
 
 	  /* get remote session-id */
@@ -2926,7 +2964,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	      struct key_state *ks = &session->key[KS_PRIMARY];
 
 	      msg (D_TLS_DEBUG,
-		   "tls_pre_decrypt: initial packet test, i=%d state=%s, mysid=%s, rec-sid=%s, rec-ip=%s, stored-sid=%s, stored-ip=%s",
+		   "TLS: initial packet test, i=%d state=%s, mysid=%s, rec-sid=%s, rec-ip=%s, stored-sid=%s, stored-ip=%s",
 		   i,
 		   state_name (ks->state),
 		   session_id_print (&session->session_id, &gc),
@@ -2945,15 +2983,14 @@ tls_pre_decrypt (struct tls_multi *multi,
 		    goto error;
 		  }
 		  msg (D_TLS_DEBUG,
-		       "tls_pre_decrypt: found match, session[%d], sid=%s",
+		       "TLS: found match, session[%d], sid=%s",
 		       i, session_id_print (&sid, &gc));
 		  break;
 		}
 	    }
 
 	  /*
-	   * check if this is the first response from a host to which
-	   * we sent an initial packet
+	   * Initial packet received.
 	   */
 
 	  if (i == TM_SIZE && is_hard_reset (op, 0))
@@ -2963,16 +3000,28 @@ tls_pre_decrypt (struct tls_multi *multi,
 
 	      if (!is_hard_reset (op, multi->opt.key_method))
 		{
-		  msg (D_TLS_ERRORS, "TLS ERROR: first response local/remote key_method mismatch, local key_method=%d, op=%s",
+		  msg (D_TLS_ERRORS, "TLS ERROR: initial packet local/remote key_method mismatch, local key_method=%d, op=%s",
 		       multi->opt.key_method,
 		       packet_opcode_name (op));
 		  goto error;
 		}
 
+	      /*
+	       * If we have no session currently in progress, the initial packet will
+	       * open a new session in TM_ACTIVE rather than TM_UNTRUSTED.
+	       */
 	      if (!session_id_defined (&ks->session_id_remote))
 		{
+		  if (multi->opt.single_session && multi->n_sessions)
+		    {
+		      msg (D_TLS_ERRORS,
+			   "TLS Error: Cannot accept new session request from %s due to --single-session [1]",
+			   print_sockaddr (from, &gc));
+		      goto error;
+		    }
+
 		  msg (D_TLS_DEBUG_LOW,
-		       "TLS: tls_pre_decrypt: first response to initial packet from %s, sid=%s",
+		       "TLS: Initial packet from %s, sid=%s",
 		       print_sockaddr (from, &gc),
 		       session_id_print (&sid, &gc));
 		  do_burst = true;
@@ -2990,6 +3039,18 @@ tls_pre_decrypt (struct tls_multi *multi,
 	       */
 	      struct tls_session *session = &multi->session[TM_UNTRUSTED];
 
+	      /*
+	       * If --single-session, don't allow any hard-reset connection request
+	       * unless it the the first packet of the session.
+	       */
+	      if (multi->opt.single_session)
+		{
+		  msg (D_TLS_ERRORS,
+		       "TLS Error: Cannot accept new session request from %s due to --single-session [2]",
+		       print_sockaddr (from, &gc));
+		  goto error;
+		}
+	      
 	      if (!is_hard_reset (op, multi->opt.key_method))
 		{
 		  msg (D_TLS_ERRORS, "TLS ERROR: new session local/remote key_method mismatch, local key_method=%d, op=%s",
@@ -3008,7 +3069,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	       * Without --tls-auth, we leave authentication entirely up to TLS.
 	       */
 	      msg (D_TLS_DEBUG_LOW,
-		   "TLS: tls_pre_decrypt: new session incoming connection from %s",
+		   "TLS: new session incoming connection from %s",
 		   print_sockaddr (from, &gc));
 
 	      new_link = true;
@@ -3055,7 +3116,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  key_state_soft_reset (session, current);
 
 		  msg (D_TLS_DEBUG,
-		       "tls_pre_decrypt: received P_CONTROL_SOFT_RESET_V1 s=%d sid=%s",
+		       "TLS: received P_CONTROL_SOFT_RESET_V1 s=%d sid=%s",
 		       i, session_id_print (&sid, &gc));
 		}
 	      else
@@ -3070,22 +3131,11 @@ tls_pre_decrypt (struct tls_multi *multi,
 		    goto error;
 
 		  msg (D_TLS_DEBUG,
-		       "tls_pre_decrypt: received control channel packet s#=%d sid=%s",
+		       "TLS: received control channel packet s#=%d sid=%s",
 		       i, session_id_print (&sid, &gc));
 		}
 	    }
 	  
-	  /*
-	   * If --single-session, don't allow more than one session.
-	   */
-	  if (multi->opt.single_session && new_link && multi->n_sessions)
-	    {
-	      msg (D_TLS_ERRORS,
-		   "TLS Error: Cannot accept new session request from %s due to --single-session",
-		   print_sockaddr (from, &gc));
-	      goto error;
-	    }
-
 	  /*
 	   * We have an authenticated packet (if --tls-auth was set).
            * Now pass to our reliability level which deals with
@@ -3127,7 +3177,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	     */
 	    if (do_burst && !session->burst)
 	      {
-		reliable_schedule_now (&ks->send_reliable, current);
+		reliable_schedule_now (ks->send_reliable, current);
 		session->burst = true;
 	      }
 
@@ -3155,10 +3205,10 @@ tls_pre_decrypt (struct tls_multi *multi,
 		       "TLS Error: reading acknowledgement record from packet");
 		  goto error;
 		}
-	      reliable_send_purge (&ks->send_reliable, &send_ack);
+	      reliable_send_purge (ks->send_reliable, &send_ack);
 	    }
 
-	    if (op != P_ACK_V1 && reliable_can_get (&ks->rec_reliable))
+	    if (op != P_ACK_V1 && reliable_can_get (ks->rec_reliable))
 	      {
 		packet_id_type id;
 
@@ -3166,19 +3216,19 @@ tls_pre_decrypt (struct tls_multi *multi,
 		if (reliable_ack_read_packet_id (buf, &id))
 		  {
 		    /* Avoid deadlock by rejecting packet that would de-sequentialize receive buffer */
-		    if (reliable_wont_break_sequentiality (&ks->rec_reliable, id))
+		    if (reliable_wont_break_sequentiality (ks->rec_reliable, id))
 		      {
-			if (reliable_not_replay (&ks->rec_reliable, id))
+			if (reliable_not_replay (ks->rec_reliable, id))
 			  {
 			    /* Save incoming ciphertext packet to reliable buffer */
-			    struct buffer *in = reliable_get_buf (&ks->rec_reliable);
+			    struct buffer *in = reliable_get_buf (ks->rec_reliable);
 			    ASSERT (in);
 			    ASSERT (buf_copy (in, buf));
-			    reliable_mark_active_incoming (&ks->rec_reliable, in, id, op);
+			    reliable_mark_active_incoming (ks->rec_reliable, in, id, op);
 			  }
 
 			/* Process outgoing acknowledgment for packet just received, even if it's a replay */
-			reliable_ack_acknowledge_packet_id (&ks->rec_ack, id);
+			reliable_ack_acknowledge_packet_id (ks->rec_ack, id);
 		      }
 		  }
 	      }
@@ -3320,7 +3370,7 @@ tls_pre_encrypt (struct tls_multi *multi,
 	      opt->pid_persist = NULL;
 	      opt->packet_id_long_form = multi->opt.packet_id_long_form;
 	      multi->save_ks = ks;
-	      msg (D_TLS_DEBUG, "tls_pre_encrypt: key_id=%d", ks->key_id);
+	      msg (D_TLS_DEBUG, "TLS: tls_pre_encrypt: key_id=%d", ks->key_id);
 	      return;
 	    }
 	}

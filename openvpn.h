@@ -249,6 +249,11 @@ struct context_2
   struct buffer read_tun_buf;
 
   /*
+   * If true, we should free all buffers on close.
+   */
+  bool buffers_owned;
+
+  /*
    * IPv4 TUN device?
    */
   bool ipv4_tun;

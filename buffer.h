@@ -499,4 +499,18 @@ gc_reset (struct gc_arena *a)
   gc_free (a);
 }
 
+/*
+ * Allocate memory to hold a structure
+ */
+
+void alloc_struct_out_of_mem (void);
+
+#define ALLOC_STRUCT(dptr, type, clear) \
+{ \
+  if (!((dptr) = (type *) malloc (sizeof (type)))) \
+    alloc_struct_out_of_mem (); \
+  if (clear) \
+    memset ((dptr), 0, sizeof(type)); \
+}
+
 #endif /* BUFFER_H */

@@ -233,14 +233,15 @@ struct key_state
 
   struct key_ctx_bi key;	       /* data channel keys for encrypt/decrypt/hmac */
 
-  struct key_source2 key_src;          /* source entropy for key expansion */
+  struct key_source2 *key_src;         /* source entropy for key expansion */
 
   struct buffer plaintext_read_buf;
   struct buffer plaintext_write_buf;
   struct buffer ack_write_buf;
-  struct reliable send_reliable; /* holds a copy of outgoing packets until ACK received */
-  struct reliable rec_reliable;	 /* order incoming ciphertext packets before we pass to TLS */
-  struct reliable_ack rec_ack;	 /* buffers all packet IDs we want to ACK back to sender */
+
+  struct reliable *send_reliable; /* holds a copy of outgoing packets until ACK received */
+  struct reliable *rec_reliable;  /* order incoming ciphertext packets before we pass to TLS */
+  struct reliable_ack *rec_ack;	  /* buffers all packet IDs we want to ACK back to sender */
 
   int n_bytes;			 /* how many bytes sent/recvd since last key exchange */
   int n_packets;		 /* how many packets sent/recvd since last key exchange */
@@ -339,7 +340,7 @@ struct tls_session
 
   int verify_maxlevel;
 
-  char common_name[TLS_CN_LEN];
+  char *common_name;
 
   struct key_state key[KS_SIZE];
 };

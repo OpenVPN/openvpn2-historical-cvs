@@ -1,7 +1,14 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.12 2004/03/19 10:42:33 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.13 2004/03/20 09:19:43 jimyonan Exp $
+
+2004.03.20 -- Version 2.0-test13
+
+* Reduced struct tls_multi and --single-session
+  memory footprint.
+* Modified --single-session flag to be used
+  in multi-client UDP server client instances.
 
 2004.03.19 -- Version 2.0-test12
 

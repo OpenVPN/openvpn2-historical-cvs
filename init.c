@@ -1111,19 +1111,7 @@ do_init_crypto_tls_c1 (struct context *c)
        * Initialize the OpenSSL library's global
        * SSL context.
        */
-      c->c1.ks.ssl_ctx = init_ssl (options->tls_server,
-				   options->ca_file,
-				   options->dh_file,
-				   options->cert_file,
-				   options->priv_key_file,
-				   options->pkcs12_file,
-				   options->cipher_list,
-#if P2MP
-				   !options->client_cert_not_required
-#else
-				   true
-#endif
-				   );
+      c->c1.ks.ssl_ctx = init_ssl (options);
 
       /* Get cipher & hash algorithms */
       init_key_type (&c->c1.ks.key_type, options->ciphername,
@@ -1369,6 +1357,13 @@ do_option_warnings (struct context *c)
       if (o->duplicate_cn && o->client_config_dir)
 	msg (M_WARN, "WARNING: using --duplicate-cn and --client-config-dir together is probably not what you want");
     }
+#endif
+
+#ifdef USE_CRYPTO
+  if (!o->replay)
+    msg (M_WARN, "WARNING: You have disabled Replay Protection (--no-replay) which may make " PACKAGE_NAME " less secure");
+  if (!o->use_iv)
+    msg (M_WARN, "WARNING: You have disabled Crypto IVs (--no-iv) which may make " PACKAGE_NAME " less secure");
 #endif
 }
 
@@ -1918,7 +1913,7 @@ init_instance (struct context *c, unsigned int flags)
   if (c->mode == CM_P2P || c->mode == CM_TOP)
     do_option_warnings (c);
 
-  /* init c2's environmental variables to c1 state */
+  /* inherit c2's environmental variables from c1 */
   if (c->mode == CM_P2P || c->mode == CM_TOP)
     do_inherit_env (c, c->es);
 
@@ -2141,9 +2136,6 @@ inherit_context_child (struct context *dest,
   dest->options = src->options;
   options_detach (&dest->options);
 
-  /* environment */
-  do_inherit_env (dest, src->c2.es);
-
   if (dest->mode == CM_CHILD_TCP)
     {
       /*
@@ -2157,6 +2149,9 @@ inherit_context_child (struct context *dest,
   init_instance (dest, CC_USR1_TO_HUP | CC_GC_FREE);
   if (IS_SIG (dest))
     return;
+
+  /* inherit environment */
+  do_inherit_env (dest, src->c2.es);
 
   /* inherit tun/tap interface object */
   dest->c1.tuntap = src->c1.tuntap;

@@ -108,6 +108,7 @@ EXTRA_DIST = \
 	win32.h \
 	win32.c \
 	makefile.w32 \
+        makefile.w32-vc \
 	INSTALL-win32.txt \
 	tap-win32 \
 	install-win32 \

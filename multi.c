@@ -66,8 +66,15 @@ learn_address_script (const struct multi_context *m,
     {
       struct gc_arena gc = gc_new ();
       struct buffer cmd = alloc_buf_gc (256, &gc);
+      struct env_set *es;
 
-      setenv_str (mi->context.c2.es, "script_type", "learn-address");
+      /* get environmental variable source */
+      if (mi && mi->context.c2.es)
+	es = mi->context.c2.es;
+      else
+	es = env_set_create (&gc);
+
+      setenv_str (es, "script_type", "learn-address");
 
       buf_printf (&cmd, "%s \"%s\" \"%s\"",
 		  m->learn_address_script,
@@ -76,7 +83,7 @@ learn_address_script (const struct multi_context *m,
       if (mi)
 	buf_printf (&cmd, " \"%s\"", tls_common_name (mi->context.c2.tls_multi, false));
 
-      system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "learn-address command failed");
+      system_check (BSTR (&cmd), es, S_SCRIPT, "learn-address command failed");
 
       gc_free (&gc);
     }

@@ -330,7 +330,7 @@ assert_failed (const char *filename, int line)
 void
 out_of_memory (void)
 {
-  fprintf (stderr, "OpenVPN: Out of Memory\n");
+  fprintf (stderr, PACKAGE_NAME ": Out of Memory\n");
   openvpn_exit (OPENVPN_EXIT_STATUS_ERROR);
 }
 

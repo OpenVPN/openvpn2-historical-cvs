@@ -2226,7 +2226,7 @@ get_device_guid (const char *name,
       }
   }
 
-  msg (M_FATAL, "TAP-Win32 adapter '%s' not found.  Use openvpn --show-adapters to show a list of TAP-WIN32 adapters on this system.  Remember that if you are specifying a TAP-Win32 adapter by GUID for the --dev-node option, enclose the GUID in braces, for example: {4E22992D-0780-4B8F-AC18-5F1DDBE13E09}", name);
+  msg (M_FATAL, "TAP-Win32 adapter '%s' not found.  Use " PACKAGE " --show-adapters to show a list of TAP-WIN32 adapters on this system.  Remember that if you are specifying a TAP-Win32 adapter by GUID for the --dev-node option, enclose the GUID in braces, for example: {4E22992D-0780-4B8F-AC18-5F1DDBE13E09}", name);
   return NULL;
 }
 

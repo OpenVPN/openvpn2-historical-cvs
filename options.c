@@ -145,7 +145,7 @@ static const char usage_message[] =
   "                  --route-up script using environmental variables.\n"
   "--redirect-gateway [flags]: (Experimental) Automatically execute routing\n"
   "                  commands to redirect all outgoing IP traffic through the\n"
-  "                  VPN.  Add 'local' flag if both OpenVPN servers are directly\n"
+  "                  VPN.  Add 'local' flag if both " PACKAGE_NAME " servers are directly\n"
   "                  connected via a common subnet, such as with WiFi.\n"
   "                  Add 'def1' flag to set default route using using 0.0.0.0/1\n"
   "                  and 128.0.0.0/1 rather than 0.0.0.0/0.\n"
@@ -350,7 +350,11 @@ static const char usage_message[] =
   "                  by a Certificate Authority in --ca file.\n"
   "--key file      : Local private key in .pem format.\n"
   "--pkcs12 file   : PKCS#12 file containing local private key, local certificate\n"
-  "                  and root CA certificate.\n" 
+  "                  and root CA certificate.\n"
+#ifdef WIN32
+  "--cryptoapicert select-string : Load the certificate and private key from the\n"
+  "                  Windows Certificate System Store.\n"
+#endif
   "--tls-cipher l  : A list l of allowable TLS ciphers separated by : (optional).\n"
   "                : Use --show-tls to see a list of supported TLS ciphers.\n"
   "--tls-timeout n : Packet retransmit timeout on TLS control channel\n"
@@ -425,17 +429,17 @@ static const char usage_message[] =
   "--tap-sleep n   : Sleep for n seconds after TAP adapter open before\n"
   "                  attempting to set adapter properties.\n"
   "--pause-exit         : When run from a console window, pause before exiting.\n"
-  "--service ex [0|1]   : For use when OpenVPN is being instantiated by a\n"
+  "--service ex [0|1]   : For use when " PACKAGE_NAME " is being instantiated by a\n"
   "                       service, and should not be used directly by end-users.\n"
   "                       ex is the name of an event object which, when\n"
-  "                       signaled, will cause OpenVPN to exit.  A second\n"
+  "                       signaled, will cause " PACKAGE_NAME " to exit.  A second\n"
   "                       optional parameter controls the initial state of ex.\n"
-  "--show-net-up   : Show OpenVPN's view of routing table and net adapter list\n"
+  "--show-net-up   : Show " PACKAGE_NAME "'s view of routing table and net adapter list\n"
   "                  after TAP adapter is up and routes have been added.\n"
   "Windows Standalone Options:\n"
   "\n"
   "--show-adapters : Show all TAP-Win32 adapters.\n"
-  "--show-net      : Show OpenVPN's view of routing table and net adapter list.\n"
+  "--show-net      : Show " PACKAGE_NAME "'s view of routing table and net adapter list.\n"
   "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n"
 #endif
   "\n"
@@ -963,6 +967,9 @@ show_settings (const struct options *o)
   SHOW_STR (cert_file);
   SHOW_STR (priv_key_file);
   SHOW_STR (pkcs12_file);
+#ifdef WIN32
+  SHOW_STR (cryptoapi_cert);
+#endif
   SHOW_STR (cipher_list);
   SHOW_STR (tls_verify);
   SHOW_STR (tls_remote);
@@ -1345,14 +1352,27 @@ options_postprocess (struct options *options, bool first_time)
     }
   if (options->tls_server || options->tls_client)
     {
+#ifdef WIN32
+      if (options->cryptoapi_cert)
+	{
+          notnull (options->ca_file, "CA file (--ca)");
+          if (options->cert_file)
+	    msg(M_USAGE, "Options error: Parameter --cert cannot be used when --cryptoapicert is also specified.");
+          if (options->priv_key_file)
+	    msg(M_USAGE, "Options error: Parameter --key cannot be used when --cryptoapicert is also specified.");
+          if (options->pkcs12_file)
+	    msg(M_USAGE, "Options error: Parameter --pkcs12 cannot be used when --cryptoapicert is also specified.");
+	}
+      else
+#endif
       if (options->pkcs12_file)
         {
           if (options->ca_file)
-	    msg(M_USAGE, "Options error: Parameter --ca can not be used when --pkcs12 is also specified.");
+	    msg(M_USAGE, "Options error: Parameter --ca cannot be used when --pkcs12 is also specified.");
           if (options->cert_file)
-	    msg(M_USAGE, "Options error: Parameter --cert can not be used when --pkcs12 is also specified.");
+	    msg(M_USAGE, "Options error: Parameter --cert cannot be used when --pkcs12 is also specified.");
           if (options->priv_key_file)
-	    msg(M_USAGE, "Options error: Parameter --key can not be used when --pkcs12 is also specified.");
+	    msg(M_USAGE, "Options error: Parameter --key cannot be used when --pkcs12 is also specified.");
         }
       else
         {
@@ -1933,7 +1953,7 @@ parse_line (char *line, char *p[], int n, const char *file, int line_num, int ms
 	  if (backslash && out)
 	    {
 	      if (!(out == '\\' || out == '\"' || space (out)))
-		msg (msglevel, "Bad backslash ('\\') usage in %s:%d: remember that backslashes are treated as shell-escapes and if you need to pass backslash characters as part of a Windows filename, you should use double backslashes such as \"c:\\\\openvpn\\\\static.key\"", file, line_num);
+		msg (msglevel, "Bad backslash ('\\') usage in %s:%d: remember that backslashes are treated as shell-escapes and if you need to pass backslash characters as part of a Windows filename, you should use double backslashes such as \"c:\\\\" PACKAGE "\\\\static.key\"", file, line_num);
 	    }
 	  backslash = false;
 	}
@@ -3545,6 +3565,14 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->cert_file = p[1];
     }
+#ifdef WIN32
+  else if (streq (p[0], "cryptoapicert") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->cryptoapi_cert = p[1];
+    }
+#endif
   else if (streq (p[0], "key") && p[1])
     {
       ++i;

@@ -290,7 +290,7 @@ new_http_proxy (const char *server,
 
 #if !NTLM
   if (p->auth_method == HTTP_AUTH_NTLM)
-    msg (M_FATAL, "Sorry, this version of OpenVPN was built without NTLM Proxy support.");
+    msg (M_FATAL, "Sorry, this version of " PACKAGE_NAME " was built without NTLM Proxy support.");
 #endif
 
   p->defined = true;

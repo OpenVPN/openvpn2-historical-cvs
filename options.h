@@ -317,6 +317,9 @@ struct options
   const char *tls_verify;
   const char *tls_remote;
   const char *crl_file;
+#ifdef WIN32
+  const char *cryptoapi_cert;
+#endif
 
   /* data channel key exchange method */
   int key_method;

@@ -202,7 +202,7 @@ check_send_occ_load_test_dowork (struct context *c)
       else
 	{
 	  msg (M_INFO,
-	       "NOTE: failed to empirically measure MTU (requires OpenVPN 1.5 or higher at other end of connection).");
+	       "NOTE: failed to empirically measure MTU (requires " PACKAGE_NAME " 1.5 or higher at other end of connection).");
 	  event_timeout_clear (&c->c2.occ_mtu_load_test_interval);
 	  c->c2.occ_mtu_load_n_tries = 0;
 	}

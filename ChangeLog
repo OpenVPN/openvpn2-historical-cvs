@@ -1,7 +1,17 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.41 2004/10/18 21:38:14 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.42 2004/10/20 06:25:48 jimyonan Exp $
+
+2004.10.19 -- Version 2.0-beta14
+
+* Fixed a bug introduced in Beta12 that would occur
+  if you use a --client-connect script without also
+  defining --tmp-dir.
+* Fixed a bug introduced in Beta12 where a learn-address
+  script might segfault on the delete method.
+* Added Crypto API support in Windows version via
+  the --cryptoapicert option (Peter 'Luna' Runestig).
 
 2004.10.18 -- Version 2.0-beta13
 

@@ -42,6 +42,7 @@
 #include "socket.h"
 #include "mtu.h"
 #include "thread.h"
+#include "options.h"
 
 /*
  * OpenVPN TLS-over-UDP Protocol.
@@ -463,14 +464,7 @@ void init_ssl_lib (void);
 void free_ssl_lib (void);
 
 /* Build master SSL_CTX object that serves for the whole of openvpn instantiation */
-SSL_CTX *init_ssl (const bool server,
-		   const char *ca_file,
-		   const char *dh_file,
-		   const char *cert_file,
-		   const char *pkcs12_file,
-		   const char *priv_key_file,
-		   const char *cipher_list,
-		   const bool require_peer_cert);
+SSL_CTX *init_ssl (const struct options *options);
 
 struct tls_multi *tls_multi_init (struct tls_options *tls_options);
 

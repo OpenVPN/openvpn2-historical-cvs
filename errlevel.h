@@ -111,7 +111,7 @@
 #define D_MSS                LOGLEV(7, 70, M_DEBUG)  /* show MSS adjustments */
 #define D_COMP_LOW           LOGLEV(7, 70, M_DEBUG)  /* show adaptive compression state changes */
 #define D_REMOTE_LIST        LOGLEV(7, 70, M_DEBUG)  /* show --remote list */
-#define D_SETENV             LOGLEV(7, 70, M_DEBUG)  /* show environmental variable assignments */
+#define D_SCRIPT             LOGLEV(7, 70, M_DEBUG)  /* show parms & env vars passed to scripts */
 #define D_SHOW_NET           LOGLEV(7, 70, M_DEBUG)  /* show routing table and adapter list */
 #define D_ROUTE_DEBUG        LOGLEV(7, 70, M_DEBUG)  /* show verbose route.[ch] output */
 #define D_TLS_STATE_ERRORS   LOGLEV(7, 70, M_DEBUG)  /* no TLS state for client */

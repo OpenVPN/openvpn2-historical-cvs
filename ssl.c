@@ -50,8 +50,11 @@
 #include "misc.h"
 #include "fdmisc.h"
 #include "interval.h"
-#include "options.h"
 #include "perf.h"
+
+#ifdef WIN32
+#include "cryptoapi.h"
+#endif
 
 #include "memdbg.h"
 
@@ -637,20 +640,13 @@ info_callback (INFO_CALLBACK_SSL_CONST SSL * s, int where, int ret)
  * All files are in PEM format.
  */
 SSL_CTX *
-init_ssl (const bool server,
-	  const char *ca_file,
-	  const char *dh_file,
-	  const char *cert_file,
-	  const char *priv_key_file,
-	  const char *pkcs12_file,
-	  const char *cipher_list,
-	  const bool require_peer_cert)
+init_ssl (const struct options *options)
 {
   SSL_CTX *ctx;
   DH *dh;
   BIO *bio;
 
-  if (server)
+  if (options->tls_server)
     {
       ctx = SSL_CTX_new (TLSv1_server_method ());
       if (ctx == NULL)
@@ -659,12 +655,12 @@ init_ssl (const bool server,
       SSL_CTX_set_tmp_rsa_callback (ctx, tmp_rsa_cb);
 
       /* Get Diffie Hellman Parameters */
-      if (!(bio = BIO_new_file (dh_file, "r")))
-	msg (M_SSLERR, "Cannot open %s for DH parameters", dh_file);
+      if (!(bio = BIO_new_file (options->dh_file, "r")))
+	msg (M_SSLERR, "Cannot open %s for DH parameters", options->dh_file);
       dh = PEM_read_bio_DHparams (bio, NULL, NULL, NULL);
       BIO_free (bio);
       if (!dh)
-	msg (M_SSLERR, "Cannot load DH parameters from %s", dh_file);
+	msg (M_SSLERR, "Cannot load DH parameters from %s", options->dh_file);
       if (!SSL_CTX_set_tmp_dh (ctx, dh))
 	msg (M_SSLERR, "SSL_CTX_set_tmp_dh");
       msg (D_TLS_DEBUG_LOW, "Diffie-Hellman initialized with %d bit key",
@@ -685,7 +681,7 @@ init_ssl (const bool server,
   /* Set callback for getting password from user to decrypt private key */
   SSL_CTX_set_default_passwd_cb (ctx, pem_password_callback);
 
-  if (pkcs12_file)
+  if (options->pkcs12_file)
     {
     /* Use PKCS #12 file for key, cert and CA certs */
 
@@ -698,11 +694,11 @@ init_ssl (const bool server,
       char password[256];
 
       /* Load the PKCS #12 file */
-      if (!(fp = fopen(pkcs12_file, "rb")))
-        msg (M_SSLERR, "Error opening file %s", pkcs12_file);
+      if (!(fp = fopen(options->pkcs12_file, "rb")))
+        msg (M_SSLERR, "Error opening file %s", options->pkcs12_file);
       p12 = d2i_PKCS12_fp(fp, NULL);
       fclose (fp);
-      if (!p12) msg (M_SSLERR, "Error reading PKCS#12 file %s", pkcs12_file);
+      if (!p12) msg (M_SSLERR, "Error reading PKCS#12 file %s", options->pkcs12_file);
       
       /* Parse the PKCS #12 file */
       if (!PKCS12_parse(p12, "", &pkey, &cert, &ca))
@@ -711,7 +707,7 @@ init_ssl (const bool server,
           /* Reparse the PKCS #12 file with password */
           ca = NULL;
           if (!PKCS12_parse(p12, password, &pkey, &cert, &ca))
-             msg (M_SSLERR, "Error parsing PKCS#12 file %s", pkcs12_file);
+             msg (M_SSLERR, "Error parsing PKCS#12 file %s", options->pkcs12_file);
         }
       PKCS12_free(p12);
 
@@ -722,7 +718,7 @@ init_ssl (const bool server,
       /* Load Private Key */
       if (!SSL_CTX_use_PrivateKey (ctx, pkey))
         msg (M_SSLERR, "Cannot use private key");
-      warn_if_group_others_accessible (pkcs12_file);
+      warn_if_group_others_accessible (options->pkcs12_file);
 
       /* Check Private Key */
       if (!SSL_CTX_check_private_key (ctx))
@@ -744,49 +740,65 @@ init_ssl (const bool server,
     {
       /* Use seperate PEM files for key, cert and CA certs */
 
-      /* Load Certificate */
-      if (cert_file)
+#ifdef WIN32
+      if (options->cryptoapi_cert)
 	{
-	  if (!SSL_CTX_use_certificate_file (ctx, cert_file, SSL_FILETYPE_PEM))
-	    msg (M_SSLERR, "Cannot load certificate file %s", cert_file);
+	  /* Load Certificate and Private Key */
+	  if (!SSL_CTX_use_CryptoAPI_certificate (ctx, options->cryptoapi_cert))
+	    msg (M_SSLERR, "Cannot load certificate \"%s\" from Microsoft Certificate Store",
+		 options->cryptoapi_cert);
 	}
-
-      /* Load Private Key */
-      if (priv_key_file)
+      else
+#endif
 	{
-	  if (!SSL_CTX_use_PrivateKey_file (ctx, priv_key_file, SSL_FILETYPE_PEM))
-	    msg (M_SSLERR, "Cannot load private key file %s", priv_key_file);
-	  warn_if_group_others_accessible (priv_key_file);
+	  /* Load Certificate */
+	  if (options->cert_file)
+	    {
+	      if (!SSL_CTX_use_certificate_file (ctx, options->cert_file, SSL_FILETYPE_PEM))
+		msg (M_SSLERR, "Cannot load certificate file %s", options->cert_file);
 
-	  /* Check Private Key */
-	  if (!SSL_CTX_check_private_key (ctx))
-	    msg (M_SSLERR, "Private key does not match the certificate");
+	      /* Enable the use of certificate chains */
+	      if (!SSL_CTX_use_certificate_chain_file (ctx, options->cert_file))
+		msg (M_SSLERR, "Cannot load certificate chain file %s (SSL_use_certificate_chain_file)", options->cert_file);
+	    }
+
+	  /* Load Private Key */
+	  if (options->priv_key_file)
+	    {
+	      if (!SSL_CTX_use_PrivateKey_file (ctx, options->priv_key_file, SSL_FILETYPE_PEM))
+		msg (M_SSLERR, "Cannot load private key file %s", options->priv_key_file);
+	      warn_if_group_others_accessible (options->priv_key_file);
+
+	      /* Check Private Key */
+	      if (!SSL_CTX_check_private_key (ctx))
+		msg (M_SSLERR, "Private key does not match the certificate");
+	    }
 	}
 
       /* Load CA file for verifying peer supplied certificate */
-      ASSERT (ca_file);
-      if (!SSL_CTX_load_verify_locations (ctx, ca_file, NULL))
-        msg (M_SSLERR, "Cannot load CA certificate file %s (SSL_CTX_load_verify_locations)", ca_file);
+      ASSERT (options->ca_file);
+      if (!SSL_CTX_load_verify_locations (ctx, options->ca_file, NULL))
+        msg (M_SSLERR, "Cannot load CA certificate file %s (SSL_CTX_load_verify_locations)", options->ca_file);
 
       /* Load names of CAs from file and use it as a client CA list */
       {
         STACK_OF(X509_NAME) *cert_names;
-        cert_names = SSL_load_client_CA_file (ca_file);
+        cert_names = SSL_load_client_CA_file (options->ca_file);
         if (!cert_names)
-          msg (M_SSLERR, "Cannot load CA certificate file %s (SSL_load_client_CA_file)", ca_file);
+          msg (M_SSLERR, "Cannot load CA certificate file %s (SSL_load_client_CA_file)", options->ca_file);
         SSL_CTX_set_client_CA_list (ctx, cert_names);
       }
 
-      if (cert_file)
-	{
-	  /* Enable the use of certificate chains */
-	  if (!SSL_CTX_use_certificate_chain_file (ctx, cert_file))
-	    msg (M_SSLERR, "Cannot load certificate chain file %s (SSL_use_certificate_chain_file)", cert_file);
-	}
     }
 
   /* Require peer certificate verification */
-  if (require_peer_cert)
+#if P2MP
+  if (options->client_cert_not_required)
+    {
+      msg (M_WARN, "WARNING: This configuration may accept clients which do not present a certificate");
+    }
+  else
+#endif
     SSL_CTX_set_verify (ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
 			verify_callback);
 
@@ -794,10 +806,10 @@ init_ssl (const bool server,
   SSL_CTX_set_info_callback (ctx, info_callback);
 
   /* Allowable ciphers */
-  if (cipher_list)
+  if (options->cipher_list)
     {
-      if (!SSL_CTX_set_cipher_list (ctx, cipher_list))
-	msg (M_SSLERR, "Problem with cipher list: %s", cipher_list);
+      if (!SSL_CTX_set_cipher_list (ctx, options->cipher_list))
+	msg (M_SSLERR, "Problem with cipher list: %s", options->cipher_list);
     }
 
   return ctx;

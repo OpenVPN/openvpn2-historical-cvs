@@ -374,19 +374,19 @@ openvpn_system (const char *command, const struct env_set *es, unsigned int flag
   if (flags & S_SCRIPT)
     env_set_add_to_environment (es);
 
-#if 0 // DEBUGGING -- print environment
- {
-   extern char **environ;
-   int i;
-   for (i = 0; environ[i]; ++i)
-     fprintf (stderr, "[%d] '%s'\n", i, environ[i]);
- }
-#endif
+
+  /* debugging */
+  msg (D_SCRIPT, "SYSTEM[%u] '%s'", flags, command);
+  if (flags & S_SCRIPT)
+    env_set_print (D_SCRIPT, es);
 
   /*
    * execute the command
    */
   ret = system (command);
+
+  /* debugging */
+  msg (D_SCRIPT, "SYSTEM return=%u", ret);
 
   /*
    * remove env_set from environment
@@ -708,22 +708,25 @@ env_set_add (struct env_set *es, const char *str)
 void
 env_set_print (int msglevel, const struct env_set *es)
 {
-  const struct env_item *e;
-  int i;
-
-  if (es)
+  if (check_debug_level (msglevel))
     {
-      mutex_lock_static (L_ENV_SET);
-      e = es->list;
-      i = 0;
+      const struct env_item *e;
+      int i;
 
-      while (e)
+      if (es)
 	{
-	  msg (msglevel, "ENV [%d] '%s'", i, e->string);
-	  ++i;
-	  e = e->next;
+	  mutex_lock_static (L_ENV_SET);
+	  e = es->list;
+	  i = 0;
+
+	  while (e)
+	    {
+	      msg (msglevel, "ENV [%d] '%s'", i, e->string);
+	      ++i;
+	      e = e->next;
+	    }
+	  mutex_unlock_static (L_ENV_SET);
 	}
-      mutex_unlock_static (L_ENV_SET);
     }
 }
 
@@ -750,51 +753,53 @@ env_set_inherit (struct env_set *es, const struct env_set *src)
 void
 env_set_add_to_environment (const struct env_set *es)
 {
-  struct gc_arena gc = gc_new ();
-  const struct env_item *e;
-
-  ASSERT (es);
-
-  mutex_lock_static (L_ENV_SET);
-  e = es->list;
-
-  while (e)
+  if (es)
     {
-      const char *name;
-      const char *value;
+      struct gc_arena gc = gc_new ();
+      const struct env_item *e;
 
-      if (deconstruct_name_value (e->string, &name, &value, &gc))
-	setenv_str (NULL, name, value);
+      mutex_lock_static (L_ENV_SET);
+      e = es->list;
 
-      e = e->next;
+      while (e)
+	{
+	  const char *name;
+	  const char *value;
+
+	  if (deconstruct_name_value (e->string, &name, &value, &gc))
+	    setenv_str (NULL, name, value);
+
+	  e = e->next;
+	}
+      mutex_unlock_static (L_ENV_SET);
+      gc_free (&gc);
     }
-  mutex_unlock_static (L_ENV_SET);
-  gc_free (&gc);
 }
 
 void
 env_set_remove_from_environment (const struct env_set *es)
 {
-  struct gc_arena gc = gc_new ();
-  const struct env_item *e;
-
-  ASSERT (es);
-
-  mutex_lock_static (L_ENV_SET);
-  e = es->list;
-
-  while (e)
+  if (es)
     {
-      const char *name;
-      const char *value;
+      struct gc_arena gc = gc_new ();
+      const struct env_item *e;
 
-      if (deconstruct_name_value (e->string, &name, &value, &gc))
-	setenv_del (NULL, name);
+      mutex_lock_static (L_ENV_SET);
+      e = es->list;
 
-      e = e->next;
+      while (e)
+	{
+	  const char *name;
+	  const char *value;
+
+	  if (deconstruct_name_value (e->string, &name, &value, &gc))
+	    setenv_del (NULL, name);
+
+	  e = e->next;
+	}
+      mutex_unlock_static (L_ENV_SET);
+      gc_free (&gc);
     }
-  mutex_unlock_static (L_ENV_SET);
-  gc_free (&gc);
 }
 
 #ifdef HAVE_PUTENV
@@ -856,11 +861,6 @@ setenv_str_ex (struct env_set *es,
 
   if (value)
     val_tmp = string_mod_const (value, value_include, value_exclude, value_replace, &gc);
-
-  if (val_tmp)
-    msg (D_SETENV, "SETENV %s='%s'", name_tmp, val_tmp);
-  else
-    msg (D_SETENV, "DELENV %s", name_tmp);
 
   if (es)
     {
@@ -971,7 +971,7 @@ const char *
 create_temp_filename (const char *directory, struct gc_arena *gc)
 {
   struct buffer fname = alloc_buf_gc (256, gc);
-  buf_printf (&fname, "openvpn_%d_%d.tmp",
+  buf_printf (&fname, PACKAGE "_%d_%d.tmp",
 	      (int) openvpn_thread_self (),
 	      (int) get_random ());
   return gen_path (directory, BSTR (&fname), gc);
@@ -979,14 +979,13 @@ create_temp_filename (const char *directory, struct gc_arena *gc)
 
 /*
  * Put a directory and filename together.
- *
  */
 const char *
 gen_path (const char *directory, const char *filename, struct gc_arena *gc)
 {
   const char *safe_filename = string_mod_const (filename, CC_ALNUM|CC_UNDERBAR|CC_DASH|CC_DOT, 0, '_', gc);
-  if (directory
-      && safe_filename
+
+  if (safe_filename
       && strcmp (safe_filename, ".")
       && strcmp (safe_filename, ".."))
     {

@@ -119,6 +119,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-connect\-freq\fR\ \fIn\ sec\fR\ ]
 [\ \fB\-\-connect\-retry\fR\ \fIn\fR\ ]
 [\ \fB\-\-crl\-verify\fR\ \fIcrl\fR\ ]
+[\ \fB\-\-cryptoapicert\fR\ \fIselect\-string\fR\ ]
 [\ \fB\-\-daemon\fR\ \fI[progname]\fR\ ]
 [\ \fB\-\-dev\-node\fR\ \fInode\fR\ ]
 [\ \fB\-\-dev\-type\fR\ \fIdevice\-type\fR\ ]
@@ -2476,13 +2477,16 @@ in the OpenVPN source distribution.
 .TP
 .B --client-cert-not-required
 Don't require client certificate, client will authenticate
-using username/password only.  If you use this option, the
+using username/password only.  Be aware that using this directive
+is less secure than requiring certificates from all clients.
+
+If you use this directive, the
 entire responsibility of authentication will rest on your
 .B --auth-user-pass-verify
 script, so keep in mind that bugs in your script
 could potentially compromise the security of your VPN.
 
-If you don't use this option, but you also specify an
+If you don't use this directive, but you also specify an
 .B --auth-user-pass-verify
 script, then OpenVPN will perform double authentication.  The
 client certificate verification AND the
@@ -3043,6 +3047,39 @@ This option can be used instead of
 .B --ca, --cert,
 and
 .B --key.
+.\"*********************************************************
+.TP
+.B --cryptoapicert select-string
+Load the certificate and private key from the
+Windows Certificate System Store (Windows Only).
+
+Use this option instead of
+.B --cert
+and
+.B --key.
+
+This makes
+it possible to use any smart card, supported by Windows, but also any
+kind of certificate, residing in the Cert Store, where you have access to
+the private key.  This option has been tested with a couple of different
+smart cards (GemSAFE, Cryptoflex, and Swedish Post Office eID) on the
+client side, and also an imported PKCS12 software certificate on the
+server side.
+
+To select a certificate, based on a substring search in the
+certificate's subject:
+
+.B cryptoapicert
+"SUBJ:Peter Runestig"
+
+To select a certificate, based on certificate's thumbprint:
+
+.B cryptoapicert
+"THUMB:f6 49 24 41 01 b4 ..."
+
+The thumbprint hex string can easily be copy-and-pasted from the Windows
+Certificate Store GUI.
+
 .\"*********************************************************
 .TP
 .B --key-method m

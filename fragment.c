@@ -73,15 +73,22 @@ fragment_list_get_buf (struct fragment_list *list, int seq_id)
 }
 
 struct fragment_master *
-fragment_init (bool generate_icmp, struct frame *frame)
+fragment_init (struct frame *frame)
 {
   struct fragment_master *ret;
 
   ret = (struct fragment_master *) malloc (sizeof (struct fragment_master));
   ASSERT (ret);
   CLEAR (*ret); /* code that initializes other parts of fragment_master assume an initial CLEAR */
-  ret->generate_icmp = generate_icmp;
   frame->extra_frame += sizeof(fragment_header_type);
+
+  /*
+   * Outgoing sequence ID is randomized to reduce the probability of sequence number collisions
+   * when openvpn sessions are restarted.  This is not done out of any need for security, as all
+   * fragmentation control information resides inside of the encrypted/authenticated envelope.
+   */
+  ret->outgoing_seq_id = (int)time(NULL) & (N_SEQ_ID - 1);
+
   return ret;
 }
 
@@ -90,13 +97,18 @@ fragment_free (struct fragment_master *f)
 {
   fragment_list_buf_free (&f->incoming);
   free_buf (&f->outgoing);
+  free_buf (&f->outgoing_return);
+  free_buf (&f->icmp_buf);
 }
 
 void
-fragment_frame_init (struct fragment_master *f, const struct frame *frame)
+fragment_frame_init (struct fragment_master *f, const struct frame *frame, bool generate_icmp)
 {
   fragment_list_buf_init (&f->incoming, frame);
   f->outgoing = alloc_buf (BUF_SIZE (frame));
+  f->outgoing_return = alloc_buf (BUF_SIZE (frame));
+  if (generate_icmp)
+    f->icmp_buf = alloc_buf (BUF_SIZE (frame));
 }
 
 #define FRAG_ERR(s) { msg = s; goto error; }
@@ -123,6 +135,10 @@ fragment_incoming (struct fragment_master *f, struct buffer *buf,
 	FRAG_ERR ("flags not found in packet");
       flags = ntoh_fragment_header_type (flags);
 
+      /* remember the maximum payload size received */
+      if (buf->len > f->max_packet_size_received)
+	f->max_packet_size_received = buf->len;
+
       /* get fragment type from flags */
       frag_type = ((flags & FRAG_TYPE_MASK) >> FRAG_TYPE_SHIFT);
 
@@ -148,7 +164,7 @@ fragment_incoming (struct fragment_master *f, struct buffer *buf,
 	  struct fragment *frag = fragment_list_get_buf (&f->incoming, seq_id);
 
 	  /* make sure that size is an even multiple of 1<<FRAG_SIZE_ROUND_SHIFT */
-	  if (size & FRAG_SIZE_ROUND_SHIFT_MASK)
+	  if (size & FRAG_SIZE_ROUND_MASK)
 	    FRAG_ERR ("bad fragment size");
 
 	  /* is this the first fragment for our sequence number? */
@@ -166,6 +182,9 @@ fragment_incoming (struct fragment_master *f, struct buffer *buf,
 
 	  /* set elements in bit array to reflect which fragments have been received */
 	  frag->map |= (((frag_type == FRAG_YES_LAST) ? FRAG_MAP_MASK : 1) << n);
+
+	  /* update timestamp on partially built datagram */
+	  frag->timestamp = current;
 
 	  /* received full datagram? */
 	  if ((frag->map & FRAG_MAP_MASK) == FRAG_MAP_MASK)
@@ -197,6 +216,20 @@ fragment_incoming (struct fragment_master *f, struct buffer *buf,
   return;
 }
 
+static inline void
+fragment_prepend_flags (struct buffer *buf, int type, int seq_id, int frag_id, int frag_size, int *max_packet_size_sent)
+{
+  fragment_header_type flags =
+    hton_fragment_header_type ((fragment_header_type)
+			       ((type & FRAG_TYPE_MASK) << FRAG_TYPE_SHIFT)
+			       | ((seq_id & FRAG_SEQ_ID_MASK) << FRAG_SEQ_ID_SHIFT)
+			       | ((frag_id & FRAG_ID_MASK) << FRAG_ID_SHIFT)
+			       | (((frag_size >> FRAG_SIZE_ROUND_SHIFT) & FRAG_SIZE_MASK) << FRAG_SIZE_SHIFT));
+  if (buf->len > *max_packet_size_sent)
+    *max_packet_size_sent = buf->len;
+  ASSERT (buf_write_prepend (buf, &flags, sizeof (flags)));
+}
+
 void
 fragment_outgoing (struct fragment_master *f, struct buffer *buf,
 		   const struct frame* frame, const time_t current)
@@ -207,12 +240,27 @@ fragment_outgoing (struct fragment_master *f, struct buffer *buf,
       ASSERT (!f->outgoing.len);
       if (buf->len > PAYLOAD_SIZE_DYNAMIC(frame)) /* should we fragment? */
 	{
-	  f->outgoing_frag_size = PAYLOAD_SIZE_DYNAMIC(frame) & ~FRAG_SIZE_ROUND_SHIFT_MASK;
+	  /*
+	   * Send the datagram as a series of 2 or more fragments.
+	   */
+	  f->outgoing_frag_size = PAYLOAD_SIZE_DYNAMIC(frame) & ~FRAG_SIZE_ROUND_MASK;
 	  if (buf->len > f->outgoing_frag_size * MAX_FRAGS)
 	    FRAG_ERR ("too many fragments would be required to send datagram");
-	  f->outgoing = *buf;
+	  ASSERT (buf_init (&f->outgoing, EXTRA_FRAME (frame)));
+	  ASSERT (buf_copy (&f->outgoing, buf));
+	  f->outgoing_seq_id = modulo_add (f->outgoing_seq_id, 1, N_SEQ_ID);
+	  f->outgoing_frag_id = 0;
 	  buf->len = 0;
 	  ASSERT (fragment_ready_to_send (f, buf, frame, current));
+	}
+      else
+	{
+	  /*
+	   * Send the datagram whole.  Also let the peer know the maximum packet size we've received
+	   * from them so far, to help them keep their path MTU correct.
+	   */
+	  fragment_prepend_flags (buf, FRAG_WHOLE, 0, 0, f->max_packet_size_received, &f->max_packet_size_sent);
+	  f->max_packet_size_received = 0;
 	}
     }
   return;
@@ -227,5 +275,57 @@ fragment_outgoing (struct fragment_master *f, struct buffer *buf,
 bool fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
 			     const struct frame* frame, const time_t current)
 {
+  if (f->outgoing.len)
+    {
+      /* get fragment size, and determine if it is the last fragment */
+      int size = f->outgoing_frag_size;
+      int last = false;
+      if (f->outgoing.len <= size)
+	{
+	  size = f->outgoing.len;
+	  last = true;
+	}
+
+      /* initialize return buffer */
+      *buf = f->outgoing_return;
+      ASSERT (buf_init (buf, EXTRA_FRAME (frame)));
+      ASSERT (buf_copy_n (buf, &f->outgoing, size));
+
+      /* fragment flags differ based on whether or not we are sending the last fragment */
+      if (last)
+	{
+	  fragment_prepend_flags (buf,
+				  FRAG_YES_LAST,
+				  f->outgoing_seq_id,
+				  f->outgoing_frag_id,
+				  f->outgoing_frag_size,
+				  &f->max_packet_size_sent);
+	  ASSERT (!f->outgoing.len); /* outgoing buffer length should be zero after last fragment sent */
+	}
+      else
+	{
+	  fragment_prepend_flags (buf,
+				  FRAG_YES_NOTLAST,
+				  f->outgoing_seq_id,
+				  f->outgoing_frag_id++,
+				  f->max_packet_size_received,
+				  &f->max_packet_size_sent);
+	  f->max_packet_size_received = 0;
+	}
+      return true;
+    }
+  else
+    return false;
+}
+
+bool
+fragment_icmp (struct fragment_master *f, struct buffer *buf,
+	       const struct frame* frame, const time_t current)
+{
   return false;
+}
+
+void
+fragment_wakeup (struct fragment_master *f, time_t current)
+{
 }

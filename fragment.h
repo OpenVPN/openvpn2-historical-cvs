@@ -48,6 +48,8 @@ struct fragment {
 # define MAX_FRAGS             32  /* maximum number of fragments per packet */
   unsigned int map;
 
+  time_t timestamp;                /* timestamp for time-to-live purposes */
+
   struct buffer buf;               /* fragment assembly buffer for received datagrams */
 };
 
@@ -58,8 +60,8 @@ struct fragment_list {
 };
 
 struct fragment_master {
-  /* should we generate "fragmentation needed but DF set" messages? */
-  bool generate_icmp;
+  /* buffer to return "fragmentation needed but DF set" messages? */
+  struct buffer icmp_buf;
 
   struct event_timeout wakeup;     /* when should main openvpn event loop wake us up */
 
@@ -73,7 +75,7 @@ struct fragment_master {
   int max_packet_size_sent_confirmed;
 
   /* a sequence ID describes a set of fragments that make up one datagram */
-# define N_SEQ_ID           1024   /* sequence number wraps to 0 at this value */
+# define N_SEQ_ID           1024   /* sequence number wraps to 0 at this value (should be a power of 2) */
   int outgoing_seq_id;             /* sent as FRAG_SEQ_ID below */
 
   /* outgoing packet is possibly sent as a series of fragments */
@@ -81,9 +83,10 @@ struct fragment_master {
 # define MAX_FRAG_PKT_SIZE 65536   /* maximum packet size */
   int outgoing_frag_size;          /* sent to peer via FRAG_SIZE when FRAG_YES_LAST set */
 
-  int current_frag_id;             /* each fragment in a datagram is numbered 0 to MAX_FRAGS-1 */ 
+  int outgoing_frag_id;            /* each fragment in a datagram is numbered 0 to MAX_FRAGS-1 */ 
 
   struct buffer outgoing;          /* outgoing datagram, free if current_frag_id == 0 */
+  struct buffer outgoing_return;   /* buffer to return outgoing fragment to code in openvpn.c */
 
   /* incoming fragments from remote */
   struct fragment_list incoming;
@@ -136,15 +139,15 @@ typedef uint32_t fragment_header_type;
 #define FRAG_SIZE_SHIFT       18
 #define FRAG_SIZE_ROUND_SHIFT 2  /* fragment/datagram sizes represented as multiple of 4 */
 
-#define FRAG_SIZE_ROUND_SHIFT_MASK ((1 << FRAG_SIZE_ROUND_SHIFT) - 1)
+#define FRAG_SIZE_ROUND_MASK ((1 << FRAG_SIZE_ROUND_SHIFT) - 1)
 
 /*
  * Public functions
  */
 
-struct fragment_master *fragment_init (bool generate_icmp, struct frame *frame);
+struct fragment_master *fragment_init (struct frame *frame);
 
-void fragment_frame_init (struct fragment_master *f, const struct frame *frame);
+void fragment_frame_init (struct fragment_master *f, const struct frame *frame, bool generate_icmp);
 
 void fragment_free (struct fragment_master *f);
 

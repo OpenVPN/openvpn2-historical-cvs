@@ -228,6 +228,7 @@ openvpn (const struct options *options,
   struct buffer to_tun = clear_buf ();
   struct buffer to_udp = clear_buf ();
   struct buffer buf = clear_buf ();
+  struct buffer ping_buf = clear_buf ();
   struct buffer nullbuf = clear_buf ();
 
   /* tells us to free to_udp buffer after it has been written to UDP port */
@@ -384,7 +385,7 @@ openvpn (const struct options *options,
    * Initialize advanced MTU negotiation and datagram fragmentation
    */
   if (options->mtu_dynamic)
-    fragment = fragment_init ((options->mtu_icmp && ipv4_tun), &frame);
+    fragment = fragment_init (&frame);
 
 #ifdef USE_CRYPTO
   /* load a persisted packet-id for cross-session replay-protection */
@@ -676,7 +677,7 @@ openvpn (const struct options *options,
 
   /* fragmenting code has buffers to initialize once frame parameters are known */
   if (fragment)
-    fragment_frame_init (fragment, &frame);
+    fragment_frame_init (fragment, &frame, (options->mtu_icmp && ipv4_tun));
 
   if (!tuntap_defined (tuntap))
     {
@@ -758,7 +759,10 @@ openvpn (const struct options *options,
   /* initialize pings */
 
   if (options->ping_send_timeout)
-    event_timeout_init (&ping_send_interval, 0, options->ping_send_timeout);
+    {
+      ping_buf = alloc_buf (BUF_SIZE (&frame));
+      event_timeout_init (&ping_send_interval, 0, options->ping_send_timeout);
+    }
 
   if (options->ping_rec_timeout)
     event_timeout_init (&ping_rec_interval, current, options->ping_rec_timeout);
@@ -936,7 +940,7 @@ openvpn (const struct options *options,
 	    {
 	      if (event_timeout_trigger (&ping_send_interval, current))
 		{
-		  buf = read_tun_buf;
+		  buf = ping_buf;
 		  ASSERT (buf_init (&buf, EXTRA_FRAME (&frame)));
 		  ASSERT (buf_safe (&buf, MAX_RW_SIZE_TUN (&frame)));
 		  ASSERT (buf_write (&buf, ping_string, sizeof (ping_string)));
@@ -1501,6 +1505,7 @@ openvpn (const struct options *options,
 
   free_buf (&read_udp_buf);
   free_buf (&read_tun_buf);
+  free_buf (&ping_buf);
 
 #ifdef USE_LZO
   if (options->comp_lzo)
@@ -1595,8 +1600,15 @@ main (int argc, char *argv[])
   bool first_time = true;
   int sig;
 
-  error_reset ();                /* initialize error.c */
-  reset_check_status ();         /* initialize status check code in socket.c */
+  /*
+   * Initialize random number seed.  random() is only used when "weak" random numbers
+   * are acceptable.  OpenSSL routines are always used when cryptographically strong
+   * random numbers are required.
+   */
+  srandom ((unsigned int)time(NULL));
+
+  error_reset ();                      /* initialize error.c */
+  reset_check_status ();               /* initialize status check code in socket.c */
 
 #ifdef OPENVPN_DEBUG_COMMAND_LINE
   {

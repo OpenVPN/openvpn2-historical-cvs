@@ -59,6 +59,12 @@ buf_init (struct buffer *buf, int offset)
   return true;
 }
 
+static inline bool
+buf_defined (struct buffer *buf)
+{
+  return buf->data != NULL;
+}
+
 static inline void
 buf_clear (struct buffer *buf)
 {
@@ -258,6 +264,15 @@ static inline bool
 buf_copy (struct buffer *dest, const struct buffer *src)
 {
   return buf_write (dest, BPTR (src), BLEN (src));
+}
+
+static inline bool
+buf_copy_n (struct buffer *dest, struct buffer *src, int n)
+{
+  uint8_t *cp = buf_read_alloc (src, n);
+  if (!cp)
+    return false;
+  return buf_write (dest, cp, n);
 }
 
 static inline bool

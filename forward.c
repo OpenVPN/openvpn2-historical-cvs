@@ -112,6 +112,7 @@ check_tls_errors_dowork (struct context *c)
  *
  * JYFIXME -- actually do something with incoming config message
  */
+#if defined(USE_CRYPTO) && defined(USE_SSL)
 void
 check_incoming_control_channel_dowork (struct context *c)
 {
@@ -130,6 +131,7 @@ check_incoming_control_channel_dowork (struct context *c)
       free_buf (&buf);
     }
 }
+#endif
 
 /*
  * Things that need to happen immediately after connection initiation should go here.
@@ -161,6 +163,7 @@ check_connection_established_dowork (struct context *c)
 	    }
 
 #if 1 // JYFIXME -- send a test control channel config message
+#if defined(USE_CRYPTO) && defined(USE_SSL)
 	  {
 	    char bigstring[] = "This is a test";
 	    struct buffer buf;
@@ -174,6 +177,7 @@ check_connection_established_dowork (struct context *c)
 
 	    msg (D_LOW, "COMMON NAME: %s", tls_common_name (c->c2.tls_multi));
 	  }
+#endif
 #endif
 
 	  event_timeout_clear (&c->c2.wait_for_connect);
@@ -303,7 +307,7 @@ pre_select (struct context *c)
 #if defined(WIN32) && defined(TAP_WIN32_DEBUG)
   c->c2.timeval.tv_sec = 1;
   if (check_debug_level (D_TAP_WIN32_DEBUG))
-    tun_show_debug (c->c1.tuntap);
+    tun_show_debug (&c->c1.tuntap);
 #endif
 
 #ifdef USE_CRYPTO

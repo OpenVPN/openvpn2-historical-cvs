@@ -740,28 +740,28 @@ options_postprocess (struct options *options, bool first_time)
     msg (M_USAGE, "Options error: local and remote/netmask --ifconfig addresses must be different");
 
 #ifdef WIN32
-      if (dev == DEV_TYPE_TUN && !(options.ifconfig_local && options.ifconfig_remote_netmask))
+      if (dev == DEV_TYPE_TUN && !(options->ifconfig_local && options->ifconfig_remote_netmask))
 	msg (M_USAGE, "Options error: On Windows, --ifconfig is required when --dev tun is used");
 
-      if ((options.tuntap_options.ip_win32_defined)
-	  && !(options.ifconfig_local && options.ifconfig_remote_netmask))
+      if ((options->tuntap_options.ip_win32_defined)
+	  && !(options->ifconfig_local && options->ifconfig_remote_netmask))
 	msg (M_USAGE, "Options error: On Windows, --ip-win32 doesn't make sense unless --ifconfig is also used");
 
-      if (options.tuntap_options.dhcp_options &&
-	  options.tuntap_options.ip_win32_type != IPW32_SET_DHCP_MASQ)
+      if (options->tuntap_options.dhcp_options &&
+	  options->tuntap_options.ip_win32_type != IPW32_SET_DHCP_MASQ)
 	msg (M_USAGE, "Options error: --dhcp-options requires --ip-win32 dynamic");
 
-      if (options.tuntap_options.ip_win32_type == IPW32_SET_DHCP_MASQ
-	  && !options.route_delay_defined)
+      if (options->tuntap_options.ip_win32_type == IPW32_SET_DHCP_MASQ
+	  && !options->route_delay_defined)
 	{
-	  options.route_delay_defined = true;
-	  options.route_delay = 10;
+	  options->route_delay_defined = true;
+	  options->route_delay = 10;
 	}
 
-      if (options.ifconfig_noexec)
+      if (options->ifconfig_noexec)
 	{
-	  options.tuntap_options.ip_win32_type = IPW32_SET_MANUAL;
-	  options.ifconfig_noexec = false;
+	  options->tuntap_options.ip_win32_type = IPW32_SET_MANUAL;
+	  options->ifconfig_noexec = false;
 	}
 #endif
 

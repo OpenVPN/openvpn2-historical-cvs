@@ -40,8 +40,8 @@ EXE = openvpn.exe
 HEADERS = basic.h buffer.h circ_list.h common.h \
           config-win32.h crypto.h errlevel.h error.h \
           fdmisc.h forward-inline.h forward.h fragment.h \
-          gremlin.h init.h integer.h interval.h io.h lzo.h \
-          memdbg.h misc.h mss.h mtu.h occ-inline.h occ.h \
+          gremlin.h init.h integer.h interval.h io.h list.h lzo.h \
+          memdbg.h misc.h mroute.h mss.h mtu.h multi.h occ-inline.h occ.h \
           openvpn.h options.h packet_id.h ping-inline.h ping.h \
           proto.h proxy.h reliable.h route.h session_id.h \
           shaper.h sig.h socket.h socks.h ssl.h syshead.h \
@@ -49,7 +49,7 @@ HEADERS = basic.h buffer.h circ_list.h common.h \
 
 OBJS =  buffer.o crypto.o error.o fdmisc.o forward.o \
         fragment.o gremlin.o inet_aton.o init.o io.o \
-        lzo.o misc.o mss.o mtu.o occ.o openvpn.o \
+        list.o lzo.o misc.o mroute.o mss.o mtu.o multi.o occ.o openvpn.o \
         options.o packet_id.o ping.o proxy.o reliable.o \
         route.o session_id.o shaper.o sig.o socket.o \
         socks.o ssl.o thread.o tun.o win32.o

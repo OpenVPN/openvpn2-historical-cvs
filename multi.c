@@ -151,7 +151,9 @@ multi_inherit_context (struct context *dest, const struct context *src)
 
   /* options */
   dest->options = src->options;
-  dest->options.tls_thread = false;
+#ifdef USE_PTHREAD
+  dest->options.tls_thread = false; // JYFIXME -- point-to-multipoint doesn't support a threaded control channel yet
+#endif
   
   /* context init */
   init_instance (dest);

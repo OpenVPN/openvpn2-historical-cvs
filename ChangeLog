@@ -1,12 +1,25 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.4 2004/03/02 19:39:59 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.5 2004/03/02 20:58:21 jimyonan Exp $
 
-2004.03.xx -- Version 2.0-test4
+2004.03.02 -- Version 2.0-test5
 
-* Move Socks5 UDP header append/remove to
-  socks.c, and is called from forward.c.
+* Move Socks5 UDP header append/remove to socks.c, and is
+  called from forward.c.
+* Moved verify statics from ssl.c into struct tls_session.
+* Wrote multi.[ch] to handle top level of point-to-multipoint
+  mode.
+* Wrote some code to allow a struct link_socket in a child context
+  to be slaved to the parent context.
+* Broke up packet read and process functions in forward.c
+  (from socket or tuntap) into separate functions for read
+  and process, so that point-to-point and point-to-multipoint can
+  share the same code.
+* Expand TLS control channel to allow the passing of configuration
+  commands.
+* Wrote mroute.[ch] to handle internal packet routing for
+  point-to-multipoint mode.
 
 2004.02.22 -- Version 2.0-test3
 

@@ -120,7 +120,9 @@ tunnel_nonforking_udp_server (struct context *top)
   ASSERT (top->options.proto == PROTO_UDPv4);
   ASSERT (top->options.mode == MODE_NONFORKING_UDP_SERVER);
 
+#ifdef USE_PTHREAD
   top->options.tls_thread = false;
+#endif
 
   multi_init (&multi, top);
   context_clear_2 (top);

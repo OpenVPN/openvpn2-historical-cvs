@@ -68,9 +68,11 @@ check_tls_errors (struct context *c)
 static inline void
 check_incoming_control_channel (struct context *c)
 {
+#if defined(USE_CRYPTO) && defined(USE_SSL)
   void check_incoming_control_channel_dowork (struct context *c);
   if (tls_test_payload_len (c->c2.tls_multi) > 0)
     check_incoming_control_channel_dowork (c);
+#endif
 }
 
 /*

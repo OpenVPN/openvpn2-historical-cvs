@@ -26,6 +26,19 @@
 #ifndef SIG_H
 #define SIG_H
 
+/*
+ * Signal information, including signal code
+ * and descriptive text.
+ */
+struct signal_info
+{
+  volatile int signal_received;
+  volatile bool hard;
+  const char *signal_text;
+};
+
+#define IS_SIG(c) ((c)->sig->signal_received)
+
 struct context;
 
 extern struct signal_info siginfo_static;
@@ -34,7 +47,7 @@ void pre_init_signal_catch (void);
 void post_init_signal_catch (void);
 
 const char *signal_description (int signum, const char *sigtext);
-void print_signal (int signum);
+void print_signal (const struct signal_info *si, const char *title);
 void print_status (const struct context *c);
 
 #endif

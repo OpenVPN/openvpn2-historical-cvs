@@ -310,7 +310,7 @@ init_tun (struct tuntap *tt,
 	  in_addr_t local_public,
 	  in_addr_t remote_public,
 	  const struct frame *frame,
-	  unsigned int flags)
+	  const struct tuntap_options *options)
 {
 #ifdef WIN32
   overlapped_io_init (&tt->reads, frame, FALSE, true);
@@ -318,7 +318,7 @@ init_tun (struct tuntap *tt,
 #endif
 
   tt->type = dev_type_enum (dev, dev_type);
-  tt->flags = flags;
+  tt->options = *options;
 
   if (ifconfig_local_parm && ifconfig_remote_netmask_parm)
     {
@@ -664,7 +664,7 @@ do_ifconfig (struct tuntap *tt,
 			  ifconfig_local,
 			  netmask);
 	
-	switch (tt->flags & IPW32_SET_MASK)
+	switch (tt->options.ip_win32_type)
 	  {
 	  case IPW32_SET_MANUAL:
 	    msg (M_INFO, "******** NOTE:  Please manually set the IP/netmask of '%s' to %s/%s (if it is not already set)",
@@ -1308,38 +1308,47 @@ close_tun (struct tuntap* tt)
 int
 write_tun (struct tuntap* tt, uint8_t *buf, int len)
 {
-  struct iovec iv[2];
-  u_int32_t type;
-  struct ip *iph;
+  if (tt->type == DEV_TYPE_TUN)
+    {
+      u_int32_t type;
+      struct iovec iv[2];
+      struct ip *iph;
 
-  iph = (struct ip *)buf;
+      iph = (struct ip *) buf;
 
-  if(tt->ipv6 && iph->ip_v == 6)
-     type = htonl(AF_INET6);
-   else
-     type = htonl(AF_INET);
+      if (tt->ipv6 && iph->ip_v == 6)
+        type = htonl (AF_INET6);
+      else 
+        type = htonl (AF_INET);
 
-  iv[0].iov_base = &type;
-  iv[0].iov_len = sizeof (type);
-  iv[1].iov_base = buf;
-  iv[1].iov_len = len;
+      iv[0].iov_base = &type;
+      iv[0].iov_len = sizeof (type);
+      iv[1].iov_base = buf;
+      iv[1].iov_len = len;
 
-  return freebsd_modify_read_write_return (writev (tt->fd, iv, 2));
+      return freebsd_modify_read_write_return (writev (tt->fd, iv, 2));
+    }
+  else
+    return write (tt->fd, buf, len);
 }
 
 int
 read_tun (struct tuntap* tt, uint8_t *buf, int len)
 {
-  u_int32_t type;
-  struct iovec iv[2];
+  if (tt->type == DEV_TYPE_TUN)
+    {
+      u_int32_t type;
+      struct iovec iv[2];
 
-  iv[0].iov_base = &type;
-  iv[0].iov_len = sizeof (type);
-  iv[1].iov_base = buf;
-  iv[1].iov_len = len;
+      iv[0].iov_base = &type;
+      iv[0].iov_len = sizeof (type);
+      iv[1].iov_base = buf;
+      iv[1].iov_len = len;
 
-
-  return freebsd_modify_read_write_return (readv (tt->fd, iv, 2));
+      return freebsd_modify_read_write_return (readv (tt->fd, iv, 2));
+    }
+  else
+    return read (tt->fd, buf, len);
 }
 
 #elif defined(WIN32)
@@ -2002,6 +2011,65 @@ get_interface_index (const char *guid)
     }
 }
 
+/*
+ * Convert DHCP options from the command line / config file
+ * into a raw DHCP-format options string.
+ */
+
+static void
+write_dhcp_u8 (struct buffer *buf, const int type, const int data)
+{
+  if (!buf_safe (buf, 3))
+    msg (M_FATAL, "write_dhcp_u8: buffer overflow building DHCP options");
+  buf_write_u8 (buf, type);
+  buf_write_u8 (buf, 1);
+  buf_write_u8 (buf, data);
+}
+
+static void
+write_dhcp_u32_array (struct buffer *buf, const int type, const uint32_t *data, const unsigned int len)
+{
+  if (len > 0)
+    {
+      int i;
+      const int size = len * sizeof (uint32_t);
+
+      if (!buf_safe (buf, 2 + size))
+	msg (M_FATAL, "write_dhcp_u32_array: buffer overflow building DHCP options");
+      if (size < 1 || size > 255)
+	msg (M_FATAL, "write_dhcp_u32_array: size (%d) must be > 0 and <= 255", size);
+      buf_write_u8 (buf, type);
+      buf_write_u8 (buf, size);
+      for (i = 0; i < len; ++i)
+	buf_write_u32 (buf, data[i]);
+    }
+}
+
+static void
+write_dhcp_str (struct buffer *buf, const int type, const char *str)
+{
+  const int len = strlen (str);
+  if (!buf_safe (buf, 2 + len))
+    msg (M_FATAL, "write_dhcp_str: buffer overflow building DHCP options");
+  if (len < 1 || len > 255)
+    msg (M_FATAL, "write_dhcp_str: string '%s' must be > 0 bytes and <= 255 bytes", str);
+  buf_write_u8 (buf, type);
+  buf_write_u8 (buf, len);
+  buf_write (buf, str, len);
+}
+
+static void
+build_dhcp_options_string (struct buffer *buf, const struct tuntap_options *o)
+{
+  int i;
+
+  if (o->domain)
+    write_dhcp_str (buf, 15, o->domain);
+  write_dhcp_u32_array (buf, 6, o->dns, o->dns_len);
+  write_dhcp_u32_array (buf, 44, o->wins, o->wins_len);
+  write_dhcp_u8 (buf, 46, o->node_type);
+}
+
 void
 open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
 {
@@ -2116,12 +2184,9 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 
   /* should we tell the TAP-Win32 driver to masquerade as a DHCP server as a means
      of setting the adapter address? */
-  if (tt->did_ifconfig_setup && (tt->flags & IPW32_SET_MASK) == IPW32_SET_DHCP_MASQ)
+  if (tt->did_ifconfig_setup && tt->options.ip_win32_type == IPW32_SET_DHCP_MASQ)
     {
-      in_addr_t ep[4];
-      const bool hioff = (tt->flags & IPW32_DHCP_MASQ_HIOFF) != 0;
-      const bool short_lease = (tt->flags & IPW32_DHCP_MASQ_LEASE_TIME_SHORT) != 0;
-      const unsigned int offset = (tt->flags >> IPW32_DHCP_MASQ_OFFSET_SHIFT) & IPW32_DHCP_MASQ_OFFSET_MASK;
+      uint32_t ep[4];
 
       /* We will answer DHCP requests with a reply to set IP/subnet to these values */
       ep[0] = htonl (tt->local);
@@ -2131,23 +2196,23 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
       if (tt->type == DEV_TYPE_TUN)
 	{
 	  ep[2] = htonl (tt->remote_netmask);
-	  if (offset != 0)
+	  if (tt->options.dhcp_masq_offset != 0)
 	    msg (M_WARN, "WARNING: because you are using '--dev tun' mode, the '--ip-win32 dynamic [offset]' option is ignoring the offset parameter");
 	}
       else
 	{
 	  in_addr_t dsa; /* DHCP server addr */
-	  if (hioff)
-	    dsa = (tt->local | (~tt->adapter_netmask)) - offset;
+	  if (tt->options.dhcp_hioff)
+	    dsa = (tt->local | (~tt->adapter_netmask)) - tt->options.dhcp_masq_offset;
 	  else
-	    dsa = (tt->local & tt->adapter_netmask) + offset;
+	    dsa = (tt->local & tt->adapter_netmask) + tt->options.dhcp_masq_offset;
 	  if ((tt->local & tt->adapter_netmask) != (dsa & tt->adapter_netmask))
 	    msg (M_FATAL, "ERROR: --tap-win32 dynamic [offset] : offset is outside of --ifconfig subnet");
 	  ep[2] = htonl (dsa);
 	}
 
       /* lease time in seconds */
-      ep[3] = (short_lease ? 60 : 31536000); /* the long lease is 1 year */
+      ep[3] = (uint32_t) tt->options.dhcp_lease_time;
 
       if (!DeviceIoControl (tt->hand, TAP_IOCTL_CONFIG_DHCP_MASQ,
 			    ep, sizeof (ep),
@@ -2161,6 +2226,18 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	   print_in_addr_t (ntohl(ep[2]), false),
 	   ep[3]
 	   );
+
+      /* user-supplied DHCP options capability */
+      if (tt->options.dhcp_options)
+	{
+	  struct buffer buf = alloc_buf (256);
+	  build_dhcp_options_string (&buf, &tt->options);
+	  if (!DeviceIoControl (tt->hand, TAP_IOCTL_CONFIG_DHCP_SET_OPT,
+				BPTR (&buf), BLEN (&buf),
+				BPTR (&buf), BLEN (&buf), &len, NULL))
+	    msg (M_FATAL, "ERROR: The TAP-Win32 driver rejected a TAP_IOCTL_CONFIG_DHCP_SET_OPT DeviceIoControl call");
+	  free_buf (&buf);
+	}
     }
 
 #if 1
@@ -2176,7 +2253,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 
   /* possible wait for adapter to come up */
   {
-    int s = ((tt->flags >> TUNTAP_SLEEP_SHIFT) & TUNTAP_SLEEP_MASK);
+    int s = tt->options.tap_sleep;
     if (s)
       {
 	msg (M_INFO, "Sleeping for %d seconds...", s);
@@ -2210,14 +2287,14 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
      * make sure the TCP/IP properties for the adapter are
      * set correctly.
      */
-    if (tt->did_ifconfig_setup && (tt->flags & IPW32_SET_MASK) == IPW32_SET_DHCP_MASQ)
+    if (tt->did_ifconfig_setup && tt->options.ip_win32_type == IPW32_SET_DHCP_MASQ)
       {
 	/* check dhcp enable status */
 	if (dhcp_disabled (index))
 	  msg (M_WARN, "WARNING: You have selected '--ip-win32 dynamic', which will not work unless the TAP-Win32 TCP/IP properties are set to 'Obtain an IP address automatically'");
       }
 
-    if (tt->did_ifconfig_setup && (tt->flags & IPW32_SET_MASK) == IPW32_SET_IPAPI)
+    if (tt->did_ifconfig_setup && tt->options.ip_win32_type == IPW32_SET_IPAPI)
       {
 	DWORD status;
 	const char *error_suffix = "I am having trouble using the Windows 'IP helper API' to automatically set the IP address -- consider using other --ip-win32 methods (not 'ipapi')";

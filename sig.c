@@ -67,24 +67,28 @@ signal_description (int signum, const char *sigtext)
 }
 
 void
-print_signal (int signum)
+print_signal (const struct signal_info *si, const char *title)
 {
-  switch (signum)
+  const char *hs = (si->hard ? "hard" : "soft");
+  const char *type = (si->signal_text ? si->signal_text : "");
+  const char *t = (title ? title : "process");
+
+  switch (si->signal_received)
     {
     case SIGINT:
-      msg (M_INFO, "SIGINT received, exiting");
+      msg (M_INFO, "SIGINT[%s,%s] received, %s exiting", hs, type, t);
       break;
     case SIGTERM:
-      msg (M_INFO, "SIGTERM received, exiting");
+      msg (M_INFO, "SIGTERM[%s,%s] received, %s exiting", hs, type, t);
       break;
     case SIGHUP:
-      msg (M_INFO, "SIGHUP received, restarting");
+      msg (M_INFO, "SIGHUP[%s,%s] received, %s restarting", hs, type, t);
       break;
     case SIGUSR1:
-      msg (M_INFO, "SIGUSR1 received, restarting");
+      msg (M_INFO, "SIGUSR1[%s,%s] received, %s restarting", hs, type, t);
       break;
     default:
-      msg (M_INFO, "Unknown signal %d received", signum);
+      msg (M_INFO, "Unknown signal %d [%s,%s] received by %s", si->signal_received, hs, type, t);
       break;
     }
 }
@@ -96,6 +100,7 @@ static void
 signal_handler (int signum)
 {
   siginfo_static.signal_received = signum;
+  siginfo_static.hard = true;
   signal (signum, signal_handler);
 }
 

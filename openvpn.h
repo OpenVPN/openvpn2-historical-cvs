@@ -42,16 +42,6 @@
 #include "sig.h"
 
 /*
- * Signal information, including signal code
- * and descriptive text.
- */
-struct signal_info
-{
-  volatile int signal_received;
-  const char *signal_text;
-};
-
-/*
  * Our global key schedules, packaged thusly
  * to facilitate --persist-key.
  */
@@ -135,6 +125,7 @@ struct context_2
 
   struct link_socket link_socket;	/* socket used for TCP/UDP connection to remote */
   struct sockaddr_in to_link_addr;	/* IP address of remote */
+  struct sockaddr_in from;              /* address of incoming datagram */
 
   /* MTU frame parameters */
   struct frame frame;
@@ -299,6 +290,12 @@ struct context
 
   /* true on initial VPN iteration */
   bool first_time;
+
+  /* context modes */
+# define CM_P2P     0 /* standalone point-to-point session */
+# define CM_TOP     1 /* top level of a multi-client or point-to-multipoint server */
+# define CM_CHILD   2 /* child context of a CM_TOP */
+  int mode;
 
   /* signal info */
   struct signal_info *sig;

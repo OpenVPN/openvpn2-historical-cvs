@@ -132,8 +132,8 @@ static const char usage_message[] =
   "--route-up cmd  : Execute shell cmd after routes are added.\n"
   "--route-noexec  : Don't add routes automatically.  Instead pass routes to\n"
   "                  --route-up script using environmental variables.\n"
-  "--redirect-gateway : Automatically execute routing commands to cause all\n"
-  "                     outgoing IP traffic to be redirected into the VPN.\n"
+  "--redirect-gateway : (Experimental) Automatically execute routing commands to\n"
+  "                     redirect all outgoing IP traffic through the VPN.\n"
   "--setenv name value : Set a custom environmental variable to pass to script.\n"
   "--shaper n      : Restrict output to peer to n bytes per second.\n"
   "--inactive n    : Exit after n seconds of inactivity on TUN/TAP device.\n"
@@ -315,8 +315,15 @@ static const char usage_message[] =
   "                            take nth address backward from broadcast\n"
   "                            address.\n"
   "                            Default is 0.\n"
-  "                    lease-time: 'short' (60 seconds) or 'long' (1 month).\n"
-  "                                Default is 'long'.\n"
+  "                    lease-time: Lease time in seconds.\n"
+  "                                Default is one year.\n"
+  "--dhcp-option type [parm] : Set extended TAP-Win32 properties, must\n"
+  "                    be used with --ip-win32 dynamic.\n"
+  "                    DOMAIN name : Set DNS suffix\n"
+  "                    DNS addr    : Set domain name server address(es)\n"
+  "                    WINS addr   : Set WINS server address(es)\n"
+  "                    NBT type    : Set NetBIOS over TCP/IP Node type\n"
+  "                                  1: B, 2: P, 4: M, 8: H\n"
   "--tap-sleep n   : Sleep for n seconds after TAP adapter open before\n"
   "                  attempting to set adapter properties.\n"
   "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n" 
@@ -347,6 +354,7 @@ void
 init_options (struct options *o)
 {
   CLEAR (*o);
+  o->mode = MODE_POINT_TO_POINT;
   o->proto = PROTO_UDPv4;
   o->connect_retry_seconds = 5;
 #ifdef TUNSETPERSIST
@@ -363,7 +371,7 @@ init_options (struct options *o)
   o->comp_lzo_adaptive = true;
 #endif
 #ifdef WIN32
-  o->tuntap_flags = (IPW32_SET_IPAPI & IPW32_SET_MASK);
+  o->tuntap_options.ip_win32_type = IPW32_SET_IPAPI;
 #endif
 #ifdef USE_CRYPTO
   o->ciphername = "BF-CBC";
@@ -410,12 +418,47 @@ setenv_settings (const struct options *o)
   setenv_int ("remote_port", o->remote_port);
 }
 
+#ifdef WIN32
+static void
+show_tuntap_options (const struct tuntap_options *o)
+{
+  int i;
+
+  SHOW_BOOL (ip_win32_defined);
+  SHOW_INT (ip_win32_type);
+  SHOW_BOOL (dhcp_hioff);
+  SHOW_INT (dhcp_masq_offset);
+  SHOW_INT (dhcp_lease_time);
+  SHOW_INT (tap_sleep);
+  SHOW_BOOL (dhcp_options);
+  SHOW_STR (domain);
+
+  for (i = 0; i < o->dns_len; ++i)
+    {
+      msg (D_SHOW_PARMS, "  dns[%d] = %s",
+	   i,
+	   print_in_addr_t (o->dns[i], false));
+    }
+
+  for (i = 0; i < o->wins_len; ++i)
+    {
+      msg (D_SHOW_PARMS, "  wins[%d] = %s",
+	   i,
+	   print_in_addr_t (o->wins[i], false));
+    }
+
+  SHOW_INT (node_type);
+}
+#endif
+
 void
 show_settings (const struct options *o)
 {
   msg (D_SHOW_PARMS, "Current Parameter Settings:");
 
   SHOW_STR (config);
+  
+  SHOW_INT (mode);
 
 #ifdef TUNSETPERSIST
   SHOW_BOOL (persist_config);
@@ -500,7 +543,6 @@ show_settings (const struct options *o)
   SHOW_INT (verbosity);
   SHOW_INT (mute);
   SHOW_BOOL (gremlin);
-  SHOW_UINT (tuntap_flags);
 
   SHOW_BOOL (occ);
 
@@ -567,6 +609,10 @@ show_settings (const struct options *o)
 
   SHOW_STR (tls_auth_file);
 #endif
+#endif
+
+#ifdef WIN32
+  show_tuntap_options (&o->tuntap_options);
 #endif
 }
 
@@ -694,17 +740,30 @@ options_postprocess (struct options *options, bool first_time)
     msg (M_USAGE, "Options error: local and remote/netmask --ifconfig addresses must be different");
 
 #ifdef WIN32
-  if (dev == DEV_TYPE_TUN && !(options->ifconfig_local && options->ifconfig_remote_netmask))
-    msg (M_USAGE, "Options error: On Windows, --ifconfig is required when --dev tun is used");
-  if ((options->tuntap_flags & IPW32_DEFINED)
-      && !(options->ifconfig_local && options->ifconfig_remote_netmask))
-    msg (M_USAGE, "Options error: On Windows, --ip-win32 doesn't make sense unless --ifconfig is also used");
-  if (options->ifconfig_noexec)
-    {
-      options->tuntap_flags &= ~IPW32_SET_MASK;
-      options->tuntap_flags |= IPW32_SET_MANUAL;
-      options->ifconfig_noexec = false;
-    }
+      /* JYFIXME -- manual merge to 2.0 beta */
+      if (dev == DEV_TYPE_TUN && !(options.ifconfig_local && options.ifconfig_remote_netmask))
+	msg (M_USAGE, "Options error: On Windows, --ifconfig is required when --dev tun is used");
+
+      if ((options.tuntap_options.ip_win32_defined)
+	  && !(options.ifconfig_local && options.ifconfig_remote_netmask))
+	msg (M_USAGE, "Options error: On Windows, --ip-win32 doesn't make sense unless --ifconfig is also used");
+
+      if (options.tuntap_options.dhcp_options &&
+	  options.tuntap_options.ip_win32_type != IPW32_SET_DHCP_MASQ)
+	msg (M_USAGE, "Options error: --dhcp-options requires --ip-win32 dynamic");
+
+      if (options.tuntap_options.ip_win32_type == IPW32_SET_DHCP_MASQ
+	  && !options.route_delay_defined)
+	{
+	  options.route_delay_defined = true;
+	  options.route_delay = 5;
+	}
+
+      if (options.ifconfig_noexec)
+	{
+	  options.tuntap_options.ip_win32_type = IPW32_SET_MANUAL;
+	  options.ifconfig_noexec = false;
+	}
 #endif
 
   /*
@@ -856,8 +915,8 @@ options_string (const struct options *o,
    */
 
   buf_printf (&out, ",dev-type %s", dev_type_string (o->dev, o->dev_type));
-  buf_printf (&out, ",link-mtu %d", MAX_RW_SIZE_LINK(frame));
-  buf_printf (&out, ",tun-mtu %d", MAX_RW_SIZE_TUN(frame));
+  buf_printf (&out, ",link-mtu %d", EXPANDED_SIZE (frame));
+  buf_printf (&out, ",tun-mtu %d", PAYLOAD_SIZE (frame));
   buf_printf (&out, ",proto %s", proto2ascii (proto_remote (o->proto, remote), true));
   if (o->tun_ipv6)
     buf_printf (&out, ",tun-ipv6");
@@ -1763,47 +1822,98 @@ add_option (struct options *options, int i, char *p[],
       const int index = ascii2ipset (p[1]);
       ++i;
 
-      options->tuntap_flags &= ~(
-	  IPW32_SET_MASK
-	| IPW32_DHCP_MASQ_HIOFF
-	| IPW32_DHCP_MASQ_LEASE_TIME_SHORT
-	| IPW32_DHCP_MASQ_OFFSET_MASK << IPW32_DHCP_MASQ_OFFSET_SHIFT);
+      options->tuntap_options.dhcp_hioff = false;
+      options->tuntap_options.dhcp_lease_time = 31536000; /* one year */
+      options->tuntap_options.dhcp_masq_offset = 0;
 
-      options->tuntap_flags |= IPW32_DEFINED;
-
+      options->tuntap_options.ip_win32_defined = true;
+ 
       if (index < 0)
 	msg (M_USAGE,
 	     "Bad --ip-win32 method: '%s'.  Allowed methods: %s",
 	     p[1],
 	     ipset2ascii_all());
 
-      options->tuntap_flags |= (index & IPW32_SET_MASK);
+      options->tuntap_options.ip_win32_type = index;
 
-      if ((options->tuntap_flags & IPW32_SET_MASK) == IPW32_SET_DHCP_MASQ)
+      if (options->tuntap_options.ip_win32_type == IPW32_SET_DHCP_MASQ)
 	{
 	  if (p[2])
 	    {
+	      const int min_lease = 30;
 	      int offset = atoi (p[2]);
 	      ++i;
 	      if (!(offset > -256 && offset < 256))
-		msg (M_USAGE, "--ip-win32 dynamic [offset] ['short'|'long']: offset (%d) must be > -256 and < 256", offset);
+		msg (M_USAGE, "--ip-win32 dynamic [offset] [lease-time]: offset (%d) must be > -256 and < 256", offset);
 	      if (offset < 0)
 		{
-		  options->tuntap_flags |= IPW32_DHCP_MASQ_HIOFF;
+		  options->tuntap_options.dhcp_hioff = true;
 		  offset = -offset;
 		}
-	      options->tuntap_flags |= ((offset & IPW32_DHCP_MASQ_OFFSET_MASK) << IPW32_DHCP_MASQ_OFFSET_SHIFT);
+	      options->tuntap_options.dhcp_masq_offset = offset;
+
 	      if (p[3])
 		{
+		  const int min_lease = 30;
+		  int lease_time;
 		  ++i;
-		  if (streq (p[3], "short"))
-		    options->tuntap_flags |= IPW32_DHCP_MASQ_LEASE_TIME_SHORT;
-		  else if (streq (p[3], "long"))
-		    ;
-		  else
-		    msg (M_USAGE, "--ip-win32 dynamic [offset] ['short'|'long']: lease time parameter must be 'short' or 'long'");
+		  lease_time = atoi (p[3]);
+		  if (lease_time < min_lease)
+		    msg (M_USAGE, "--ip-win32 dynamic [offset] [lease-time]: lease time parameter (%d) must be at least %d seconds", lease_time, min_lease);
+		  options->tuntap_options.dhcp_lease_time = lease_time;
 		}
 	    }
+	}
+    }
+  else if (streq (p[0], "dhcp-option") && p[1])
+    {
+      struct tuntap_options *o = &options->tuntap_options;
+      ++i;
+      o->dhcp_options = true;
+
+      if (streq (p[1], "DOMAIN") && p[2])
+	{
+	  ++i;
+	  o->domain = p[2];
+	}
+      else if (streq (p[1], "DNS") && p[2])
+	{
+	  ++i;
+	  if (o->dns_len >= N_DNS)
+	    msg (M_USAGE, "--dhcp-option DNS: maximum of %d DNS servers can be specified", N_DNS);
+	  o->dns[o->dns_len++] = getaddr (GETADDR_FATAL
+					  | GETADDR_HOST_ORDER
+					  | GETADDR_FATAL_ON_SIGNAL,
+					  p[2],
+					  0,
+					  NULL,
+					  NULL);
+	}
+      else if (streq (p[1], "WINS") && p[2])
+	{
+	  ++i;
+	  if (o->wins_len >= N_WINS)
+	    msg (M_USAGE, "--dhcp-option WINS: maximum of %d WINS servers can be specified", N_WINS);
+	  o->wins[o->wins_len++] = getaddr (GETADDR_FATAL
+					  | GETADDR_HOST_ORDER
+					  | GETADDR_FATAL_ON_SIGNAL,
+					  p[2],
+					  0,
+					  NULL,
+					  NULL);
+	}
+      else if (streq (p[1], "NBT") && p[2])
+	{
+	  int t;
+	  ++i;
+	  t = atoi (p[2]);
+	  if (!(t == 1 || t == 2 || t == 4 || t == 8))
+	    msg (M_USAGE, "--dhcp-option NBT: parameter (%d) must be 1, 2, 4, or 8", t);
+	  o->node_type = t;
+	}
+      else
+	{
+	  msg (M_USAGE, "--dhcp-option: unknown option type '%s' or missing parameter", p[1]);
 	}
     }
   else if (streq (p[0], "show-adapters"))
@@ -1818,8 +1928,7 @@ add_option (struct options *options, int i, char *p[],
       s = atoi (p[1]);
       if (s < 0 || s >= 256)
 	msg (M_FATAL, "--tap-sleep parameter must be between 0 and 255");
-      options->tuntap_flags &= ~(TUNTAP_SLEEP_MASK << TUNTAP_SLEEP_SHIFT);
-      options->tuntap_flags |= (s << TUNTAP_SLEEP_SHIFT);
+      options->tuntap_options.tap_sleep = s;
     }
   else if (streq (p[0], "show-valid-subnets"))
     {

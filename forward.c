@@ -44,7 +44,7 @@
 
 /* show pre-select debugging info */
 
-static void
+void
 show_select_status (struct context *c)
 {
   msg (D_SELECT, "SELECT %s|%s|%s|%s %d/%d",
@@ -420,21 +420,20 @@ single_select (struct context *c)
   SELECT_SIGNAL_RECEIVED (&c->c2.event_wait, c->sig->signal_received);
 }
 
-static void
-process_incoming_link (struct context *c)
+void
+read_incoming_link (struct context *c)
 {
   /*
    * Set up for recvfrom call to read datagram
    * sent to our TCP/UDP port.
    */
-  struct sockaddr_in from;
   int status;
 
   ASSERT (!c->c2.to_tun.len);
-  c->c2.buf = c->c2.read_link_buf;
-  ASSERT (buf_init (&c->c2.buf, EXTRA_FRAME (&c->c2.frame)));
 
-  status = link_socket_read (&c->c2.link_socket, &c->c2.buf, MAX_RW_SIZE_LINK (&c->c2.frame), &from);
+  c->c2.buf = c->c2.read_link_buf;
+  ASSERT (buf_init (&c->c2.buf, FRAME_HEADROOM (&c->c2.frame)));
+  status = link_socket_read (&c->c2.link_socket, &c->c2.buf, MAX_RW_SIZE_LINK (&c->c2.frame), &c->c2.from);
 
   if (socket_connection_reset (&c->c2.link_socket, status))
     {
@@ -450,9 +449,16 @@ process_incoming_link (struct context *c)
 	  msg (D_STREAM_ERRORS, "Connection reset, restarting [%d]", status);
 	}
       c->sig->signal_text = "connection-reset";
-      return;		  
+      return;
     }
 
+  /* check recvfrom status */
+  check_status (status, "read", &c->c2.link_socket, NULL);
+}
+
+void
+process_incoming_link (struct context *c)
+{
   if (c->c2.buf.len > 0)
     {
       c->c2.link_read_bytes += c->c2.buf.len;
@@ -461,14 +467,11 @@ process_incoming_link (struct context *c)
   else
     c->c2.original_recv_size = 0;
 
-  /* check recvfrom status */
-  check_status (status, "read", &c->c2.link_socket, NULL);
-
   /* take action to corrupt packet if we are in gremlin test mode */
   if (c->options.gremlin) {
     if (!ask_gremlin())
       c->c2.buf.len = 0;
-    corrupt_gremlin(&c->c2.buf);
+    corrupt_gremlin (&c->c2.buf);
   }
 
   /* log incoming packet */
@@ -479,7 +482,7 @@ process_incoming_link (struct context *c)
   msg (D_LINK_RW, "%s READ [%d] from %s: %s",
        proto2ascii (c->c2.link_socket.proto, true),
        BLEN (&c->c2.buf),
-       print_sockaddr (&from),
+       print_sockaddr (&c->c2.from),
        PROTO_DUMP (&c->c2.buf));
 
   /*
@@ -491,7 +494,7 @@ process_incoming_link (struct context *c)
    */
   if (c->c2.buf.len > 0)
     {
-      link_socket_incoming_addr (&c->c2.buf, &c->c2.link_socket, &from);
+      link_socket_incoming_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
       mutex_lock (L_TLS);
@@ -507,7 +510,7 @@ process_incoming_link (struct context *c)
 	   * will load crypto_options with the correct encryption key
 	   * and return false.
 	   */
-	  if (tls_pre_decrypt (c->c2.tls_multi, &from, &c->c2.buf, &c->c2.crypto_options, c->c2.current))
+	  if (tls_pre_decrypt (c->c2.tls_multi, &c->c2.from, &c->c2.buf, &c->c2.crypto_options, c->c2.current))
 	    {
 #ifdef USE_PTHREAD
 	      /* tell TLS thread a packet is waiting */
@@ -561,7 +564,7 @@ process_incoming_link (struct context *c)
        * Also, update the persisted version of our packet-id.
        */
       if (!TLS_MODE)
-	link_socket_set_outgoing_addr (&c->c2.buf, &c->c2.link_socket, &from);
+	link_socket_set_outgoing_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from);
 
       /* reset packet received timer */
       if (c->options.ping_rec_timeout && c->c2.buf.len > 0)
@@ -593,25 +596,22 @@ process_incoming_link (struct context *c)
     }
 }
 
-static void
-process_incoming_tun (struct context *c)
+void
+read_incoming_tun (struct context *c)
 {
   /*
    * Setup for read() call on TUN/TAP device.
    */
   ASSERT (!c->c2.to_link.len);
-  c->c2.buf = c->c2.read_tun_buf;
 
+  c->c2.buf = c->c2.read_tun_buf;
 #ifdef TUN_PASS_BUFFER
   read_tun_buffered (&c->c1.tuntap, &c->c2.buf, MAX_RW_SIZE_TUN (&c->c2.frame));
 #else
-  ASSERT (buf_init (&c->c2.buf, EXTRA_FRAME (&c->c2.frame)));
+  ASSERT (buf_init (&c->c2.buf, FRAME_HEADROOM (&c->c2.frame)));
   ASSERT (buf_safe (&c->c2.buf, MAX_RW_SIZE_TUN (&c->c2.frame)));
   c->c2.buf.len = read_tun (&c->c1.tuntap, BPTR (&c->c2.buf), MAX_RW_SIZE_TUN (&c->c2.frame));
 #endif
-
-  if (c->c2.buf.len > 0)
-    c->c2.tun_read_bytes += c->c2.buf.len;
 
   /* Was TUN/TAP interface stopped? */
   if (tuntap_stop (c->c2.buf.len))
@@ -624,6 +624,13 @@ process_incoming_tun (struct context *c)
 
   /* Check the status return from read() */
   check_status (c->c2.buf.len, "read from TUN/TAP", NULL, &c->c1.tuntap);
+}
+
+void
+process_incoming_tun (struct context *c)
+{
+  if (c->c2.buf.len > 0)
+    c->c2.tun_read_bytes += c->c2.buf.len;
 
 #ifdef LOG_RW
   if (c->c2.log_rw)
@@ -676,10 +683,10 @@ process_incoming_tun (struct context *c)
     }
 }
 
-static void
+void
 process_outgoing_link (struct context *c)
 {
-  if (c->c2.to_link.len > 0 && c->c2.to_link.len <= MAX_RW_SIZE_LINK (&c->c2.frame))
+  if (c->c2.to_link.len > 0 && c->c2.to_link.len <= EXPANDED_SIZE (&c->c2.frame))
     {
       /*
        * Setup for call to send/sendto which will send
@@ -754,7 +761,7 @@ process_outgoing_link (struct context *c)
       msg (D_LINK_ERRORS, "TCP/UDP packet too large on write to %s (tried=%d,max=%d)",
 	   print_sockaddr (&c->c2.to_link_addr),
 	   c->c2.to_link.len,
-	   MAX_RW_SIZE_LINK (&c->c2.frame));
+	   EXPANDED_SIZE (&c->c2.frame));
     }
 
   /*
@@ -770,7 +777,7 @@ process_outgoing_link (struct context *c)
   c->c2.to_link = c->c2.nullbuf;
 }
 
-static void
+void
 process_outgoing_tun (struct context *c)
 {
   /*
@@ -856,7 +863,7 @@ process_outgoing_tun (struct context *c)
 }
 
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-static void
+void
 process_incoming_tls_thread (struct context *c)
 {
   int s;
@@ -893,20 +900,34 @@ process_io (struct context *c)
     {
       /* Incoming data on TCP/UDP port */
       if (SOCKET_READ_RESIDUAL (&c->c2.link_socket) || SOCKET_ISSET (&c->c2.event_wait, &c->c2.link_socket, reads))
-	process_incoming_link (c);
+	{
+	  read_incoming_link (c);
+	  if (!IS_SIG (c))
+	    process_incoming_link (c);
+	}
       /* Incoming data on TUN device */
       else if (TUNTAP_ISSET (&c->c2.event_wait, &c->c1.tuntap, reads))
-	process_incoming_tun (c);
+	{
+	  read_incoming_tun (c);
+	  if (!IS_SIG (c))
+	    process_incoming_tun (c);
+	}
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
       /* Incoming data from TLS background thread */
       else if (TLS_THREAD_SOCKET_ISSET (c->c2.tls_multi, &c->c2.event_wait, &c->c2.thread_parms, reads))
-	process_incoming_tls_thread (c);
+	{
+	  process_incoming_tls_thread (c);
+	}
 #endif
       /* TCP/UDP port ready to accept write */
       else if (SOCKET_ISSET (&c->c2.event_wait, &c->c2.link_socket, writes))
-	process_outgoing_link (c);
+	{
+	  process_outgoing_link (c);
+	}
       /* TUN device ready to accept write */
       else if (TUNTAP_ISSET (&c->c2.event_wait, &c->c1.tuntap, writes))
-	process_outgoing_tun (c);
+	{
+	  process_outgoing_tun (c);
+	}
     }
 }

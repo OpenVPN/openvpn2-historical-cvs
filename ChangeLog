@@ -1,21 +1,27 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.2 2004/02/14 09:04:28 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.3 2004/02/23 05:38:49 jimyonan Exp $
 
-2004.02.xx -- Version 2.0-test2
+2004.02.22 -- Version 2.0-test3
+
+* Initial work on UDP multi-client server.
+* Branch merge of 1.6-beta7
+	
+2004.02.14 -- Version 2.0-test2
 
 * Refactorization of openvpn.c into openvpn.[ch]
   init.[ch] forward.[ch] forward-inline.h
   occ.[ch] occ-inline.h  ping.[ch] ping-inline.h
-  sig.[ch]
+  sig.[ch].  Created a master per-tunnel
+  struct context in openvpn.h.
 * Branch merge of 1.6-beta6.2
 
 2003.11.06 -- Version 2.0-test1
 
 * Initial testbed for 2.0.
 
-2004.02.xx -- Version 1.6-beta7
+2004.02.22 -- Version 1.6-beta7
 	
 * Allow scheduling priority increase (--nice) together
   with UID/GID downgrade (--user/--group).
@@ -28,6 +34,21 @@ $Id: ChangeLog,v 1.89.2.2 2004/02/14 09:04:28 jimyonan Exp $
   a kernel patch) (Horst Laschinsky).
 * Fixed bug in checking the return value of the nice()
   function (Ian Pilcher).
+* Bug fix in new FreeBSD IPv6 over TUN code which was
+  originally added in 1.6-beta5 (Nathanael Rensen).
+* More Socks5 fixes -- extended the struct frame
+  infrastructure to accomodate proxy-based encapsulation
+  overhead.
+* Added --dhcp-option to Windows version for setting
+  adapter properties such as WINS & DNS servers.
+* Use a default route-delay of 5 seconds when
+  --ip-win32 dynamic is specified (only applicable when
+  --route-delay is not explicitly specified).
+* Added "log_append" registry variable to control
+  whether the OpenVPN service wrapper on Windows
+  opens log files in append (log_append="1") or
+  truncate (log_append="0") mode.  The default
+  is truncate.
 
 2004.02.05 -- Version 1.6-beta6
 

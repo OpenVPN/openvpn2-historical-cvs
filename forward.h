@@ -38,4 +38,13 @@ void process_io (struct context *c);
 
 void encrypt_sign (struct context *c, bool comp_frag);
 
+void show_select_status (struct context *c);
+
+void read_incoming_link (struct context *c);
+void process_incoming_link (struct context *c);
+void read_incoming_tun (struct context *c);
+void process_incoming_tun (struct context *c);
+void process_outgoing_link (struct context *c);
+void process_outgoing_tun (struct context *c);
+
 #endif /* FORWARD_H */

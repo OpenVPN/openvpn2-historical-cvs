@@ -196,7 +196,7 @@ check_send_occ_load_test_dowork (struct context *c)
 	{
 	  c->c2.occ_op = entry->op;
 	  c->c2.occ_mtu_load_size =
-	    MAX_RW_SIZE_LINK (&c->c2.frame) + entry->delta;
+	    EXPANDED_SIZE (&c->c2.frame) + entry->delta;
 	}
       else
 	{
@@ -214,7 +214,7 @@ check_send_occ_msg_dowork (struct context *c)
   bool doit = false;
 
   c->c2.buf = c->c2.aux_buf;
-  ASSERT (buf_init (&c->c2.buf, EXTRA_FRAME (&c->c2.frame)));
+  ASSERT (buf_init (&c->c2.buf, FRAME_HEADROOM (&c->c2.frame)));
   ASSERT (buf_safe (&c->c2.buf, MAX_RW_SIZE_TUN (&c->c2.frame)));
   ASSERT (buf_write (&c->c2.buf, occ_magic, OCC_STRING_SIZE));
 
@@ -275,8 +275,8 @@ check_send_occ_msg_dowork (struct context *c)
 	need_to_add = min_int (c->c2.occ_mtu_load_size
 			       - OCC_STRING_SIZE
 			       - sizeof (uint8_t)
-			       - EXTRA_FRAME (&c->c2.frame),
-			       MAX_RW_SIZE_TUN (&c->c2.frame));
+			       - EXTRA_FRAME (&c->c2.frame), 
+			       EXPANDED_SIZE (&c->c2.frame));
 	while (need_to_add > 0)
 	  {
 	    /*

@@ -322,4 +322,14 @@ typedef SOCKET socket_descriptor_t;
 typedef int socket_descriptor_t;
 #endif
 
+/*
+ * Do we have point-to-multipoint capability?
+ */
+
+#if defined(USE_CRYPTO) && defined(USE_SSL)
+#define P2MP 1
+#else
+#define P2MP 0
+#endif
+
 #endif

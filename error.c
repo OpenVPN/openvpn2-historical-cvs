@@ -239,18 +239,18 @@ void x_msg (unsigned int flags, const char *format, ...)
 	}
       else
 	{
-	  const int pid = get_current_pid ();
-	  if (pid)
-	    fprintf (fp, "%s %d[%d]: %s\n",
-		     time_string (0, show_usec),
-		     msg_line_num,
-		     pid,
-		     m1);
-	  else
-	    fprintf (fp, "%s %d: %s\n",
-		     time_string (0, show_usec),
-		     msg_line_num,
-		     m1);
+#ifdef USE_PTHREAD
+	  fprintf (fp, "%s %d[%d]: %s\n",
+		   time_string (0, show_usec),
+		   msg_line_num,
+		   thread_number (),
+		   m1);
+#else
+	  fprintf (fp, "%s %d: %s\n",
+		   time_string (0, show_usec),
+		   msg_line_num,
+		   m1);
+#endif
 	}
       fflush(fp);
       ++msg_line_num;

@@ -47,11 +47,14 @@ openvpn_SOURCES = \
 	integer.h \
         interval.h \
 	io.c io.h \
+	list.c list.h \
 	lzo.c lzo.h \
         memdbg.h \
 	misc.c misc.h \
+	mroute.c mroute.h \
 	mss.c mss.h \
 	mtu.c mtu.h \
+	multi.c multi.h \
 	occ.c occ.h occ-inline.h \
 	openvpn.c openvpn.h \
 	options.c options.h \

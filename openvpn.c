@@ -33,8 +33,131 @@
 
 #include "init.h"
 #include "forward.h"
+#include "multi.h"
 
 #include "memdbg.h"
+
+static void
+tunnel_point_to_point (struct context *c)
+{
+  const int gc_level = gc_new_level ();
+
+  c->mode = CM_P2P;
+  context_clear_2 (c);
+
+  /* initialize tunnel instance */
+  init_instance (c);
+  if (IS_SIG (c))
+    return;
+
+  /* main event loop */
+  while (true)
+    {
+      /* process timers, TLS, etc. */
+      pre_select (c);
+      if (IS_SIG (c))
+	break;
+
+      /* garbage collect */
+      gc_collect (gc_level);
+
+      /* set up and do the select() */
+      single_select (c);
+
+      /* process signals */
+      if (IS_SIG (c))
+	{
+	  if (c->sig->signal_received == SIGUSR2)
+	    {
+	      print_status (c);
+	      c->sig->signal_received = 0;
+	      continue;
+	    }
+	  break;
+	}
+
+      /* timeout? */
+      if (!c->c2.select_status)
+	continue;
+
+      /* process the I/O which triggered select */
+      process_io (c);
+      if (IS_SIG (c))
+	break;
+    }
+
+  /* tear down tunnel instance (unless --persist-tun) */
+  close_instance (c);
+  c->first_time = false;
+  gc_free_level (gc_level);
+}
+
+#if P2MP
+
+/*
+ * Check for signals -- to be used
+ * in the context of the
+ * tunnel_multiclient_udp_server function. 
+ */
+#define TMUS_SIG() \
+  if (IS_SIG (top)) \
+  { \
+    if (top->sig->signal_received == SIGUSR2) \
+      { \
+        multi_print_status (&multi, top); \
+        top->sig->signal_received = 0; \
+        continue; \
+      } \
+    break; \
+  }
+
+static void
+tunnel_multiclient_udp_server (struct context *top)
+{
+  const int gc_level = gc_new_level ();
+  struct multi_context multi;
+
+  ASSERT (top->options.proto == PROTO_UDPv4);
+  ASSERT (top->options.mode == MODE_MULTICLIENT_UDP_SERVER);
+
+  multi_init (&multi, top);
+  context_clear_2 (top);
+
+  /* initialize tunnel instance */
+  init_instance (top);
+  if (IS_SIG (top))
+    return;
+
+  /* per-packet event loop */
+  while (true)
+    {
+      /* garbage collect */
+      gc_collect (gc_level);
+
+      /* set up and do the select() */
+      multi_select (&multi, top);
+      TMUS_SIG ();
+
+      /* timeout? */
+      if (!top->c2.select_status)
+	{
+	  multi_process_timeout (&multi, top);
+	  continue;
+	}
+
+      /* process the I/O which triggered select */
+      multi_process_io (&multi, top);
+      TMUS_SIG ();
+    }
+
+  /* tear down tunnel instance (unless --persist-tun) */
+  close_instance (top);
+  multi_uninit (&multi);
+  top->first_time = false;
+  gc_free_level (gc_level);
+}
+
+#endif
 
 int
 main (int argc, char *argv[])
@@ -55,6 +178,7 @@ main (int argc, char *argv[])
    */
   do
     {
+      /* zero context struct but leave first_time member alone */
       context_clear_all_except_first_time (&c);
 
       /* static signal info object */
@@ -99,54 +223,24 @@ main (int argc, char *argv[])
 
       do
 	{
-	  const int gc_level_inner = gc_new_level ();
-
-	  context_clear_2 (&c);
-
-	  /* initialize tunnel instance */
-	  init_instance (&c);
-
-	  /* main event loop */
-	  while (true)
+	  /* run tunnel depending on mode */
+	  switch (c.options.mode)
 	    {
-	      /* process timers, TLS, etc. */
-	      pre_select (&c);
-
-	      /* garbage collect */
-	      gc_collect (gc_level_inner);
-
-	      /* set up and do the select() */
-	      single_select (&c);
-
-	      /* process signals */
-	      if (c.sig->signal_received)
-		{
-		  if (c.sig->signal_received == SIGUSR2)
-		    {
-		      print_status (&c);
-		      c.sig->signal_received = 0;
-		      continue;
-		    }
-		  print_signal (c.sig->signal_received);
-		  break;
-		}
-
-	      /* timeout? */
-	      if (!c.c2.select_status)
-		continue;
-
-	      /* process the I/O which triggered select */
-	      process_io (&c);
-
-	      if (c.sig->signal_received)
-		break;
+	    case MODE_POINT_TO_POINT:
+	      tunnel_point_to_point (&c);
+	      break;
+#if P2MP
+	    case MODE_MULTICLIENT_UDP_SERVER:
+	      tunnel_multiclient_udp_server (&c);
+	      break;
+#endif
+	    default:
+	      ASSERT (0);
 	    }
 
-	  /* tear down tunnel instance (unless --persist-tun) */
-	  close_instance (&c);
-	  c.first_time = false;
-	  gc_free_level (gc_level_inner);
-
+	  /* any signals received? */
+	  if (IS_SIG (&c))
+	    print_signal (c.sig, NULL);
 	}
       while (c.sig->signal_received == SIGUSR1);
 
@@ -161,6 +255,6 @@ main (int argc, char *argv[])
   /* pop our garbage collection level */
   gc_free_level (gc_level);
 
-  openvpn_exit (OPENVPN_EXIT_STATUS_GOOD);	/* exit point */
-  return 0;			/* NOTREACHED */
+  openvpn_exit (OPENVPN_EXIT_STATUS_GOOD);  /* exit point */
+  return 0;			            /* NOTREACHED */
 }

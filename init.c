@@ -380,7 +380,7 @@ do_open_tun (const struct options *options,
       run_script (options->up_script,
 		  tuntap->actual,
 		  TUN_MTU_SIZE (frame),
-		  MAX_RW_SIZE_LINK (frame),
+		  EXPANDED_SIZE (frame),
 		  print_in_addr_t (tuntap->local, true),
 		  print_in_addr_t (tuntap->remote_netmask, true),
 		  "init", NULL, "up");
@@ -418,7 +418,7 @@ do_open_tun (const struct options *options,
 	run_script (options->up_script,
 		    tuntap->actual,
 		    TUN_MTU_SIZE (frame),
-		    MAX_RW_SIZE_LINK (frame),
+		    EXPANDED_SIZE (frame),
 		    print_in_addr_t (tuntap->local, true),
 		    print_in_addr_t (tuntap->remote_netmask, true),
 		    "restart", NULL, "up");
@@ -570,33 +570,27 @@ do_init_crypto_static (struct context *c)
 
 #ifdef USE_SSL
 
+/*
+ * Initialize the persistent component of OpenVPN's TLS mode,
+ * which is preserved across SIGUSR1 resets.
+ */
 static void
-do_init_crypto_tls (struct context *c)
+do_init_crypto_tls_c1 (struct context *c)
 {
   const struct options *options = &c->options;
-  struct tls_options to;
-  bool packet_id_long_form;
-
-  ASSERT (options->tls_server || options->tls_client);
-  ASSERT (!options->test_crypto);
-
-  init_crypto_pre (c);
-
-  /* Make sure we are either a TLS client or server but not both */
-  ASSERT (options->tls_server == !options->tls_client);
-
-  /* Let user specify a script to verify the incoming certificate */
-  tls_set_verify_command (options->tls_verify);
-
-  /* Verify the X509 name of the incoming host */
-  tls_set_verify_x509name (options->tls_remote);
-
-  /* Let user specify a certificate revocation list to
-     check the incoming certificate */
-  tls_set_crl_verify (options->crl_file);
 
   if (!c->c1.ks.ssl_ctx)
     {
+      /* Let user specify a script to verify the incoming certificate */
+      tls_set_verify_command (options->tls_verify);
+
+      /* Verify the X509 name of the incoming host */
+      tls_set_verify_x509name (options->tls_remote);
+
+      /* Let user specify a certificate revocation list to
+	 check the incoming certificate */
+      tls_set_crl_verify (options->crl_file);
+  
       /*
        * Initialize the OpenSSL library's global
        * SSL context.
@@ -624,6 +618,25 @@ do_init_crypto_tls (struct context *c)
     {
       msg (M_INFO, "Re-using SSL/TLS context");
     }
+}
+
+static void
+do_init_crypto_tls (struct context *c)
+{
+  const struct options *options = &c->options;
+  struct tls_options to;
+  bool packet_id_long_form;
+
+  ASSERT (options->tls_server || options->tls_client);
+  ASSERT (!options->test_crypto);
+
+  init_crypto_pre (c);
+
+  /* Make sure we are either a TLS client or server but not both */
+  ASSERT (options->tls_server == !options->tls_client);
+
+  /* initialize persistent component */
+  do_init_crypto_tls_c1 (c);
 
   /* Sanity check on IV, sequence number, and cipher mode options */
   check_replay_iv_consistency (&c->c1.ks.key_type, options->replay,
@@ -684,14 +697,24 @@ static void
 do_init_finalize_tls_frame (struct context *c)
 {
   tls_multi_init_finalize (c->c2.tls_multi, &c->c2.frame);
-  ASSERT (MAX_RW_SIZE_LINK (&c->c2.tls_multi->opt.frame) <=
-	  MAX_RW_SIZE_LINK (&c->c2.frame));
+  ASSERT (EXPANDED_SIZE (&c->c2.tls_multi->opt.frame) <=
+	  EXPANDED_SIZE (&c->c2.frame));
   frame_print (&c->c2.tls_multi->opt.frame, D_MTU_INFO,
 	       "Control Channel MTU parms");
 }
 
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
+
+static void
+do_init_crypto_tls_lite (struct context *c)
+{
+#if P2MP
+  do_init_crypto_tls_c1 (c);
+#else
+  ASSERT (0);
+#endif
+}
 
 #ifdef USE_CRYPTO
 /*
@@ -805,20 +828,24 @@ do_init_buffers (struct context *c)
 {
   c->c2.read_link_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
   c->c2.read_tun_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-  c->c2.aux_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
+
+  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+    {
+      c->c2.aux_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
 
 #ifdef USE_CRYPTO
-  c->c2.encrypt_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-  c->c2.decrypt_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
+      c->c2.encrypt_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
+      c->c2.decrypt_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
 #endif
 
 #ifdef USE_LZO
-  if (c->options.comp_lzo)
-    {
-      c->c2.lzo_compress_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-      c->c2.lzo_decompress_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-    }
+      if (c->options.comp_lzo)
+	{
+	  c->c2.lzo_compress_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
+	  c->c2.lzo_decompress_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
+	}
 #endif
+    }
 }
 
 /*
@@ -905,7 +932,8 @@ do_init_tun (struct context *c)
 	    c->options.ifconfig_remote_netmask,
 	    addr_host (&c->c2.link_socket.lsa->local),
 	    addr_host (&c->c2.link_socket.lsa->remote),
-	    &c->c2.frame, c->options.tuntap_flags);
+	    &c->c2.frame,
+	    &c->options.tuntap_options);
 }
 
 /*
@@ -1185,7 +1213,8 @@ do_close_tls (struct context *c)
 static void
 do_close_free_key_schedule (struct context *c)
 {
-  if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_key))
+  if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_key)
+      && (c->mode == CM_P2P || c->mode == CM_TOP))
     key_schedule_free (&c->c1.ks);
 }
 
@@ -1230,7 +1259,7 @@ do_close_tuntap (struct context *c)
 	  run_script (c->options.down_script,
 		      tuntap_actual,
 		      TUN_MTU_SIZE (&c->c2.frame),
-		      MAX_RW_SIZE_LINK (&c->c2.frame),
+		      EXPANDED_SIZE (&c->c2.frame),
 		      print_in_addr_t (c->c1.tuntap.local, true),
 		      print_in_addr_t (c->c1.tuntap.remote_netmask, true),
 		      "init",
@@ -1244,7 +1273,7 @@ do_close_tuntap (struct context *c)
 	    run_script (c->options.down_script,
 			c->c1.tuntap.actual,
 			TUN_MTU_SIZE (&c->c2.frame),
-			MAX_RW_SIZE_LINK (&c->c2.frame),
+			EXPANDED_SIZE (&c->c2.frame),
 			print_in_addr_t (c->c1.tuntap.local, true),
 			print_in_addr_t (c->c1.tuntap.remote_netmask, true),
 			"restart",
@@ -1314,21 +1343,30 @@ init_instance (struct context *c)
   /* signals caught here will abort */
   c->sig->signal_received = 0;
   c->sig->signal_text = NULL;
-  pre_init_signal_catch ();
+  c->sig->hard = false;
+
+  /* before full initialization, received signals will trigger exit */
+  if (c->first_time)
+    pre_init_signal_catch ();
+
+  /* should we disable paging? */
+  if (c->first_time && options->mlock)
+    do_mlockall (true);
 
   /* init flags */
   c->c2.ipv4_tun = (!options->tun_ipv6
 		    && is_dev_type (options->dev, options->dev_type, "tun"));
   c->c2.log_rw = (check_debug_level (D_LOG_RW)
 		  && !check_debug_level (D_LOG_RW + 1));
-
+  
   /* possible sleep if restart */
   if (!c->first_time)
     socket_restart_pause (options->proto, options->http_proxy_server != NULL,
 			  options->socks_proxy_server != NULL);
 
   /* reset OCC state */
-  c->c2.occ_op = occ_reset_op ();
+  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+    c->c2.occ_op = occ_reset_op ();
 
   /* our wait-for-i/o object, different for posix vs. win32 */
   wait_init (&c->c2.event_wait);
@@ -1336,20 +1374,19 @@ init_instance (struct context *c)
   /* reset our transport layer socket object */
   link_socket_reset (&c->c2.link_socket);
 
-  /* should we disable paging? */
-  if (c->first_time && options->mlock)
-    do_mlockall (true);
-
   /* initialize internal fragmentation object */
-  if (options->fragment)
+  if (options->fragment && (c->mode == CM_P2P || c->mode == CM_CHILD))
     c->c2.fragment = fragment_init (&c->c2.frame);
 
   /* init crypto layer */
-  do_init_crypto (c);
+  if (c->mode == CM_TOP)
+    do_init_crypto_tls_lite (c);
+  else
+    do_init_crypto (c);
 
 #ifdef USE_LZO
   /* initialize LZO compression library. */
-  if (options->comp_lzo)
+  if (options->comp_lzo && (c->mode == CM_P2P || c->mode == CM_CHILD))
     lzo_compress_init (&c->c2.lzo_compwork, options->comp_lzo_adaptive);
 #endif
 
@@ -1357,13 +1394,14 @@ init_instance (struct context *c)
   do_init_frame (c);
 
   /* initialize TLS MTU variables */
-  do_init_frame_tls (c);
+  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+    do_init_frame_tls (c);
 
   /* init workspace buffers whose size is derived from frame size */
   do_init_buffers (c);
 
   /* initialize internal fragmentation capability with known frame size */
-  if (options->fragment)
+  if (options->fragment && (c->mode == CM_P2P || c->mode == CM_CHILD))
     do_init_fragment (c);
 
   /* initialize dynamic MTU variable */
@@ -1373,22 +1411,29 @@ init_instance (struct context *c)
   do_init_socket_1 (c);
 
   /* initialize tun/tap device object */
-  do_init_tun (c);
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    {
+      do_init_tun (c);
 
-  /* open tun/tap device, ifconfig, run up script, etc. */
-  if (!options->up_delay)
-    c->c2.did_open_tun =
-      do_open_tun (options, &c->c2.frame, &c->c2.link_socket, &c->c1.tuntap,
-		   &c->c1.route_list);
+      /* open tun/tap device, ifconfig, run up script, etc. */
+      if (!options->up_delay || c->mode == CM_TOP)
+	c->c2.did_open_tun = do_open_tun (options,
+					  &c->c2.frame,
+					  &c->c2.link_socket,
+					  &c->c1.tuntap,
+					  &c->c1.route_list);
+    }
 
   /* print MTU info */
   do_print_data_channel_mtu_parms (c);
 
   /* get local and remote options compatibility strings */
-  do_compute_occ_strings (c);
+  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+    do_compute_occ_strings (c);
 
   /* initialize output speed limiter */
-  do_init_traffic_shaper (c);
+  if (c->mode == CM_P2P)
+    do_init_traffic_shaper (c);
 
   /* do one-time inits, and possibily become a daemon here */
   do_init_first_time_1 (c);
@@ -1404,21 +1449,22 @@ init_instance (struct context *c)
 
   /* finalize the TCP/UDP socket */
   do_init_socket_2 (c);
-  if (c->sig->signal_received)
+  if (IS_SIG (c))
     {
       c->sig->signal_text = "socket";
-      print_signal (c->sig->signal_received);
       return;
     }
 
   /* start the TLS thread */
-  do_start_tls_thread (c);
+  if (c->mode == CM_P2P) /* JYFIXME -- for efficiency multi-client modes should use tls thread */
+    do_start_tls_thread (c);
 
   /* set maximum fd + 1 for select() */
   do_init_maxfd (c);
 
   /* initialize timers */
-  do_init_timers (c);
+  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+    do_init_timers (c);
 }
 
 /*

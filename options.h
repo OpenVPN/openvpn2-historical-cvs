@@ -50,7 +50,12 @@ struct options
   /* first config file */
   const char *config;
 
-  /* mode parms */
+  /* mode of operation */
+# define MODE_POINT_TO_POINT 0
+# define MODE_MULTICLIENT_UDP_SERVER 1
+  int mode;
+
+  /* persist parms */
   bool persist_config;
   int persist_mode;
 
@@ -126,7 +131,7 @@ struct options
 
   int resolve_retry_seconds;    /* If hostname resolve fails, retry for n seconds */
 
-  unsigned int tuntap_flags;
+  struct tuntap_options tuntap_options;
 
   /* Misc parms */
   const char *username;

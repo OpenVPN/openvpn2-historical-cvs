@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -40,24 +40,24 @@
 
 void
 frame_finalize (struct frame *frame,
-		bool udp_mtu_defined,
-		int udp_mtu,
+		bool link_mtu_defined,
+		int link_mtu,
 		bool tun_mtu_defined,
 		int tun_mtu,
-		bool udp_mtu_min_defined,
-		int udp_mtu_min,
-		bool udp_mtu_max_defined,
-		int udp_mtu_max)
+		bool link_mtu_min_defined,
+		int link_mtu_min,
+		bool link_mtu_max_defined,
+		int link_mtu_max)
 {
-  /* Set udp_mtu based on command line options */
+  /* Set link_mtu based on command line options */
   if (tun_mtu_defined)
     {
-      frame->udp_mtu = tun_mtu + TUN_UDP_DELTA (frame);
+      frame->link_mtu = tun_mtu + TUN_LINK_DELTA (frame);
     }
   else
     {
-      ASSERT (udp_mtu_defined);
-      frame->udp_mtu = udp_mtu;
+      ASSERT (link_mtu_defined);
+      frame->link_mtu = link_mtu;
     }
 
   if (TUN_MTU_SIZE (frame) < TUN_MTU_MIN)
@@ -70,17 +70,17 @@ frame_finalize (struct frame *frame,
    * Sets a range for the dynamic mtu value.
    * Requires call to frame_dynamic_finalize to finalize.
    */
-  if (udp_mtu_min_defined)
-    frame->dynamic.mtu_min_initial = udp_mtu_min;
+  if (link_mtu_min_defined)
+    frame->dynamic.mtu_min_initial = link_mtu_min;
   else
     frame->dynamic.mtu_min_initial = MTU_INITIAL_UNDEF;
 
-  if (udp_mtu_max_defined)
-    frame->dynamic.mtu_max_initial = udp_mtu_max;
+  if (link_mtu_max_defined)
+    frame->dynamic.mtu_max_initial = link_mtu_max;
   else
     frame->dynamic.mtu_max_initial = MTU_INITIAL_UNDEF;
 
-  if (udp_mtu_min_defined && udp_mtu_max_defined && udp_mtu_min > udp_mtu_max)
+  if (link_mtu_min_defined && link_mtu_max_defined && link_mtu_min > link_mtu_max)
     frame_print (frame, M_FATAL, "Dynamic MTU min is larger than dynamic MTU max");
 
   frame_set_mtu_dynamic (frame, MTU_SET_TO_MAX);
@@ -94,8 +94,8 @@ frame_finalize (struct frame *frame,
 void
 frame_dynamic_finalize (struct frame *frame)
 {
-  const int lower_bound = TUN_MTU_MIN + TUN_UDP_DELTA (frame);
-  const int upper_bound = max_int (lower_bound, frame->udp_mtu);
+  const int lower_bound = TUN_MTU_MIN + TUN_LINK_DELTA (frame);
+  const int upper_bound = max_int (lower_bound, frame->link_mtu);
 
   if (frame->dynamic.mtu_min_initial == MTU_INITIAL_UNDEF)
     frame->dynamic.mtu_min = lower_bound;
@@ -131,7 +131,7 @@ frame_dynamic_finalize (struct frame *frame)
 void
 frame_finalize_derivative (struct frame *frame, const struct frame *src)
 {
-  frame->udp_mtu = src->udp_mtu;
+  frame->link_mtu = src->link_mtu;
   frame->dynamic.mtu_min_initial = src->dynamic.mtu_min_initial;
   frame->dynamic.mtu_max_initial = src->dynamic.mtu_max_initial;
   frame_dynamic_finalize (frame);  
@@ -148,18 +148,18 @@ frame_set_mtu_dynamic (struct frame *frame, int mtu_dynamic)
 }
 
 /*
- * Increase/Decrease udp_mtu by a percentage.
+ * Increase/Decrease link_mtu by a percentage.
  *
  * Return true if mtu changed.
  */
 bool
 frame_mtu_change_pct (struct frame *frame, int pct)
 {
-  const int orig_mtu = frame->udp_mtu;
+  const int orig_mtu = frame->link_mtu;
   const int new_mtu = orig_mtu + (orig_mtu * pct / 100);
   frame_set_mtu_dynamic (frame, new_mtu);
   frame_dynamic_finalize (frame);
-  return frame->udp_mtu != orig_mtu;
+  return frame->link_mtu != orig_mtu;
 }
 
 /*
@@ -181,7 +181,7 @@ frame_print (const struct frame *frame, int level, const char *prefix)
   if (prefix)
     buf_printf (&out, "%s ", prefix);
   buf_printf (&out, "[");
-  buf_printf (&out, " udp_mtu=%d", frame->udp_mtu);
+  buf_printf (&out, " link_mtu=%d", frame->link_mtu);
   buf_printf (&out, " extra_frame=%d", frame->extra_frame);
   buf_printf (&out, " extra_buffer=%d", frame->extra_buffer);
   buf_printf (&out, " extra_tun=%d", frame->extra_tun);
@@ -221,7 +221,7 @@ set_mtu_discover_type (int sd, int mtu_type)
 #if defined(HAVE_SETSOCKOPT) && defined(SOL_IP) && defined(IP_MTU_DISCOVER)
       if (setsockopt
 	  (sd, SOL_IP, IP_MTU_DISCOVER, &mtu_type, sizeof (mtu_type)))
-	msg (M_ERR, "Error setting IP_MTU_DISCOVER type=%d on UDP socket",
+	msg (M_ERR, "Error setting IP_MTU_DISCOVER type=%d on TCP/UDP socket",
 	     mtu_type);
 #else
       msg (M_FATAL, MTUDISC_NOT_SUPPORTED_MSG);
@@ -357,7 +357,7 @@ set_sock_extended_error_passing (int sd)
   int on = 1;
   if (setsockopt (sd, SOL_IP, IP_RECVERR, &on, sizeof (on)))
     msg (M_WARN | M_ERRNO,
-	 "Note: enable extended error passing on UDP socket failed (IP_RECVERR)");
+	 "Note: enable extended error passing on TCP/UDP socket failed (IP_RECVERR)");
 }
 
 #endif

@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -38,7 +38,7 @@ struct tuntap
   int ip_fd;
 #endif
   bool ipv6;
-  char actual[64]; /* actual name of TUN/TAP dev, usually including unit number */
+  char actual[256]; /* actual name of TUN/TAP dev, usually including unit number */
 };
 
 void clear_tuntap (struct tuntap *tuntap);

@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -29,6 +29,12 @@
 #include "error.h"
 
 /*
+ * Debug level at and above where we
+ * display time to microsecond resolution.
+ */
+#define DEBUG_LEVEL_USEC_TIME  6
+
+/*
  * Debugging levels for various kinds
  * of output.
  */
@@ -54,10 +60,10 @@
 
 #define D_LOG_RW             LOGLEV(5, 0, 0)         /* Print 'R' or 'W' to stdout for read/write */
 
-#define D_UDP_RW             LOGLEV(6, 60, M_DEBUG)  /* show UDP reads/writes (terse) */
+#define D_LINK_RW            LOGLEV(6, 60, M_DEBUG)  /* show TCP/UDP reads/writes (terse) */
 
 #define D_SHOW_KEYS          LOGLEV(7, 70, M_DEBUG)  /* show data channel encryption keys */
-#define D_REL_DEBUG          LOGLEV(7, 70, M_DEBUG)  /* show detailed info from reliable routines */
+#define D_REL_LOW            LOGLEV(7, 70, M_DEBUG)  /* show low frequency info from reliable layer */
 #define D_MTU_DEBUG          LOGLEV(7, 70, M_DEBUG)  /* show dynamic MTU info */
 #define D_FRAG_DEBUG         LOGLEV(7, 70, M_DEBUG)  /* show fragment debugging info */
 
@@ -65,21 +71,22 @@
 #define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* medium frequency info from tls_session routines */
 #define D_INTERVAL           LOGLEV(8, 70, M_DEBUG)  /* show interval.h debugging info */
 #define D_GREMLIN_VERBOSE    LOGLEV(8, 70, M_DEBUG)  /* show verbose info from gremlin module */
+#define D_REL_DEBUG          LOGLEV(8, 70, M_DEBUG)  /* show detailed info from reliable routines */
 
 #define D_TLS_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show detailed info from TLS routines */
 #define D_CRYPTO_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show detailed info from crypto.c routines */
 #define D_COMP               LOGLEV(9, 70, M_DEBUG)  /* show compression info */
-#define D_READ_WRITE         LOGLEV(9, 70, M_DEBUG)  /* verbose account of all tun/UDP reads/writes/opens */
+#define D_READ_WRITE         LOGLEV(9, 70, M_DEBUG)  /* verbose account of all tun/link reads/writes/opens */
 #define D_PACKET_CONTENT     LOGLEV(9, 70, M_DEBUG)  /* show before/after encryption packet content */
 #define D_TLS_NO_SEND_KEY    LOGLEV(9, 70, M_DEBUG)  /* show when no data channel send-key exists */
 #define D_THREAD_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show pthread debug information */
-#define D_REL_LOW            LOGLEV(9, 70, M_DEBUG)  /* show low frequency info from reliable layer */
 #define D_PID_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show packet-id debugging info */
 #define D_PID_PERSIST_DEBUG  LOGLEV(9, 70, M_DEBUG)  /* show packet-id persist debugging info */
-#define D_UDP_RW_VERBOSE     LOGLEV(9, 70, M_DEBUG)  /* show UDP reads/writes with greater verbosity */
+#define D_LINK_RW_VERBOSE    LOGLEV(9, 70, M_DEBUG)  /* show link reads/writes with greater verbosity */
 #define D_TLS_THREAD_DEBUG   LOGLEV(9, 70, M_DEBUG)  /* show detailed info from TLS thread routines */
 #define D_SELECT             LOGLEV(9, 70, M_DEBUG)  /* show detailed info from main select() call */
 #define D_TUN_RW             LOGLEV(9, 70, M_DEBUG)  /* show TUN/TAP reads/writes */
+#define D_CO_DEBUG           LOGLEV(9, 70, M_DEBUG)  /* show connection-oriented debug info */
 
 #define D_SHAPER_DEBUG       LOGLEV(10, 70, M_DEBUG) /* show traffic shaper info */
 

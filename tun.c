@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -122,7 +122,7 @@ do_ifconfig (const char *dev, const char *dev_type,
 {
   if (ifconfig_local && ifconfig_remote)
     {
-      char command_line[256];
+      char command_line[512];
 
       if (!is_dev_type (dev, dev_type, "tun"))
 	msg (M_FATAL, "%s is not a tun device.  The --ifconfig option works only for tun devices.  You should use an --up script to ifconfig a tap device.", dev);
@@ -266,9 +266,9 @@ open_tun_generic (const char *dev, const char *dev_node,
 		  bool ipv6, bool ipv6_explicitly_supported, bool dynamic,
 		  struct tuntap *tt)
 {
-  char tunname[64];
+  char tunname[256];
 
-  char dynamic_name[64];
+  char dynamic_name[256];
   bool dynamic_opened = false;
 
   clear_tuntap (tt);

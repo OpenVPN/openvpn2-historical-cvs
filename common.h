@@ -37,6 +37,11 @@ typedef unsigned long counter_type;
 typedef int interval_t;
 
 /*
+ * Used as an upper bound for timeouts.
+ */
+#define BIG_TIMEOUT  (60*60*24*365)  /* one year (in seconds) */
+
+/*
  * Printf formats for special types
  */
 #define counter_format          "%10lu"

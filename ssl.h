@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -41,7 +41,7 @@
 /*
  * Openvpn Protocol.
  *
- * UDP Packet:
+ * TCP/UDP Packet:
  *   packet opcode (high 5 bits, see P_ constants below)
  *   key_id (low 3 bits, see key_id in struct tls_session below for comment)
  *   payload (n bytes)
@@ -125,7 +125,7 @@
   || (op) == P_CONTROL_HARD_RESET_SERVER_V1)
 
 /* Should we aggregate TLS acknowledgements, and tack them onto control packets? */
-/* #define TLS_AGGREGATE_ACK */
+#define TLS_AGGREGATE_ACK
 
 /*
  * If TLS_AGGREGATE_ACK, set the
@@ -347,14 +347,14 @@ SSL_CTX *init_ssl (bool server,
 		   const char *priv_key_file, const char *cipher_list);
 
 struct tls_multi *tls_multi_init (struct tls_options *tls_options,
-				  struct udp_socket *udp_socket);
+				  struct link_socket *link_socket);
 
 void tls_multi_init_finalize(struct tls_multi* multi, const struct frame* frame);
 
 bool tls_multi_process (struct tls_multi *multi,
-			struct buffer *to_udp,
-			struct sockaddr_in *to_udp_addr,
-			struct udp_socket *to_udp_socket,
+			struct buffer *to_link,
+			struct sockaddr_in *to_link_addr,
+			struct link_socket *to_link_socket,
 			interval_t *wakeup,
 			time_t current);
 
@@ -395,8 +395,8 @@ struct tt_cmd
 
 struct tt_ret
 {
-  struct buffer to_udp;
-  struct sockaddr_in to_udp_addr;
+  struct buffer to_link;
+  struct sockaddr_in to_link_addr;
 };
 
 struct thread_parms
@@ -407,14 +407,14 @@ struct thread_parms
   int sd[2];
 
   struct tls_multi *multi;
-  struct udp_socket *udp_socket;
+  struct link_socket *link_socket;
   int nice;
   bool mlock;
 };
 
 void tls_thread_create (struct thread_parms *state,
 			struct tls_multi *multi,
-			struct udp_socket *udp_socket,
+			struct link_socket *link_socket,
 			int nice, bool mlock);
 
 int tls_thread_process (struct thread_parms *state);

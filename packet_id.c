@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -122,7 +122,9 @@ packet_id_net_print (const struct packet_id_net *pin, bool print_timestamp)
 
   buf_printf (&out, "[ #" packet_id_format, (packet_id_print_type)pin->id);
   if (print_timestamp && pin->time)
-      buf_printf (&out, " / time = (" packet_id_format ") %s", (packet_id_print_type)pin->time, time_string (pin->time));
+      buf_printf (&out, " / time = (" packet_id_format ") %s", 
+		  (packet_id_print_type)pin->time,
+		  time_string (pin->time, false));
 
   buf_printf (&out, " ]");
   return BSTR (&out);
@@ -258,7 +260,9 @@ packet_id_persist_print (const struct packet_id_persist *p)
     {
       buf_printf (&out, " #" packet_id_format, (packet_id_print_type)p->id);
       if (p->time)
-	buf_printf (&out, " / time = (" packet_id_format ") %s", (packet_id_print_type)p->time, time_string (p->time));
+	buf_printf (&out, " / time = (" packet_id_format ") %s",
+		    (packet_id_print_type)p->time,
+		    time_string (p->time, false));
     }
 
   buf_printf (&out, " ]");

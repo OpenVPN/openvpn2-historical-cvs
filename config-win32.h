@@ -423,6 +423,9 @@
 /* 32-bit unsigned type */
 #define uint32_t unsigned int
 
+/* 16-bit unsigned type */
+#define uint16_t unsigned short
+
 /* 8-bit unsigned type */
 #define uint8_t unsigned char
 

@@ -27,12 +27,6 @@
  * These routines are designed to optimize the calling of a routine
  * (normally used for tls_multi_process())
  * which can be called less frequently between triggers.
- *
- * We won't optimize if we are within I_HORIZON seconds
- * of a trigger.
- *
- * If we are optimizing, we will call routine at least once
- * per I_REFRESH seconds.
  */
 
 #ifndef INTERVAL_H
@@ -50,8 +44,10 @@ interval_earliest_wakeup (interval_t *wakeup, time_t at, time_t current) {
   if (at > current)
     {
       const interval_t delta = (interval_t) (at - current);
-      if (!*wakeup || delta < *wakeup)
+      if (delta < *wakeup)
 	*wakeup = delta;
+      if (*wakeup < 0)
+	*wakeup = 0;
     }
 }
 
@@ -93,7 +89,6 @@ static inline bool
 interval_test (struct interval* top, time_t current)
 {
   bool trigger = false;
-
 
   if (top->future_trigger && current >= top->future_trigger)
     {
@@ -172,7 +167,7 @@ event_timeout_reset (struct event_timeout* et, time_t current)
 static inline bool
 event_timeout_trigger (struct event_timeout* et, time_t current)
 {
-  if (et->n && et->last + et->n <= current)
+  if (et->last + et->n <= current)
     {
       msg (D_INTERVAL, "EVENT event_timeout_trigger (%d)", et->n);
       et->last = current;
@@ -184,15 +179,12 @@ event_timeout_trigger (struct event_timeout* et, time_t current)
 static inline void
 event_timeout_wakeup (struct event_timeout* et, time_t current, struct timeval* tv)
 {
-  if (et->n)
+  const int wakeup = max_int ((int) (et->last + et->n - current), 0);
+  if (wakeup < tv->tv_sec)
     {
-      const int wakeup = (int) (et->last + et->n - current);
-      if (wakeup > 0 && (!tv->tv_sec || wakeup < tv->tv_sec))
-	{
-	  msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d)", wakeup, et->n);
-	  tv->tv_sec = wakeup;
-	  tv->tv_usec = 0;
-	}
+      msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d)", wakeup, et->n);
+      tv->tv_sec = wakeup;
+      tv->tv_usec = 0;
     }
 }
 

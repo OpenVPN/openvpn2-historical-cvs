@@ -278,6 +278,13 @@
 #endif
 
 /*
+ * Some OSes define this as a recv/sendv flag
+ */
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
+/*
  * Does this OS provide a different function for closing regular files
  * vs. sockets?
  */

@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -214,10 +214,18 @@ void x_msg (unsigned int flags, const char *format, ...)
   else
     {
       FILE *fp = msg_fp();
+      const bool show_usec = check_debug_level (DEBUG_LEVEL_USEC_TIME);
 #ifdef USE_PTHREAD
-      fprintf (fp, "%s %d[%d]: %s\n", time_string (0), msg_line_num, thread_number (), m1);
+      fprintf (fp, "%s %d[%d]: %s\n",
+	       time_string (0, show_usec),
+	       msg_line_num,
+	       thread_number (),
+	       m1);
 #else
-      fprintf (fp, "%s %d: %s\n", time_string (0), msg_line_num, m1);
+      fprintf (fp, "%s %d: %s\n",
+	       time_string (0, show_usec),
+	       msg_line_num,
+	       m1);
 #endif
       fflush(fp);
       ++msg_line_num;

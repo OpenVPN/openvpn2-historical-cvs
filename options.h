@@ -60,16 +60,19 @@ struct options
 #ifdef HAVE_GETTIMEOFDAY
   int shaper;
 #endif
-  int tun_mtu;          /* MTU of tun device */
+  int tun_mtu;           /* MTU of tun device */
   int tun_mtu_extra;
-  int udp_mtu;          /* MTU of device over which tunnel packets pass via UDP */
-  bool tun_mtu_defined; /* true if user overriding parm with command line option */
-  bool udp_mtu_defined; /* true if user overriding parm with command line option */
+  int link_mtu;          /* MTU of device over which tunnel packets pass via TCP/UDP */
+  bool tun_mtu_defined;  /* true if user overriding parm with command line option */
+  bool link_mtu_defined; /* true if user overriding parm with command line option */
+
+  /* Protocol type (PROTO_UDP or PROTO_TCP) */
+  int proto;
 
   /* Advanced MTU negotiation and datagram fragmentation options */
   int mtu_discover_type; /* used if OS supports setting Path MTU discovery options on socket */
 #ifdef FRAGMENT_ENABLE
-  bool mtu_dynamic;             /* should we fragment and reassemble packets? */
+  bool mtu_dynamic;      /* should we fragment and reassemble packets? */
   int mtu_min;
   bool mtu_min_defined;
   int mtu_max;
@@ -79,14 +82,14 @@ struct options
 
   bool mlock;
   int inactivity_timeout;
-  int ping_send_timeout;        /* Send a UDP ping to remote every n seconds */
-  int ping_rec_timeout;         /* Expect a UDP ping from remote at least once every n seconds */
+  int ping_send_timeout;        /* Send a TCP/UDP ping to remote every n seconds */
+  int ping_rec_timeout;         /* Expect a TCP/UDP ping from remote at least once every n seconds */
   bool ping_timer_remote;       /* Run ping timer only if we have a remote address */
   bool tun_ipv6;                /* Build tun dev that supports IPv6 */
 
-  #define PING_UNDEF   0
-  #define PING_EXIT    1
-  #define PING_RESTART 2
+# define PING_UNDEF   0
+# define PING_EXIT    1
+# define PING_RESTART 2
   int ping_rec_timeout_action;  /* What action to take on ping_rec_timeout (exit or restart)? */
 
   bool persist_tun;             /* Don't close/reopen TUN/TAP dev on SIGUSR1 or PING_RESTART */

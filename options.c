@@ -42,6 +42,7 @@
 #include "options.h"
 #include "openvpn.h"
 #include "misc.h"
+#include "socket.h"
 
 #include "memdbg.h"
 
@@ -78,6 +79,8 @@ static const char usage_message[] =
   "Tunnel Options:\n"
   "--local host    : Local host name or ip address.\n"
   "--remote host   : Remote host name or ip address.\n"
+  "--proto p       : Use protocol p for communicating with peer.\n"
+  "                  p = udp, tcp-server, or tcp-client\n"
   "--resolv-retry n: If hostname resolve fails for --local or --remote, retry\n"
   "                  resolve for n seconds before failing (disabled by default).\n"
   "--float         : Allow remote to change its IP address/port, such as through\n"
@@ -85,9 +88,9 @@ static const char usage_message[] =
   "--ipchange cmd  : Execute shell command cmd on remote ip address initial\n"
   "                  setting or change -- execute as: cmd ip-address port#\n"
   "                  (',' may be used to separate multiple args in cmd)\n"
-  "--port port     : UDP port # for both local and remote.\n"
-  "--lport port    : UDP port # for local (default=%d).\n"
-  "--rport port    : UDP port # for remote (default=%d).\n"
+  "--port port     : TCP/UDP port # for both local and remote.\n"
+  "--lport port    : TCP/UDP port # for local (default=%d).\n"
+  "--rport port    : TCP/UDP port # for remote (default=%d).\n"
   "--nobind        : Do not bind to local address and port.\n"
   "--dev tunX|tapX : TUN/TAP device (X can be omitted for dynamic device in\n"
   "                  Linux 2.4+).\n"
@@ -101,7 +104,7 @@ static const char usage_message[] =
   "                  endpoint and r as a remote endpoint.  l & r should be\n"
   "                  swapped on the other peer.  l & r must be private\n"
   "                  addresses outside of the subnets used by either peer.\n"
-  "                  Implies --udp-mtu %d if neither --udp-mtu or --tun-mtu\n"
+  "                  Implies --link-mtu %d if neither --link-mtu or --tun-mtu\n"
   "                  explicitly specified.\n"
   "--shaper n      : Restrict output to peer to n bytes per second.\n"
   "--inactive n    : Exit after n seconds of inactivity on TUN/TAP device.\n"
@@ -109,7 +112,7 @@ static const char usage_message[] =
   "--ping-restart n: Restart if n seconds pass without reception of remote ping.\n"
   "--ping-timer-rem: Run the --ping-exit/--ping-restart timer only if we have a\n"
   "                  remote address.\n"
-  "--ping n        : Ping remote once every n seconds over UDP port.\n"
+  "--ping n        : Ping remote once every n seconds over TCP/UDP port.\n"
   "--persist-tun   : Keep TUN/TAP device open across SIGUSR1 or --ping-restart.\n"
   "--persist-remote-ip : Keep remote IP address across SIGUSR1 or --ping-restart.\n"
   "--persist-local-ip  : Keep local IP address across SIGUSR1 or --ping-restart.\n"
@@ -118,13 +121,13 @@ static const char usage_message[] =
   "--passtos       : TOS passthrough (applies to IPv4 only).\n"
 #endif
   "--tun-mtu n     : Take the TUN/TAP device MTU to be n and derive the\n"
-  "                  UDP MTU from it (default=%d).\n"
+  "                  TCP/UDP MTU from it (default=%d).\n"
   "--tun-mtu-extra n : Assume that TUN/TAP device might return as many\n"
   "                  as n bytes\n"
   "                  more than the tun-mtu size on read (default=%d).\n"
-  "--udp-mtu n     : Take the UDP device MTU to be n and derive the tun MTU\n"
+  "--link-mtu n    : Take the TCP/UDP device MTU to be n and derive the tun MTU\n"
   "                  from it (disabled by default).\n"
-  "--mtu-disc type : Should we do Path MTU discovery on UDP channel?\n"
+  "--mtu-disc type : Should we do Path MTU discovery on TCP/UDP channel?\n"
   "                  'no'    -- Never send DF (Don't Fragment) frames\n"
   "                  'maybe' -- Use per-route hints\n"
   "                  'yes'   -- Always DF (Don't Fragment)\n"
@@ -140,7 +143,7 @@ static const char usage_message[] =
   "--mlock         : Disable Paging -- ensures key material and tunnel\n"
   "                  data will never be written to disk.\n"
   "--up cmd        : Shell cmd to execute after successful tun device open.\n"
-  "                  Execute as: cmd TUN/TAP-dev tun-mtu udp-mtu \\\n"
+  "                  Execute as: cmd TUN/TAP-dev tun-mtu link-mtu \\\n"
   "                              ifconfig-local-ip ifconfig-remote-ip\n"
   "                  (pre --user or --group UID/GID change)\n"
   "--down cmd      : Shell cmd to run after tun device close.\n"
@@ -275,6 +278,7 @@ void
 init_options (struct options *o)
 {
   CLEAR (*o);
+  o->proto = PROTO_UDPv4;
 #ifdef TUNSETPERSIST
   o->persist_mode = 1;
 #endif
@@ -282,7 +286,7 @@ init_options (struct options *o)
   o->verbosity = 1;
   o->bind_local = true;
   o->tun_mtu = TUN_MTU_DEFAULT;
-  o->udp_mtu = UDP_MTU_DEFAULT;
+  o->link_mtu = LINK_MTU_DEFAULT;
   o->mtu_discover_type = -1;
 #ifdef FRAGMENT_ENABLE
   o->mtu_icmp = true;
@@ -331,6 +335,7 @@ show_settings (const struct options *o)
 #endif
 #endif
 
+  SHOW_INT (proto);
   SHOW_STR (local);
   SHOW_STR (remote);
 
@@ -350,8 +355,8 @@ show_settings (const struct options *o)
 #endif
   SHOW_INT (tun_mtu);
   SHOW_BOOL (tun_mtu_defined);
-  SHOW_INT (udp_mtu);
-  SHOW_BOOL (udp_mtu_defined);
+  SHOW_INT (link_mtu);
+  SHOW_BOOL (link_mtu_defined);
   SHOW_INT (tun_mtu_extra);
 #ifdef FRAGMENT_ENABLE
   SHOW_BOOL (mtu_dynamic);
@@ -457,8 +462,8 @@ options_string (const struct options *o)
   buf_printf (&out, "V1");
 #ifdef STRICT_OPTIONS_CHECK
   buf_printf (&out, " --dev-type %s", dev_type_string (o->dev, o->dev_type));
-  if (o->udp_mtu_defined)
-    buf_printf (&out, " --udp-mtu %d", o->udp_mtu);
+  if (o->link_mtu_defined)
+    buf_printf (&out, " --udp-mtu %d", o->link_mtu);
   if (o->tun_mtu_defined)
     buf_printf (&out, " --tun-mtu %d", o->tun_mtu);
   if (o->tun_ipv6)
@@ -530,18 +535,18 @@ usage (void)
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   fprintf (fp, usage_message,
-	   title_string, o.local_port, o.remote_port, o.udp_mtu,
+	   title_string, o.local_port, o.remote_port, o.link_mtu,
 	   o.tun_mtu, o.tun_mtu_extra,
 	   o.verbosity, o.authname, o.ciphername, o.tls_timeout,
 	   o.renegotiate_seconds, o.handshake_window, o.transition_window);
 #elif defined(USE_CRYPTO)
   fprintf (fp, usage_message,
-	   title_string, o.local_port, o.remote_port, o.udp_mtu,
+	   title_string, o.local_port, o.remote_port, o.link_mtu,
 	   o.tun_mtu, o.tun_mtu_extra,
 	   o.verbosity, o.authname, o.ciphername);
 #else
   fprintf (fp, usage_message,
-	   title_string, o.local_port, o.remote_port, o.udp_mtu,
+	   title_string, o.local_port, o.remote_port, o.link_mtu,
 	   o.tun_mtu, o.tun_mtu_extra,
 	   o.verbosity);
 #endif
@@ -867,11 +872,11 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
       ++i;
       options->mute = positive (atoi (p2));
     }
-  else if (streq (p1, "udp-mtu") && p2)
+  else if ((streq (p1, "link-mtu") || streq (p1, "udp-mtu")) && p2)
     {
       ++i;
-      options->udp_mtu = positive (atoi (p2));
-      options->udp_mtu_defined = true;
+      options->link_mtu = positive (atoi (p2));
+      options->link_mtu_defined = true;
     }
   else if (streq (p1, "tun-mtu") && p2)
     {
@@ -977,6 +982,18 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
     {
       ++i;
       options->inactivity_timeout = positive (atoi (p2));
+    }
+  else if (streq (p1, "proto") && p2)
+    {
+      ++i;
+      options->proto = ascii2proto (p2);
+      if (options->proto < 0)
+	{
+	  msg (M_WARN, "Bad protocol: '%s'.  Allowed protocols with --proto option: %s",
+	       p2,
+	       proto2ascii_all());
+	  usage_small ();
+	}
     }
   else if (streq (p1, "ping") && p2)
     {

@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -105,7 +105,7 @@ signal_handler_exit (int signum)
  */
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 #define TLS_MODE (tls_multi != NULL)
-#define PROTO_DUMP_FLAGS (check_debug_level (D_UDP_RW_VERBOSE) ? (PD_SHOW_DATA|PD_VERBOSE) : 0)
+#define PROTO_DUMP_FLAGS (check_debug_level (D_LINK_RW_VERBOSE) ? (PD_SHOW_DATA|PD_VERBOSE) : 0)
 #define PROTO_DUMP(buf) protocol_dump(buf, \
 				      PROTO_DUMP_FLAGS | \
 				      (tls_multi ? PD_TLS : 0) | \
@@ -184,8 +184,8 @@ frame_finalize_options (struct frame *frame, const struct options *options)
 {
 
   frame_finalize (frame,
-		  options->udp_mtu_defined,
-		  options->udp_mtu,
+		  options->link_mtu_defined,
+		  options->link_mtu,
 		  options->tun_mtu_defined,
 		  options->tun_mtu,
 #ifdef FRAGMENT_ENABLE
@@ -211,7 +211,7 @@ frame_finalize_options (struct frame *frame, const struct options *options)
  */
 static int
 openvpn (const struct options *options,
-	 struct udp_socket_addr *udp_socket_addr,
+	 struct link_socket_addr *link_socket_addr,
 	 struct tuntap *tuntap,
 	 struct key_schedule *ks,
 	 struct packet_id_persist *pid_persist,
@@ -239,21 +239,21 @@ openvpn (const struct options *options,
 
   /* declare various buffers */
   struct buffer to_tun = clear_buf ();
-  struct buffer to_udp = clear_buf ();
+  struct buffer to_link = clear_buf ();
   struct buffer buf = clear_buf ();
   struct buffer ping_buf = clear_buf ();
   struct buffer nullbuf = clear_buf ();
 
-  /* tells us to free to_udp buffer after it has been written to UDP port */
-  bool free_to_udp;
+  /* tells us to free to_link buffer after it has been written to TCP/UDP port */
+  bool free_to_link;
 
   /* used by select() */
   fd_set reads, writes;
 
-  struct udp_socket udp_socket;   /* socket used for UDP connection to remote */
-  struct sockaddr_in to_udp_addr; /* IP address of remote */
+  struct link_socket link_socket;   /* socket used for TCP/UDP connection to remote */
+  struct sockaddr_in to_link_addr; /* IP address of remote */
 
-  int max_rw_size_udp = 0;        /* max size of packet we can send to remote */
+  int max_rw_size_link = 0;        /* max size of packet we can send to remote */
 
   /* MTU frame parameters */
   struct frame frame;
@@ -280,8 +280,8 @@ openvpn (const struct options *options,
    */
   counter_type tun_read_bytes = 0;
   counter_type tun_write_bytes = 0;
-  counter_type udp_read_bytes = 0;
-  counter_type udp_write_bytes = 0;
+  counter_type link_read_bytes = 0;
+  counter_type link_write_bytes = 0;
 
   /*
    * Timer objects for ping and inactivity
@@ -358,16 +358,15 @@ openvpn (const struct options *options,
 
   /*
    * Buffers used to read from TUN device
-   * and UDP port.
+   * and TCP/UDP port.
    */
-  struct buffer read_udp_buf = clear_buf ();
+  struct buffer read_link_buf = clear_buf ();
   struct buffer read_tun_buf = clear_buf ();
 
   /*
    * IPv4 TUN device?
    */
   bool ipv4_tun = (!options->tun_ipv6 && is_dev_type (options->dev, options->dev_type, "tun"));
-  const bool ipv6_udp_transport = false; /* we don't support IPv6 UDP sockets yet */
 
   /* workspace for get_pid_file/write_pid */
   struct pid_state pid_state;
@@ -394,7 +393,7 @@ openvpn (const struct options *options,
 
   msg (M_INFO, "%s", title_string);
 
-  CLEAR (udp_socket);
+  CLEAR (link_socket);
   CLEAR (frame);
 #ifdef FRAGMENT_ENABLE
   CLEAR (frame_fragment_omit);
@@ -419,14 +418,15 @@ openvpn (const struct options *options,
 
   if (!options->test_crypto)
 #endif
-    /* open the UDP socket */
-    udp_socket_init (&udp_socket, options->local, options->remote,
-		     options->local_port, options->remote_port,
-		     options->bind_local, options->remote_float,
-		     options->inetd,
-		     udp_socket_addr, options->ipchange,
-		     options->resolve_retry_seconds,
-		     options->mtu_discover_type);
+    /* open the TCP/UDP socket */
+    link_socket_init (&link_socket, options->local, options->remote,
+		      options->proto,
+		      options->local_port, options->remote_port,
+		      options->bind_local, options->remote_float,
+		      options->inetd,
+		      link_socket_addr, options->ipchange,
+		      options->resolve_retry_seconds,
+		      options->mtu_discover_type);
 
 #ifdef USE_CRYPTO
 
@@ -624,7 +624,7 @@ openvpn (const struct options *options,
       /*
        * Initialize OpenVPN's master TLS-mode object.
        */
-      tls_multi = tls_multi_init (&to, &udp_socket);
+      tls_multi = tls_multi_init (&to, &link_socket);
     }
 #endif
   else
@@ -666,6 +666,13 @@ openvpn (const struct options *options,
   tun_adjust_frame_parameters (&frame, options->tun_mtu_extra);
 
   /*
+   * Adjust frame size based on link socket parameters.
+   * (Since TCP is a stream protocol, we need to insert
+   * a packet length uint16_t in the buffer.)
+   */
+  socket_adjust_frame_parameters (&frame, &link_socket);
+
+  /*
    * Fill in the blanks in the frame parameters structure,
    * make sure values are rational, etc.
    */
@@ -682,7 +689,7 @@ openvpn (const struct options *options,
   frame_dynamic_finalize (&frame_fragment);
 #endif
 
-  max_rw_size_udp = MAX_RW_SIZE_UDP (&frame);
+  max_rw_size_link = MAX_RW_SIZE_LINK (&frame);
   frame_print (&frame, D_MTU_INFO, "Data Channel MTU parms");
 #ifdef FRAGMENT_ENABLE
   if (fragment)
@@ -695,9 +702,9 @@ openvpn (const struct options *options,
       int size;
 
       tls_multi_init_finalize (tls_multi, &frame);
-      size = MAX_RW_SIZE_UDP (&tls_multi->opt.frame);
-      if (size > max_rw_size_udp)
-	max_rw_size_udp = size;
+      size = MAX_RW_SIZE_LINK (&tls_multi->opt.frame);
+      if (size > max_rw_size_link)
+	max_rw_size_link = size;
       frame_print (&tls_multi->opt.frame, D_MTU_INFO, "Control Channel MTU parms");
     }
 #endif
@@ -707,7 +714,7 @@ openvpn (const struct options *options,
    * our buffers.
    */
 
-  read_udp_buf = alloc_buf (BUF_SIZE (&frame));
+  read_link_buf = alloc_buf (BUF_SIZE (&frame));
   read_tun_buf = alloc_buf (BUF_SIZE (&frame));
 
 #ifdef USE_CRYPTO
@@ -729,6 +736,9 @@ openvpn (const struct options *options,
     fragment_frame_init (fragment, &frame_fragment, (options->mtu_icmp && ipv4_tun));
 #endif
 
+  /* socket code has buffers to initialize once frame parameters are known */
+  socket_frame_init (&frame, &link_socket);
+
   if (!tuntap_defined (tuntap))
     {
       /* do ifconfig */
@@ -748,7 +758,7 @@ openvpn (const struct options *options,
 
       /* run the up script */
       run_script (options->up_script, tuntap->actual, TUN_MTU_SIZE (&frame),
-		  max_rw_size_udp, options->ifconfig_local, options->ifconfig_remote);
+		  max_rw_size_link, options->ifconfig_local, options->ifconfig_remote);
     }
   else
     {
@@ -809,7 +819,7 @@ openvpn (const struct options *options,
   /* start the TLS thread */
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
   if (tls_multi)
-    tls_thread_create (&thread_parms, tls_multi, &udp_socket,
+    tls_thread_create (&thread_parms, tls_multi, &link_socket,
 		       options->nice_work, options->mlock);
 #endif
 
@@ -820,16 +830,16 @@ openvpn (const struct options *options,
   /*
    * MAIN EVENT LOOP
    *
-   * Pipe UDP -> tun and tun -> UDP using nonblocked i/o.
+   * Pipe TCP/UDP -> tun and tun -> TCP/UDP using nonblocked i/o.
    *
    * If tls_multi is defined, multiplex a TLS
-   * control channel over the UDP connection which
+   * control channel over the TCP/UDP connection which
    * will be used for secure key exchange with our peer.
    *
    */
 
   /* calculate max file handle + 1 for select */
-  fm = udp_socket.sd;
+  fm = link_socket.sd;
   if (tuntap->fd > fm)
     fm = tuntap->fd;
 
@@ -865,7 +875,7 @@ openvpn (const struct options *options,
   ++fm;
 
   /* this flag is true for buffers coming from the TLS background thread */
-  free_to_udp = false;
+  free_to_link = false;
 
   while (true)
     {
@@ -874,7 +884,7 @@ openvpn (const struct options *options,
       struct timeval timeval;
 
       /* initialize select() timeout */
-      timeval.tv_sec = 0;
+      timeval.tv_sec = BIG_TIMEOUT;
       timeval.tv_usec = 0;
 
 #ifdef USE_CRYPTO
@@ -894,15 +904,15 @@ openvpn (const struct options *options,
        */
       if (tls_multi)
 	{
-	  interval_t wakeup = 0;
+	  interval_t wakeup = BIG_TIMEOUT;
 
 	  if (interval_test (&tmp_int, current))
 	    {
-	      if (tls_multi_process (tls_multi, &to_udp, &to_udp_addr, &udp_socket, &wakeup, current))
+	      if (tls_multi_process (tls_multi, &to_link, &to_link_addr, &link_socket, &wakeup, current))
 		interval_action (&tmp_int, current);
 
 	      interval_future_trigger (&tmp_int, wakeup, current);
-	      free_to_udp = false;
+	      free_to_link = false;
 	    }
 
 	  interval_schedule_wakeup (&tmp_int, current, &wakeup);
@@ -938,7 +948,7 @@ openvpn (const struct options *options,
        * not received in n seconds?
        */
       if (options->ping_rec_timeout &&
-	  (!options->ping_timer_remote || addr_defined (&udp_socket_addr->actual)))
+	  (!options->ping_timer_remote || addr_defined (&link_socket_addr->actual)))
 	{
 	  if (event_timeout_trigger (&ping_rec_interval, current)) 
 	    {
@@ -968,12 +978,12 @@ openvpn (const struct options *options,
       if (fragment)
 	{
 	  /* OS MTU Hint? */
-	  if (udp_socket.mtu_changed && ipv4_tun)
+	  if (link_socket.mtu_changed && ipv4_tun)
 	    {
-	      frame_adjust_path_mtu (&frame_fragment, udp_socket.mtu, ipv6_udp_transport);
-	      udp_socket.mtu_changed = false;
+	      frame_adjust_path_mtu (&frame_fragment, link_socket.mtu, options->proto);
+	      link_socket.mtu_changed = false;
 	    }
-	  if (!to_udp.len
+	  if (!to_link.len
 	      && fragment_outgoing_defined (fragment)
 	      && fragment_ready_to_send (fragment, &buf, &frame_fragment))
 	    {
@@ -996,8 +1006,8 @@ openvpn (const struct options *options,
 	      /*
 	       * Get the address we will be sending the packet to.
 	       */
-	      udp_socket_get_outgoing_addr (&buf, &udp_socket,
-					    &to_udp_addr);
+	      link_socket_get_outgoing_addr (&buf, &link_socket,
+					    &to_link_addr);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 	      /*
@@ -1012,8 +1022,8 @@ openvpn (const struct options *options,
 	      mutex_unlock (L_TLS);
 #endif
 #endif
-	      to_udp = buf;
-	      free_to_udp = false;
+	      to_link = buf;
+	      free_to_link = false;
 	    }
 	  if (!to_tun.len && fragment_icmp (fragment, &buf))
 	    {
@@ -1029,7 +1039,7 @@ openvpn (const struct options *options,
        */
       if (options->ping_send_timeout)
 	{
-	  if (!to_udp.len)
+	  if (!to_link.len)
 	    {
 	      if (event_timeout_trigger (&ping_send_interval, current))
 		{
@@ -1058,8 +1068,8 @@ openvpn (const struct options *options,
 #endif
 		  openvpn_encrypt (&buf, encrypt_buf, &crypto_options, &frame, current);
 #endif
-		  udp_socket_get_outgoing_addr (&buf, &udp_socket,
-						&to_udp_addr);
+		  link_socket_get_outgoing_addr (&buf, &link_socket,
+						&to_link_addr);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 		  if (tls_multi)
@@ -1067,8 +1077,8 @@ openvpn (const struct options *options,
 		  mutex_unlock (L_TLS);
 #endif
 #endif
-		  to_udp = buf;
-		  free_to_udp = false;
+		  to_link = buf;
+		  free_to_link = false;
 		  msg (D_PACKET_CONTENT, "SENT PING");
 		}
 	      event_timeout_wakeup (&ping_send_interval, current, &timeval);
@@ -1088,10 +1098,10 @@ openvpn (const struct options *options,
       FD_ZERO (&writes);
 
       /*
-       * If outgoing data (for UDP port) pending, wait for ready-to-send
-       * status from UDP port. Otherwise, wait for incoming data on TUN/TAP device.
+       * If outgoing data (for TCP/UDP port) pending, wait for ready-to-send
+       * status from TCP/UDP port. Otherwise, wait for incoming data on TUN/TAP device.
        */
-      if (to_udp.len > 0)
+      if (to_link.len > 0)
 	{
 	  /*
 	   * If sending this packet would put us over our traffic shaping
@@ -1113,10 +1123,10 @@ openvpn (const struct options *options,
 	    }
 	  else
 	    {
-	      FD_SET (udp_socket.sd, &writes);
+	      FD_SET (link_socket.sd, &writes);
 	    }
 #else /* HAVE_GETTIMEOFDAY */
-	  FD_SET (udp_socket.sd, &writes);
+	  FD_SET (link_socket.sd, &writes);
 #endif /* HAVE_GETTIMEOFDAY */
 	}
 #ifdef FRAGMENT_ENABLE
@@ -1137,7 +1147,7 @@ openvpn (const struct options *options,
 
       /*
        * If outgoing data (for TUN/TAP device) pending, wait for ready-to-send status
-       * from device.  Otherwise, wait for incoming data on UDP port.
+       * from device.  Otherwise, wait for incoming data on TCP/UDP port.
        */
       if (to_tun.len > 0)
 	{
@@ -1146,16 +1156,16 @@ openvpn (const struct options *options,
 	}
       else
 	{
-	  FD_SET (udp_socket.sd, &reads);
+	  FD_SET (link_socket.sd, &reads);
 	}
 
       /*
        * Possible scenarios:
-       *  (1) udp port has data available to read
-       *  (2) udp port is ready to accept more data to write
+       *  (1) tcp/udp port has data available to read
+       *  (2) tcp/udp port is ready to accept more data to write
        *  (3) tun dev has data available to read
        *  (4) tun dev is ready to accept more data to write
-       *  (5) tls background thread has data available to forward to udp port
+       *  (5) tls background thread has data available to forward to tcp/udp port
        *  (6) we received a signal (handler sets signal_received)
        *  (7) timeout (tv) expired (from TLS, shaper, inactivity timeout, or ping timeout)
        */
@@ -1165,10 +1175,10 @@ openvpn (const struct options *options,
        */
       if (!signal_received) {
 	msg (D_SELECT, "SELECT %s|%s|%s|%s %d/%d",
-	     FD_ISSET (tuntap->fd, &reads) ?     "TR" : "tr", 
-	     FD_ISSET (tuntap->fd, &writes) ?    "TW" : "tw", 
-	     FD_ISSET (udp_socket.sd, &reads) ?  "UR" : "ur",
-	     FD_ISSET (udp_socket.sd, &writes) ? "UW" : "uw",
+	     (tuntap_defined (tuntap) && FD_ISSET (tuntap->fd, &reads)) ?  "TR" : "tr", 
+	     (tuntap_defined (tuntap) && FD_ISSET (tuntap->fd, &writes)) ? "TW" : "tw", 
+	     FD_ISSET (link_socket.sd, &reads) ?                           "UR" : "ur",
+	     FD_ISSET (link_socket.sd, &writes) ?                          "UW" : "uw",
 	     tv ? (int)tv->tv_sec : -1,
 	     tv ? (int)tv->tv_usec : -1
 	     );
@@ -1191,8 +1201,8 @@ openvpn (const struct options *options,
 	      msg (M_INFO, "Current OpenVPN Statistics:");
 	      msg (M_INFO, " TUN/TAP read bytes:   " counter_format, tun_read_bytes);
 	      msg (M_INFO, " TUN/TAP write bytes:  " counter_format, tun_write_bytes);
-	      msg (M_INFO, " UDP read bytes:       " counter_format, udp_read_bytes);
-	      msg (M_INFO, " UDP write bytes:      " counter_format, udp_write_bytes);
+	      msg (M_INFO, " LINK read bytes:       " counter_format, link_read_bytes);
+	      msg (M_INFO, " LINK write bytes:      " counter_format, link_write_bytes);
 #ifdef USE_LZO
 	      if (options->comp_lzo)
 		  lzo_print_stats (&lzo_compwork);		  
@@ -1229,28 +1239,35 @@ openvpn (const struct options *options,
 
       if (stat > 0)
 	{
-	  /* Incoming data on UDP port */
-	  if (FD_ISSET (udp_socket.sd, &reads))
+	  /* Incoming data on TCP/UDP port */
+	  if (FD_ISSET (link_socket.sd, &reads))
 	    {
 	      /*
 	       * Set up for recvfrom call to read datagram
-	       * sent to our UDP port from any source address.
+	       * sent to our TCP/UDP port from any source address.
 	       */
 	      struct sockaddr_in from;
-	      socklen_t fromlen = sizeof (from);
+	      bool status;
+
 	      ASSERT (!to_tun.len);
-	      buf = read_udp_buf;
+	      buf = read_link_buf;
 	      ASSERT (buf_init (&buf, EXTRA_FRAME (&frame)));
-	      ASSERT (buf_safe (&buf, max_rw_size_udp));
-	      fromlen = sizeof (from);
-	      buf.len = recvfrom (udp_socket.sd, BPTR (&buf), max_rw_size_udp, 0,
-				  (struct sockaddr *) &from, &fromlen);
-	      ASSERT (fromlen == sizeof (from));
+
+	      status = link_socket_read (&link_socket, &buf, max_rw_size_link, &from);
+
+	      if (!status || (buf.len < 0 && socket_connection_reset()))
+		{
+		  /* received a disconnect from a connection-oriented protocol */
+		  signal_received = SIGUSR1;
+		  msg (M_INFO|M_ERRNO_SOCK, "Connection reset, restarting [%d]", (int)status);
+		  break;		  
+		}
+
 	      if (buf.len > 0)
-		udp_read_bytes += buf.len;
+		link_read_bytes += buf.len;
 
 	      /* check recvfrom status */
-	      check_status (buf.len, "read from UDP", &udp_socket);
+	      check_status (buf.len, "read from TCP/UDP", &link_socket);
 
 	      /* take action to corrupt packet if we are in gremlin test mode */
 	      if (options->gremlin) {
@@ -1264,7 +1281,7 @@ openvpn (const struct options *options,
 	      if (check_debug_level (D_LOG_RW) && !check_debug_level (D_LOG_RW + 1))
 		fprintf (stderr, "R");
 #endif
-	      msg (D_UDP_RW, "UDP READ [%d] from %s: %s",
+	      msg (D_LINK_RW, "TCP/UDP READ [%d] from %s: %s",
 		   BLEN (&buf), print_sockaddr (&from), PROTO_DUMP (&buf));
 
 	      /*
@@ -1276,7 +1293,7 @@ openvpn (const struct options *options,
 	       */
 	      if (buf.len > 0)
 		{
-		  udp_socket_incoming_addr (&buf, &udp_socket, &from);
+		  link_socket_incoming_addr (&buf, &link_socket, &from);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 		  mutex_lock (L_TLS);
@@ -1337,7 +1354,7 @@ openvpn (const struct options *options,
 		   * Also, update the persisted version of our packet-id.
 		   */
 		  if (!TLS_MODE)
-		    udp_socket_set_outgoing_addr (&buf, &udp_socket, &from);
+		    link_socket_set_outgoing_addr (&buf, &link_socket, &from);
 
 		  /* reset packet received timer */
 		  if (options->ping_rec_timeout && buf.len > 0)
@@ -1363,7 +1380,7 @@ openvpn (const struct options *options,
 	  else if (tls_multi && FD_ISSET (TLS_THREAD_SOCKET (&thread_parms), &reads))
 	    {
 	      int s;
-	      ASSERT (!to_udp.len);
+	      ASSERT (!to_link.len);
 
 	      s = tls_thread_rec_buf (&thread_parms, &tt_ret, true);
 	      if (s == 1)
@@ -1372,11 +1389,11 @@ openvpn (const struct options *options,
 		   * TLS background thread has a control channel
 		   * packet to send to remote.
 		   */
-		  to_udp = tt_ret.to_udp;
-		  to_udp_addr = tt_ret.to_udp_addr;
+		  to_link = tt_ret.to_link;
+		  to_link_addr = tt_ret.to_link_addr;
 		
-		  /* tell UDP packet writer to free buffer after write */
-		  free_to_udp = true;
+		  /* tell TCP/UDP packet writer to free buffer after write */
+		  free_to_link = true;
 		}
 
 	      /* remote died? */
@@ -1395,7 +1412,7 @@ openvpn (const struct options *options,
 	      /*
 	       * Setup for read() call on TUN/TAP device.
 	       */
-	      ASSERT (!to_udp.len);
+	      ASSERT (!to_link.len);
 	      buf = read_tun_buf;
 	      ASSERT (buf_init (&buf, EXTRA_FRAME (&frame)));
 	      ASSERT (buf_safe (&buf, MAX_RW_SIZE_TUN (&frame)));
@@ -1464,8 +1481,8 @@ openvpn (const struct options *options,
 		  /*
 		   * Get the address we will be sending the packet to.
 		   */
-		  udp_socket_get_outgoing_addr (&buf, &udp_socket,
-						&to_udp_addr);
+		  link_socket_get_outgoing_addr (&buf, &link_socket,
+						&to_link_addr);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 		  /*
@@ -1480,13 +1497,13 @@ openvpn (const struct options *options,
 		  mutex_unlock (L_TLS);
 #endif
 #endif
-		  to_udp = buf;
+		  to_link = buf;
 		}
 	      else
 		{
-		  to_udp = nullbuf;
+		  to_link = nullbuf;
 		}
-	      free_to_udp = false;
+	      free_to_link = false;
 	    }
 
 	  /* TUN device ready to accept write */
@@ -1549,17 +1566,17 @@ openvpn (const struct options *options,
 	      to_tun = nullbuf;
 	    }
 
-	  /* UDP port ready to accept write */
-	  else if (FD_ISSET (udp_socket.sd, &writes))
+	  /* TCP/UDP port ready to accept write */
+	  else if (FD_ISSET (link_socket.sd, &writes))
 	    {
-	      if (to_udp.len > 0 && to_udp.len <= max_rw_size_udp)
+	      if (to_link.len > 0 && to_link.len <= max_rw_size_link)
 		{
 		  /*
-		   * Setup for call to sendto() which will send
-		   * packet to remote over the UDP port.
+		   * Setup for call to send/sendto which will send
+		   * packet to remote over the TCP/UDP port.
 		   */
 		  int size;
-		  ASSERT (addr_defined (&to_udp_addr));
+		  ASSERT (addr_defined (&to_link_addr));
 
 		  /* In gremlin-test mode, we may choose to drop this packet */
 		  if (!options->gremlin || ask_gremlin())
@@ -1570,13 +1587,13 @@ openvpn (const struct options *options,
 		       */
 #ifdef HAVE_GETTIMEOFDAY
 		      if (options->shaper)
-			shaper_wrote_bytes (&shaper, BLEN (&to_udp)
-					    + datagram_overhead (ipv6_udp_transport));
+			shaper_wrote_bytes (&shaper, BLEN (&to_link)
+					    + datagram_overhead (options->proto));
 #endif
 #ifdef FRAGMENT_ENABLE
 		      if (fragment)
-			fragment_post_send (fragment, BLEN (&to_udp)
-					    + datagram_overhead (ipv6_udp_transport));
+			fragment_post_send (fragment, BLEN (&to_link)
+					    + datagram_overhead (options->proto));
 #endif
 		      /*
 		       * Let the pinger know that we sent a packet.
@@ -1587,60 +1604,59 @@ openvpn (const struct options *options,
 #if PASSTOS_CAPABILITY
 		      /* Set TOS */
 		      if (ptos_defined)
-			setsockopt(udp_socket.sd, IPPROTO_IP, IP_TOS, &ptos, sizeof(ptos));
+			setsockopt(link_socket.sd, IPPROTO_IP, IP_TOS, &ptos, sizeof(ptos));
 #endif
 
+		      /* Log packet send */
+#ifdef LOG_RW
+		      if (check_debug_level (D_LOG_RW) && !check_debug_level (D_LOG_RW + 1))
+			fprintf (stderr, "W");
+#endif
+		      msg (D_LINK_RW, "TCP/UDP WRITE [%d] to %s: %s",
+			   BLEN (&to_link), print_sockaddr (&to_link_addr), PROTO_DUMP (&to_link));
+
 		      /* Send packet */
-		      size = sendto (udp_socket.sd, BPTR (&to_udp), BLEN (&to_udp), 0,
-				     (struct sockaddr *) &to_udp_addr,
-				     (socklen_t) sizeof (to_udp_addr));
+		      size = link_socket_write (&link_socket, &to_link, &to_link_addr);
+
 		      if (size > 0)
-			udp_write_bytes += size;
+			link_write_bytes += size;
 		    }
 		  else
 		    size = 0;
 
-		  /* Check sendto() return status */
-		  check_status (size, "write to UDP", &udp_socket);
+		  /* Check return status */
+		  check_status (size, "write to TCP/UDP", &link_socket);
 
 		  if (size > 0)
 		    {
 		      /* Did we write a different size packet than we intended? */
-		      if (size != BLEN (&to_udp))
+		      if (size != BLEN (&to_link))
 			msg (D_LINK_ERRORS,
-			     "UDP packet was truncated/expanded on write to %s (tried=%d,actual=%d)",
-			     print_sockaddr (&to_udp_addr),
-			     BLEN (&to_udp),
+			     "TCP/UDP packet was truncated/expanded on write to %s (tried=%d,actual=%d)",
+			     print_sockaddr (&to_link_addr),
+			     BLEN (&to_link),
 			     size);
 		    }
-
-		  /* Log packet send */
-#ifdef LOG_RW
-		  if (check_debug_level (D_LOG_RW) && !check_debug_level (D_LOG_RW + 1))
-		    fprintf (stderr, "W");
-#endif
-		  msg (D_UDP_RW, "UDP WRITE [%d] to %s: %s",
-		       BLEN (&to_udp), print_sockaddr (&to_udp_addr), PROTO_DUMP (&to_udp));
 		}
 	      else
 		{
-		  msg (D_LINK_ERRORS, "UDP packet too large on write to %s (tried=%d,max=%d)",
-		       print_sockaddr (&to_udp_addr),
-		       to_udp.len,
-		       max_rw_size_udp);
+		  msg (D_LINK_ERRORS, "TCP/UDP packet too large on write to %s (tried=%d,max=%d)",
+		       print_sockaddr (&to_link_addr),
+		       to_link.len,
+		       max_rw_size_link);
 		}
 
 	      /*
-	       * The free_to_udp flag means that we should free the packet buffer
+	       * The free_to_link flag means that we should free the packet buffer
 	       * after send.  This flag is usually set when the TLS background
 	       * thread generated the packet buffer.
 	       */
-	      if (free_to_udp)
+	      if (free_to_link)
 		{
-		  free_to_udp = false;
-		  free_buf (&to_udp);
+		  free_to_link = false;
+		  free_buf (&to_link);
 		}
-	      to_udp = nullbuf;
+	      to_link = nullbuf;
 	    }
 	}
     }
@@ -1649,15 +1665,15 @@ openvpn (const struct options *options,
    *  Do Cleanup
    */
 
-  if (free_to_udp)
-    free_buf (&to_udp);
+  if (free_to_link)
+    free_buf (&to_link);
     
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
   if (tls_multi)
     tls_thread_close (&thread_parms);
 #endif
 
-  free_buf (&read_udp_buf);
+  free_buf (&read_link_buf);
   free_buf (&read_tun_buf);
   free_buf (&ping_buf);
 
@@ -1692,16 +1708,16 @@ openvpn (const struct options *options,
     key_schedule_free (ks);
 
   /*
-   * Close UDP connection
+   * Close TCP/UDP connection
    */
-  udp_socket_close (&udp_socket);
+  link_socket_close (&link_socket);
   if ( !(signal_received == SIGUSR1 && options->persist_remote_ip) )
     {
-      CLEAR (udp_socket_addr->remote);
-      CLEAR (udp_socket_addr->actual);
+      CLEAR (link_socket_addr->remote);
+      CLEAR (link_socket_addr->actual);
     }
   if ( !(signal_received == SIGUSR1 && options->persist_local_ip) )
-    CLEAR (udp_socket_addr->local);
+    CLEAR (link_socket_addr->local);
 
   /*
    * Close TUN/TAP device
@@ -1717,7 +1733,7 @@ openvpn (const struct options *options,
       /* Run the down script -- note that it will run at reduced
 	 privilege if, for example, "--user nobody" was used. */
       run_script (options->down_script, tuntap_actual, TUN_MTU_SIZE (&frame),
-		  max_rw_size_udp, options->ifconfig_local, options->ifconfig_remote);
+		  max_rw_size_link, options->ifconfig_local, options->ifconfig_remote);
     }
 
 #ifdef USE_CRYPTO
@@ -1891,24 +1907,30 @@ main (int argc, char *argv[])
 	  usage_small ();
 	}
 
-      /*
-       * Sanity check on MTU parameters
-       */
-      if (options.tun_mtu_defined && options.udp_mtu_defined)
+      if (options.inetd && options.proto == PROTO_TCPv4_CLIENT)
 	{
-	  msg (M_WARN, "Options error: only one of --tun-mtu or --udp-mtu may be defined (note that --ifconfig implies --udp-mtu %d)", UDP_MTU_DEFAULT);
+	  msg (M_WARN, "Options error: --proto tcp-client cannot be used with --inetd");
 	  usage_small ();
 	}
 
       /*
-       * If neither --tun-mtu or --udp-mtu specified,
-       * use default --udp-mtu if --ifconfig specified, otherwise
+       * Sanity check on MTU parameters
+       */
+      if (options.tun_mtu_defined && options.link_mtu_defined)
+	{
+	  msg (M_WARN, "Options error: only one of --tun-mtu or --link-mtu may be defined (note that --ifconfig implies --link-mtu %d)", LINK_MTU_DEFAULT);
+	  usage_small ();
+	}
+
+      /*
+       * If neither --tun-mtu or --link-mtu specified,
+       * use default --link-mtu if --ifconfig specified, otherwise
        * use default --tun-mtu.
        */
-      if (!options.tun_mtu_defined && !options.udp_mtu_defined)
+      if (!options.tun_mtu_defined && !options.link_mtu_defined)
 	{
 	  if (options.ifconfig_local || options.ifconfig_remote)
-	    options.udp_mtu_defined = true;
+	    options.link_mtu_defined = true;
 	  else
 	    options.tun_mtu_defined = true;
 	}
@@ -1935,6 +1957,22 @@ main (int argc, char *argv[])
       if (string_defined_equal (options.ifconfig_local, options.ifconfig_remote))
 	{
 	  msg (M_WARN, "Options error: local and remote --ifconfig addresses must be different");
+	  usage_small ();
+	}
+
+      /*
+       * Check that protocol options make sense.
+       */
+#ifdef FRAGMENT_ENABLE
+      if (options.proto != PROTO_UDPv4 && options.mtu_dynamic)
+	{
+	  msg (M_WARN, "Options error: --mtu-dynamic cannot be used with non-UDP protocols");
+	  usage_small ();
+	}
+#endif
+      if (!options.remote && options.proto == PROTO_TCPv4_CLIENT)
+	{
+	  msg (M_WARN, "Options error: --remote MUST be used in TCP Client mode");
 	  usage_small ();
 	}
 
@@ -2008,7 +2046,7 @@ main (int argc, char *argv[])
       /* Do Work */
       {
 	/* these objects are potentially persistent across SIGUSR1 resets */
-	struct udp_socket_addr usa;
+	struct link_socket_addr usa;
 	struct key_schedule ks;
 	struct tuntap tuntap;
 	struct packet_id_persist pid_persist;
@@ -2056,7 +2094,7 @@ main (int argc, char *argv[])
 static void*
 test_crypto_thread (void *arg)
 {
-  struct udp_socket_addr usa;
+  struct link_socket_addr usa;
   struct tuntap tuntap;
   struct key_schedule ks;
   struct packet_id_persist pid_persist;

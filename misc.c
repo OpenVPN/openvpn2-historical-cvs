@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -151,12 +151,12 @@ set_nice (int niceval)
 
 /* Pass tunnel endpoint and MTU parms to a user-supplied script */
 void
-run_script (const char *command, const char *arg, int tun_mtu, int udp_mtu,
+run_script (const char *command, const char *arg, int tun_mtu, int link_mtu,
 	    const char *ifconfig_local, const char* ifconfig_remote)
 {
   if (command)
     {
-      char command_line[256];
+      char command_line[512];
 
       ASSERT (arg);
 
@@ -167,7 +167,7 @@ run_script (const char *command, const char *arg, int tun_mtu, int udp_mtu,
 
       openvpn_snprintf (command_line, sizeof (command_line),
 			"%s %s %d %d %s %s",
-			command, arg, tun_mtu, udp_mtu,
+			command, arg, tun_mtu, link_mtu,
 			ifconfig_local, ifconfig_remote);
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "script failed", true);
@@ -416,17 +416,34 @@ init_random_seed(void)
 /* format a time_t as ascii, or use current time if 0 */
 
 const char*
-time_string (time_t t)
+time_string (time_t t, bool show_usec)
 {
   struct buffer out = alloc_buf_gc (64);
+  struct timeval tv;
 
-  if (!t)
-    t = time (NULL);
+  if (t)
+    {
+      tv.tv_sec = t;
+      tv.tv_usec = 0;
+    }
+  else
+    {
+#ifdef HAVE_GETTIMEOFDAY
+      if (gettimeofday (&tv, NULL))
+#endif
+	{
+	  tv.tv_sec = time (NULL);
+	  tv.tv_usec = 0;
+	}
+    }
 
   mutex_lock (L_CTIME);
-  buf_printf (&out, "%s", ctime (&t));
+  buf_printf (&out, "%s", ctime (&tv.tv_sec));
   mutex_unlock (L_CTIME);
   buf_chomp (&out, '\n');
+
+  if (show_usec && tv.tv_usec)
+    buf_printf (&out, " us=%d", (int)tv.tv_usec);
 
   return BSTR (&out);
 }

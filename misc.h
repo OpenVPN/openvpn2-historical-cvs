@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -63,7 +63,7 @@ void set_group (const struct group_state *state);
 void set_nice (int niceval);
 void do_chroot (const char *path);
 
-void run_script (const char *command, const char *arg, int tun_mtu, int udp_mtu,
+void run_script (const char *command, const char *arg, int tun_mtu, int link_mtu,
 		 const char *ifconfig_local, const char* ifconfig_remote);
 
 /* workspace for get_pid_file/write_pid */
@@ -100,7 +100,7 @@ const char *system_error_message (int);
 bool system_check (const char* command, const char* error_message, bool fatal);
 
 /* format a time_t as ascii, or use current time if 0 */
-const char* time_string (time_t t);
+const char* time_string (time_t t, bool show_usec);
 
 #ifdef HAVE_STRERROR
 /* a thread-safe version of strerror */

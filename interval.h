@@ -35,6 +35,11 @@
  * per I_INTERVAL seconds.
  */
 
+#ifndef INTERVAL_H
+#define INTERVAL_H
+
+#include "error.h"
+
 /* TLS time constants */
 
 #define TLS_MULTI_REFRESH 15    /* seconds */
@@ -138,3 +143,5 @@ event_timeout_wakeup (struct event_timeout* et, time_t current, struct timeval* 
 	}
     }
 }
+
+#endif /* INTERVAL_H */

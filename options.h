@@ -62,7 +62,13 @@ struct options
   int udp_mtu;          /* MTU of device over which tunnel packets pass via UDP */
   bool tun_mtu_defined; /* true if user overriding parm with command line option */
   bool udp_mtu_defined; /* true if user overriding parm with command line option */
-  int mtu_discover_type;
+
+  /* Advanced MTU negotiation and datagram fragmentation options */
+  bool fragment;         /* should we fragment and reassemble packets? */
+  int max_fragment_size; /* if fragment=true, 0=auto negotiate, >0=explicit size */
+  bool generate_icmp;    /* if fragment=true, bounce back "fragmentation needed but DF set" ICMPs */
+  int mtu_discover_type; /* used if OS supports setting Path MTU discovery options on socket */
+
   bool mlock;
   int inactivity_timeout;
   int ping_send_timeout;        /* Send a UDP ping to remote every n seconds */

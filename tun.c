@@ -189,7 +189,7 @@ do_ifconfig (const char *dev, const char *dev_type,
 #elif defined(TARGET_DARWIN)
 
       /*
-       * Darwin seems to exibit similar behaviour to OpenBSD...
+       * Darwin seems to exhibit similar behaviour to OpenBSD...
        */
 
       snprintf (command_line, sizeof (command_line),

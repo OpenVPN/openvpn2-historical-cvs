@@ -41,6 +41,7 @@
 #include "shaper.h"
 #include "thread.h"
 #include "interval.h"
+#include "fragment.h"
 #include "openvpn.h"
 
 #include "memdbg.h"
@@ -226,6 +227,9 @@ openvpn (const struct options *options,
   /* MTU frame parameters */
   struct frame frame;
 
+  /* Object to handle advanced MTU negotiation and datagram fragmentation */
+  struct fragment_master *fragment = NULL;
+
   /* Always set to current time. */
   time_t current;
 
@@ -353,6 +357,12 @@ openvpn (const struct options *options,
       /* chroot if requested */
       do_chroot (options->chroot_dir);
     }
+
+  /*
+   * Initialize advanced MTU negotiation and datagram fragmentation
+   */
+  if (options->fragment)
+    fragment = fragment_init (options->max_fragment_size, options->generate_icmp, &frame);
 
 #ifdef USE_CRYPTO
   /* load a persisted packet-id for cross-session replay-protection */
@@ -642,6 +652,10 @@ openvpn (const struct options *options,
     }
 #endif
 
+  /* fragmenting code has buffers to initialize once frame parameters are known */
+  if (fragment)
+    fragment_frame_init (fragment, &frame);
+
   if (!tuntap_defined (tuntap))
     {
       /* do ifconfig */
@@ -834,6 +848,57 @@ openvpn (const struct options *options,
 	}
 
       /*
+       * Should we deliver a datagram fragment to remote?
+       */
+      if (fragment)
+	{
+	  fragment_housekeeping (fragment, current, &timeval);
+	  if (!to_udp.len)
+	    {
+	      if (fragment_ready_to_send (fragment, &buf, &frame, current))
+		{
+#ifdef USE_CRYPTO
+#ifdef USE_SSL
+		  /*
+		   * If TLS mode, get the key we will use to encrypt
+		   * the packet.
+		   */
+		  mutex_lock (L_TLS);
+		  if (tls_multi)
+		    tls_pre_encrypt (tls_multi, &buf, &crypto_options);
+#endif
+		  /*
+		   * Encrypt the packet and write an optional
+		   * HMAC authentication record.
+		   */
+		  openvpn_encrypt (&buf, encrypt_buf, &crypto_options, &frame, current);
+#endif
+		  /*
+		   * Get the address we will be sending the packet to.
+		   */
+		  udp_socket_get_outgoing_addr (&buf, &udp_socket,
+						&to_udp_addr);
+#ifdef USE_CRYPTO
+#ifdef USE_SSL
+		  /*
+		   * In TLS mode, prepend the appropriate one-byte opcode
+		   * to the packet which identifies it as a data channel
+		   * packet and gives the low-permutation version of
+		   * the key-id to the recipient so it knows which
+		   * decrypt key to use.
+		   */
+		  if (tls_multi)
+		    tls_post_encrypt (tls_multi, &buf);
+		  mutex_unlock (L_TLS);
+#endif
+#endif
+		  to_udp = buf;
+		  free_to_udp = false;
+		}
+	    }
+	}
+
+      /*
        * Should we ping the remote?
        */
       if (options->ping_send_timeout)
@@ -855,6 +920,8 @@ openvpn (const struct options *options,
 		  if (options->comp_lzo)
 		    lzo_compress (&buf, lzo_compress_buf, &lzo_compwork, &frame, current);
 #endif
+		  if (fragment)
+		    fragment_outgoing (fragment, &buf, &frame, current);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 		  mutex_lock (L_TLS);
@@ -1090,8 +1157,10 @@ openvpn (const struct options *options,
 		  openvpn_decrypt (&buf, decrypt_buf, &crypto_options, &frame, current);
 #ifdef USE_SSL
 		  mutex_unlock (L_TLS);
-#endif
+#endif /* USE_SSL */
 #endif /* USE_CRYPTO */
+		  if (fragment)
+		    fragment_incoming (fragment, &buf, &frame, current);
 #ifdef USE_LZO
 		  /* decompress the incoming packet */
 		  if (options->comp_lzo)
@@ -1203,6 +1272,8 @@ openvpn (const struct options *options,
 		  if (options->comp_lzo)
 		    lzo_compress (&buf, lzo_compress_buf, &lzo_compwork, &frame, current);
 #endif
+		  if (fragment)
+		    fragment_outgoing (fragment, &buf, &frame, current);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 		  /*
@@ -1469,6 +1540,12 @@ openvpn (const struct options *options,
   if ( !(signal_received == SIGUSR1) )
     packet_id_persist_close (pid_persist);
 #endif
+
+  /*
+   * Close fragmentation handler.
+   */
+  if (fragment)
+    fragment_free (fragment);
 
  done:
   /* pop our garbage collection level */

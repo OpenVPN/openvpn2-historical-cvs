@@ -27,26 +27,33 @@
 #define FRAGMENT_H
 
 #include "buffer.h"
+#include "interval.h"
+#include "mtu.h"
 
 #define N_FRAG_BUF          40     /* number of packet buffers, should be <= N_FRAG_ID */
 
 #define FRAG_TTL_SEC        10     /* number of seconds time-to-live for a fragment */
-#define FRAG_WAKEUP         15     /* fragment code housekeeping is run once every n seconds */
+#define FRAG_WAKEUP         10     /* fragment code housekeeping is run once every n seconds */
 
-#define TEST_EXP_SEC        300    /* try to increase MTU size after n seconds by sending big test packet */
-#define TEST_EXP_TRIG_PCT   80     /* packet must be this % of max size to trigger N_TEST_SEC */
-#define TEST_EXP_PCT        10     /* expansion test packet is this % larger than current max */
-#define TEST_CON_PCT        50     /* contraction test packet is this % smaller than current max */
+//#define TEST_EXP_SEC        300    /* try to increase MTU size after n seconds by sending big test packet */
+//#define TEST_EXP_TRIG_PCT   80     /* packet must be this % of max size to trigger N_TEST_SEC */
+//#define TEST_EXP_PCT        10     /* expansion test packet is this % larger than current max */
+//#define TEST_CON_PCT        50     /* contraction test packet is this % smaller than current max */
 
 struct fragment_master {
+  struct event_timeout;
+
   time_t last_wakeup;
   time_t last_mtu_change;
   int mtu;
-  int n_rec_big;
-  int n_rec_small;
-  int n_sent_big;
-  int n_sent_small;
-  int max_packet_size_received;    /* this value gets bounced back to peer via fragment_net.max_size_recent */
+  //int n_rec_big;
+  //int n_rec_small;
+  //int n_sent_big;
+  //int n_sent_small;
+
+  /* this value is bounced back to peer then zeroed via fragment_net.max_size_recent */
+  int max_packet_size_received;
+
   uint8_t outgoing_id;
   struct buffer outgoing;
 };
@@ -87,7 +94,7 @@ struct fragment_net {
 # define FRAG_WHOLE         0      /* packet is whole (not a fragment) */
 # define FRAG_YES_NOTLAST   1      /* packet is a fragment, but is not the last fragment (seq_id defined) */
 # define FRAG_YES_LAST      2      /* packet is the last fragment (seq_id and max_frag_size defined) */
-# define FRAG_TEST          3      /* dummy packet for establishing MTU size */
+# define FRAG_TEST          3      /* dummy packet for establishing MTU size, bounce a FRAG_MSR on receipt */
 
 # define FRAG_MSR           0x80   /* Maximum size of recently received packet (max_size_recent defined) */
 
@@ -108,5 +115,31 @@ struct fragment_net {
 
   uint16_t max_size_recent;   /* Largest packet size received recently */
 };
+
+/*
+ * Inline functions
+ */
+
+static inline void
+fragment_housekeeping (struct fragment_master *f, time_t current, struct timeval *tv)
+{
+}
+
+/*
+ * Public functions
+ */
+
+struct fragment_master *fragment_init (int max_fragment_size, bool generate_icmp, struct frame *frame);
+void fragment_frame_init (struct fragment_master *f, const struct frame *frame);
+void fragment_free (struct fragment_master *f);
+
+void fragment_incoming (struct fragment_master *f, struct buffer *buf,
+			const struct frame* frame, const time_t current);
+
+void fragment_outgoing (struct fragment_master *f, struct buffer *buf,
+			const struct frame* frame, const time_t current);
+
+bool fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
+			const struct frame* frame, const time_t current);
 
 #endif

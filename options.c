@@ -101,6 +101,12 @@ static const char usage_message[] =
   "                  'no'    -- Never send DF (Don't Fragment) frames\n"
   "                  'maybe' -- Use per-route hints\n"
   "                  'yes'   -- Always DF (Don't Fragment)\n"
+  "--fragment [n]  : Enable advanced MTU negotiation and datagram fragmentation,\n"
+  "                  n = maximum fragment size sent over UDP channel, or\n"
+  "                  automatic size negotiation if omitted.\n"
+  "                  Adds 1 to 6 octets of overhead per datagram.\n"
+  "--fragment-noicmp : Don't automatically generate 'Fragmentation needed but\n"
+  "                  DF set' IPv4 ICMP messages.\n" 
   "--mlock         : Disable Paging -- ensures key material and tunnel\n"
   "                  data will never be written to disk.\n"
   "--up cmd        : Shell cmd to execute after successful tun device open.\n"
@@ -247,6 +253,7 @@ init_options (struct options *o)
   o->tun_mtu = DEFAULT_TUN_MTU;
   o->udp_mtu = DEFAULT_UDP_MTU;
   o->mtu_discover_type = -1;
+  o->generate_icmp = true;
 #ifdef USE_LZO
   o->comp_lzo_adaptive = true;
 #endif
@@ -312,6 +319,9 @@ show_settings (const struct options *o)
   SHOW_INT (udp_mtu);
   SHOW_BOOL (udp_mtu_defined);
   SHOW_INT (tun_mtu_extra);
+  SHOW_BOOL (fragment);
+  SHOW_INT (max_fragment_size);
+  SHOW_BOOL (generate_icmp);
   SHOW_INT (mtu_discover_type);
   SHOW_BOOL (mlock);
   SHOW_INT (inactivity_timeout);
@@ -421,6 +431,8 @@ options_string (const struct options *o)
   if (o->comp_lzo)
     buf_printf (&out, " --comp-lzo");
 #endif
+  if (o->fragment)
+    buf_printf (&out, " --fragment");
   return out.data;
 }
 
@@ -801,6 +813,19 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
     {
       ++i;
       options->tun_mtu_extra = positive (atoi (p2));
+    }
+  else if (streq (p1, "fragment"))
+    {
+      options->fragment = true;
+      if (p2)
+	{
+	  options->max_fragment_size = positive (atoi (p2));
+	  ++i;
+	}
+    }
+  else if (streq (p1, "fragment-noicmp"))
+    {
+      options->generate_icmp = false;
     }
   else if (streq (p1, "mtu-disc") && p2)
     {

@@ -58,7 +58,7 @@
  * Default MTU of network over which tunnel data will pass by UDP.
  * TODO: DEFAULT_UDP_MTU = 1500 is probably too big...
  */
-#define DEFAULT_UDP_MTU 1300
+#define DEFAULT_UDP_MTU     1300
 
 /*
  * Default MTU of tunnel device.
@@ -74,7 +74,7 @@ struct frame {
   /*
    * An MTU value that can dynamically change during the life of the session
    * in order to reduce packet fragmentation.
-   * mtu_dynamic <= mtu
+   * MIN_TUN_MTU <= mtu_dynamic <= mtu
    */
   int mtu_dynamic;
 

@@ -247,6 +247,20 @@ openvpn (const struct options *options,
   struct fragment_master *fragment = NULL;
   struct frame frame_fragment;
   struct frame frame_fragment_omit;
+
+  /*
+   * Set to true if our select call should wait on TUN/TAP data, not necessarily because
+   * we are ready to read it, but rather because we want to time the rate at which data
+   * is being sent to us so that we can calculate the effective incoming bandwidth on
+   * the TUN/TAP device.
+   */
+  bool tuntap_bandwidth_sample_mode = false;
+
+  /*
+   * Set to true if we are ready to read data from the TUN/TAP device in the normal
+   * fashion, independent of the setting of tuntap_bandwidth_sample_mode.
+   */
+  bool tuntap_ready_to_read;
 #endif
 
   /* Always set to current time. */
@@ -349,6 +363,7 @@ openvpn (const struct options *options,
    * IPv4 TUN device?
    */
   bool ipv4_tun = (!options->tun_ipv6 && is_dev_type (options->dev, options->dev_type, "tun"));
+  const bool ipv6_udp_transport = false; /* we don't support IPv6 UDP sockets yet */
 
   /* workspace for get_pid_file/write_pid */
   struct pid_state pid_state;
@@ -945,7 +960,7 @@ openvpn (const struct options *options,
 	  /* OS MTU Hint? */
 	  if (ipv4_tun && udp_socket.mtu_changed)
 	    {
-	      frame_adjust_path_mtu (&frame_fragment, udp_socket.mtu);
+	      frame_adjust_path_mtu (&frame_fragment, udp_socket.mtu, ipv6_udp_transport);
 	      udp_socket.mtu_changed = false;
 	      fragment_received_os_mtu_hint (fragment, &frame_fragment);
 	    }
@@ -1059,7 +1074,14 @@ openvpn (const struct options *options,
        */
       FD_ZERO (&reads);
       FD_ZERO (&writes);
+#ifdef FRAGMENT_ENABLE
+      tuntap_ready_to_read = false;
+#endif
 
+      /*
+       * If outgoing data (for UDP port) pending, wait for ready-to-send
+       * status from UDP port. Otherwise, wait for incoming data on TUN/TAP device.
+       */
       if (to_udp.len > 0)
 	{
 	  /*
@@ -1096,13 +1118,23 @@ openvpn (const struct options *options,
 #endif
 	{
 	  if (tuntap->fd >= 0)
-	    FD_SET (tuntap->fd, &reads);
+	    {
+	      FD_SET (tuntap->fd, &reads);
+#ifdef FRAGMENT_ENABLE
+	      if (fragment)
+		tuntap_ready_to_read = true;
+#endif
+	    }
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
 	  if (tls_multi)
 	    FD_SET (TLS_THREAD_SOCKET (&thread_parms), &reads);
 #endif
 	}
 
+      /*
+       * If outgoing data (for TUN/TAP device) pending, wait for ready-to-send status
+       * from device.  Otherwise, wait for incoming data on UDP port.
+       */
       if (to_tun.len > 0)
 	{
 	  if (tuntap->fd >= 0)
@@ -1112,6 +1144,20 @@ openvpn (const struct options *options,
 	{
 	  FD_SET (udp_socket.sd, &reads);
 	}
+
+      /*
+       * If we are not ready to read incoming TUN/TAP packets, however we still
+       * want to measure effective incoming bandwidth on the TUN/TAP device,
+       * then wait for incoming TUN/TAP packets to become available but do
+       * not read them.
+       */
+#ifdef FRAGMENT_ENABLE
+      if (fragment)
+	{
+	  if (tuntap_bandwidth_sample_mode && !tuntap_ready_to_read && tuntap->fd >= 0)
+	    FD_SET (tuntap->fd, &reads);
+	}
+#endif
 
       /*
        * Possible scenarios:
@@ -1183,6 +1229,23 @@ openvpn (const struct options *options,
 
       if (stat > 0)
 	{
+	  bool tuntap_data_available = (tuntap->fd >= 0 && FD_ISSET (tuntap->fd, &reads));
+
+#ifdef FRAGMENT_ENABLE
+	  if (fragment)
+	    {
+	      if (tuntap_data_available)
+		{
+		  if (tuntap_bandwidth_sample_mode)
+		    {
+		      fragment_transfer_event_tuntap_data_available (fragment);
+		      tuntap_bandwidth_sample_mode = false;
+		    }
+		  tuntap_data_available = tuntap_ready_to_read;
+		}
+	    }
+#endif
+
 	  /* Incoming data on UDP port */
 	  if (FD_ISSET (udp_socket.sd, &reads))
 	    {
@@ -1340,7 +1403,7 @@ openvpn (const struct options *options,
 #endif
 
 	  /* Incoming data on TUN device */
-	  else if (tuntap->fd >= 0 && FD_ISSET (tuntap->fd, &reads))
+	  else if (tuntap_data_available)
 	    {
 	      /*
 	       * Setup for read() call on TUN/TAP device.
@@ -1357,11 +1420,12 @@ openvpn (const struct options *options,
 	      check_status (buf.len, "read from TUN/TAP", NULL);
 	      if (buf.len > 0)
 		{
-#if 0
-		  /* special BSD <-> Linux mode, remove leading AF_INET
-		     from tun driver IP encoding */
-		  if (options->tun_af_inet)
-		    tun_rm_head (&buf, AF_INET);
+#ifdef FRAGMENT_ENABLE
+		  if (fragment)
+		    {
+		      fragment_transfer_event_tuntap_data_read (fragment);
+		      tuntap_bandwidth_sample_mode = true;
+		    }
 #endif
 #if PASSTOS_CAPABILITY
 		  if (options->passtos)
@@ -1507,12 +1571,13 @@ openvpn (const struct options *options,
 		       * we wrote.
 		       */
 		      if (options->shaper)
-			shaper_wrote_bytes (&shaper, BLEN (&to_udp));
+			shaper_wrote_bytes (&shaper, BLEN (&to_udp)
+					    + datagram_overhead (ipv6_udp_transport));
 #ifdef FRAGMENT_ENABLE
 		      if (fragment)
-			fragment_post_send (fragment, BLEN (&to_udp));
+			fragment_post_send (fragment, BLEN (&to_udp)
+					    + datagram_overhead (ipv6_udp_transport));
 #endif
-
 		      /*
 		       * Let the pinger know that we sent a packet.
 		       */

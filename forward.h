@@ -37,15 +37,20 @@
 #define TO_LINK_FRAG(c) ((c)->c2.fragment && fragment_outgoing_defined ((c)->c2.fragment))
 #define TO_LINK_DEF(c)  (LINK_OUT(c) || TO_LINK_FRAG(c))
 
-#define IOW_TO_LINK         (1<<0)
-#define IOW_TO_TUN          (1<<1)
-#define IOW_READ            (1<<2)
-#define IOW_SHAPER          (1<<3)
-#define IOW_CHECK_RESIDUAL  (1<<4)
-#define IOW_FRAG            (1<<5)
-#define IOW_MBUF            (1<<6)
+#define IOW_TO_TUN          (1<<0)
+#define IOW_TO_LINK         (1<<1)
+#define IOW_READ_TUN        (1<<2)
+#define IOW_READ_LINK       (1<<3)
+#define IOW_SHAPER          (1<<4)
+#define IOW_CHECK_RESIDUAL  (1<<5)
+#define IOW_FRAG            (1<<6)
+#define IOW_MBUF            (1<<7)
+#define IOW_READ_TUN_FORCE  (1<<8)
+#define IOW_WAIT_SIGNAL     (1<<9)
 
-void io_wait (struct context *c, unsigned int flags);
+#define IOW_READ            (IOW_READ_TUN|IOW_READ_LINK)
+
+void io_wait (struct context *c, const unsigned int flags);
 
 void pre_select (struct context *c);
 
@@ -64,5 +69,10 @@ void process_outgoing_link (struct context *c);
 void process_outgoing_tun (struct context *c);
 
 bool send_control_channel_string (struct context *c, char *str);
+
+#define PIPV4_PASSTOS         (1<<0)
+#define PIPV4_MSSFIX          (1<<1)
+
+void process_ipv4_header (struct context *c, unsigned int flags, struct buffer *buf);
 
 #endif /* FORWARD_H */

@@ -58,8 +58,8 @@ send_push_reply (struct context *c)
 
   if (c->c2.push_ifconfig_defined && c->c2.push_ifconfig_local && c->c2.push_ifconfig_remote_netmask)
     buf_printf (&buf, ",ifconfig %s %s",
-		print_in_addr_t (c->c2.push_ifconfig_local, true, &gc),
-		print_in_addr_t (c->c2.push_ifconfig_remote_netmask, true, &gc));
+		print_in_addr_t (c->c2.push_ifconfig_local, IA_EMPTY_IF_UNDEF, &gc),
+		print_in_addr_t (c->c2.push_ifconfig_remote_netmask, IA_EMPTY_IF_UNDEF, &gc));
 
   if (strlen (BSTR (&buf)) >= MAX_PUSH_LIST_LEN)
     msg (M_FATAL, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);

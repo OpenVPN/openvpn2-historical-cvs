@@ -92,6 +92,7 @@ getaddr (unsigned int flags,
       int resolve_retries = resolve_retry_seconds / fail_wait_interval;
       struct hostent *h;
       const char *fmt;
+      int level = 0;
 
       CLEAR (ia);
 
@@ -102,10 +103,8 @@ getaddr (unsigned int flags,
 
       if (!(flags & GETADDR_RESOLVE))
 	{
-	  if (flags & GETADDR_FATAL)
-	    msg (M_FATAL, "RESOLVE: Cannot parse IP address: %s", hostname);
-	  else
-	    goto done;
+	  msg (msglevel, "RESOLVE: Cannot parse IP address: %s", hostname);
+	  goto done;
 	}
 
       /*
@@ -129,15 +128,17 @@ getaddr (unsigned int flags,
 
 	  /* resolve lookup failed, should we
 	     continue or fail? */
-	  msg (((resolve_retries > 0
-		 || !(flags & GETADDR_FATAL))
-		? D_RESOLVE_ERRORS : M_FATAL),
+
+	  level = msglevel;
+	  if (resolve_retries > 0)
+	    level = D_RESOLVE_ERRORS;
+
+	  msg (level,
 	       fmt,
 	       hostname,
 	       h_errno_msg (h_errno));
 
-	  if (--resolve_retries <= 0
-	      && !(flags & GETADDR_FATAL))
+	  if (--resolve_retries <= 0)
 	    goto done;
 
 	  sleep (fail_wait_interval);
@@ -258,14 +259,16 @@ socket_get_rcvbuf (int sd)
   return 0;
 }
 
-static void
+static bool
 socket_set_rcvbuf (int sd, int size)
 {
 #if defined(HAVE_SETSOCKOPT) && defined(SOL_SOCKET) && defined(SO_RCVBUF)
   if (setsockopt (sd, SOL_SOCKET, SO_RCVBUF, (void *) &size, sizeof (size)) != 0)
     {
       msg (M_WARN, "NOTE: setsockopt SO_RCVBUF=%d failed", size);
+      return false;
     }
+  return true;
 #endif
 }
 
@@ -277,8 +280,11 @@ socket_set_buffers (int fd, const struct socket_buffer_size *sbs)
       const int sndbuf_old = socket_get_sndbuf (fd);
       const int rcvbuf_old = socket_get_rcvbuf (fd);
 
-      socket_set_sndbuf (fd, sbs->sndbuf);
-      socket_set_rcvbuf (fd, sbs->rcvbuf);
+      if (sbs->sndbuf)
+	socket_set_sndbuf (fd, sbs->sndbuf);
+
+      if (sbs->rcvbuf)
+	socket_set_rcvbuf (fd, sbs->rcvbuf);
        
       msg (D_OSBUF, "Socket Buffers: R=[%d->%d] S=[%d->%d]",
 	   rcvbuf_old,
@@ -318,15 +324,18 @@ void
 remote_list_randomize (struct remote_list *l)
 {
   int i;
-  for (i = 0; i < l->len; ++i)
+  if (l)
     {
-      const int j = get_random () % l->len;
-      if (i != j)
+      for (i = 0; i < l->len; ++i)
 	{
-	  struct remote_entry tmp;
-	  tmp = l->array[i];
-	  l->array[i] = l->array[j];
-	  l->array[j] = tmp;
+	  const int j = get_random () % l->len;
+	  if (i != j)
+	    {
+	      struct remote_entry tmp;
+	      tmp = l->array[i];
+	      l->array[i] = l->array[j];
+	      l->array[j] = tmp;
+	    }
 	}
     }
 }
@@ -474,7 +483,7 @@ socket_do_accept (socket_descriptor_t sd,
 
   if (new_sd == -1)
     {
-      msg (D_LINK_ERRORS | M_ERRNO_SOCK, "TCP: accept() failed");
+      msg (D_LINK_ERRORS | M_ERRNO_SOCK, "TCP: accept(%d) failed", sd);
     }
   else if (remote_len != sizeof (*remote))
     {
@@ -816,13 +825,6 @@ link_socket_init_phase1 (struct link_socket *sock,
   remote_host = remote_list_host (remote_list);
   remote_port = remote_list_port (remote_list);
 
-  sock->mode = mode;
-  if (mode == LS_MODE_TCP_ACCEPT_FROM)
-    {
-      ASSERT (accept_from);
-      sock->sd = accept_from->sd;
-    }
-
   sock->local_host = local_host;
   sock->local_port = local_port;
   sock->http_proxy = http_proxy;
@@ -840,6 +842,15 @@ link_socket_init_phase1 (struct link_socket *sock,
   sock->info.lsa = lsa;
   sock->info.ipchange_command = ipchange_command;
 
+  sock->mode = mode;
+  if (mode == LS_MODE_TCP_ACCEPT_FROM)
+    {
+      ASSERT (accept_from);
+      ASSERT (sock->info.proto == PROTO_TCPv4_SERVER);
+      ASSERT (!sock->inetd);
+      sock->sd = accept_from->sd;
+    }
+
   /* are we running in HTTP proxy mode? */
   if (sock->http_proxy)
     {
@@ -853,10 +864,15 @@ link_socket_init_phase1 (struct link_socket *sock,
       /* the OpenVPN server we will use the proxy to connect to */
       sock->proxy_dest_host = remote_host;
       sock->proxy_dest_port = remote_port;
+
+      /* this is needed so that connection retries will go to the proxy server,
+	 not the remote OpenVPN address */
+      sock->remote_list = NULL;
     }
   /* or in Socks proxy mode? */
   else if (sock->socks_proxy)
     {
+      ASSERT (sock->info.proto == PROTO_TCPv4_CLIENT || sock->info.proto == PROTO_UDPv4);
       ASSERT (!sock->inetd);
 
       /* the proxy server */
@@ -866,6 +882,10 @@ link_socket_init_phase1 (struct link_socket *sock,
       /* the OpenVPN server we will use the proxy to connect to */
       sock->proxy_dest_host = remote_host;
       sock->proxy_dest_port = remote_port;
+
+      /* this is needed so that connection retries will go to the proxy server,
+	 not the remote OpenVPN address */
+      sock->remote_list = NULL;
     }
   else
     {
@@ -875,9 +895,16 @@ link_socket_init_phase1 (struct link_socket *sock,
 
   /* bind behavior for TCP server vs. client */
   if (sock->info.proto == PROTO_TCPv4_SERVER)
-    sock->bind_local = true;
+    {
+      if (sock->mode == LS_MODE_TCP_ACCEPT_FROM)
+	sock->bind_local = false;
+      else
+	sock->bind_local = true;
+    }
   else if (sock->info.proto == PROTO_TCPv4_CLIENT)
-    sock->bind_local = false;
+    {
+      sock->bind_local = false;
+    }
 
   /* were we started by inetd or xinetd? */
   if (sock->inetd)
@@ -886,7 +913,7 @@ link_socket_init_phase1 (struct link_socket *sock,
       ASSERT (inetd_socket_descriptor >= 0);
       sock->sd = inetd_socket_descriptor;
     }
-  else
+  else if (mode != LS_MODE_TCP_ACCEPT_FROM)
     {
       create_socket (sock);
       resolve_bind_local (sock);
@@ -1099,6 +1126,7 @@ link_socket_close (struct link_socket *sock)
 #ifdef WIN32
 	  overlapped_io_close (&sock->reads);
 	  overlapped_io_close (&sock->writes);
+	  free_tcp_connect_event (&sock->listen_handle, sock->sd);
 #endif
 	  msg (D_CLOSE, "TCP/UDP: Closing socket");
 	  if (openvpn_close_socket (sock->sd))
@@ -1219,7 +1247,7 @@ socket_stat (const struct link_socket *s, unsigned int rwflags, struct gc_arena 
       if (rwflags & EVENT_READ)
 	{
 	  buf_printf (&out, "S%s",
-		      (s->rwflags & EVENT_READ) ? "R" : "r");
+		      (s->rwflags_debug & EVENT_READ) ? "R" : "r");
 #ifdef WIN32
 	  buf_printf (&out, "%s",
 		      overlapped_io_state_ascii (&s->reads));
@@ -1228,7 +1256,7 @@ socket_stat (const struct link_socket *s, unsigned int rwflags, struct gc_arena 
       if (rwflags & EVENT_WRITE)
 	{
 	  buf_printf (&out, "S%s",
-		      (s->rwflags & EVENT_WRITE) ? "W" : "w");
+		      (s->rwflags_debug & EVENT_WRITE) ? "W" : "w");
 #ifdef WIN32
 	  buf_printf (&out, "%s",
 		      overlapped_io_state_ascii (&s->writes));
@@ -1304,7 +1332,6 @@ stream_buf_get_next (struct stream_buf *sb, struct buffer *buf)
   *buf = sb->next;
 }
 
-
 bool
 stream_buf_read_setup_dowork (struct link_socket* sock)
 {
@@ -1375,6 +1402,23 @@ stream_buf_close (struct stream_buf* sb)
 }
 
 /*
+ * The listen event is a special event whose sole purpose is
+ * to tell us that there's a new incoming connection on a
+ * TCP socket, for use in server mode.
+ */
+event_t
+socket_listen_event_handle (struct link_socket *s)
+{
+#ifdef WIN32
+  if (!tcp_connect_event_defined (&s->listen_handle))
+    init_tcp_connect_event (&s->listen_handle, s->sd);
+  return &s->listen_handle;
+#else
+  return s->sd;
+#endif
+}
+
+/*
  * Format IP addresses in ascii
  */
 
@@ -1409,15 +1453,15 @@ print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* sep
  * to an ascii dotted quad.
  */
 const char *
-print_in_addr_t (in_addr_t addr, bool empty_if_undef, struct gc_arena *gc)
+print_in_addr_t (in_addr_t addr, unsigned int flags, struct gc_arena *gc)
 {
   struct in_addr ia;
   struct buffer out = alloc_buf_gc (64, gc);
 
-  if (addr || !empty_if_undef)
+  if (addr || (flags & IA_EMPTY_IF_UNDEF))
     {
       CLEAR (ia);
-      ia.s_addr = htonl (addr);
+      ia.s_addr = (flags & IA_NET_ORDER) ? addr : htonl (addr);
 
       mutex_lock_static (L_INET_NTOA);
       buf_printf (&out, "%s", inet_ntoa (ia));
@@ -1924,3 +1968,40 @@ socket_finalize (
 }
 
 #endif /* WIN32 */
+
+/*
+ * Socket event notification
+ */
+
+unsigned int
+socket_set (struct link_socket *s,
+	    struct event_set *es,
+	    unsigned int rwflags,
+	    void *arg,
+	    unsigned int *persistent)
+{
+  if (s)
+    {
+      if ((rwflags & EVENT_READ) && !stream_buf_read_setup (s))
+	{
+	  ASSERT (!persistent);
+	  rwflags &= ~EVENT_READ;
+	}
+      
+#ifdef WIN32
+      if (rwflags & EVENT_READ)
+	socket_recv_queue (s, 0);
+#endif
+
+      /* if persistent is defined, call event_ctl only if rwflags has changed since last call */
+      if (!persistent || *persistent != rwflags)
+	{
+	  event_ctl (es, socket_event_handle (s), rwflags, arg);
+	  if (persistent)
+	    *persistent = rwflags;
+	}
+
+      s->rwflags_debug = rwflags;
+    }
+  return rwflags;
+}

@@ -138,10 +138,12 @@ static const char usage_message[] =
   "--route-up cmd  : Execute shell cmd after routes are added.\n"
   "--route-noexec  : Don't add routes automatically.  Instead pass routes to\n"
   "                  --route-up script using environmental variables.\n"
-  "--redirect-gateway ['local']: (Experimental) Automatically execute routing\n"
+  "--redirect-gateway [flags]: (Experimental) Automatically execute routing\n"
   "                  commands to redirect all outgoing IP traffic through the\n"
   "                  VPN.  Add 'local' flag if both OpenVPN servers are directly\n"
-  "                  connected via a common subnet, such as with wireless.\n"
+  "                  connected via a common subnet, such as with WiFi.\n"
+  "                  Add 'def1' flag to set default route using using 0.0.0.0/1\n"
+  "                  and 128.0.0.0/1 rather than 0.0.0.0/0.\n"
   "--setenv name value : Set a custom environmental variable to pass to script.\n"
   "--shaper n      : Restrict output to peer to n bytes per second.\n"
   "--inactive n    : Exit after n seconds of inactivity on tun/tap device.\n"
@@ -239,8 +241,8 @@ static const char usage_message[] =
   "                  execution.  Peer must specify --pull in its config file.\n"
   "--push-reset    : Don't inherit global push list for specific\n"
   "                  client instance.\n"
-  "--ifconfig-pool start-IP end-IP : Set aside a pool of subnets to be\n"
-  "                  dynamically allocated to connecting clients.\n"
+  "--ifconfig-pool start-IP end-IP [netmask] : Set aside a pool of subnets\n"
+  "                  to be dynamically allocated to connecting clients.\n"
   "--ifconfig-push local remote-netmask : Push an ifconfig option to remote,\n"
   "                  overrides --ifconfig-pool dynamic allocation.\n"
   "                  Must be associated with a specific client instance.\n"
@@ -257,8 +259,9 @@ static const char usage_message[] =
   "--hash-size r v : Set the size of the real address hash table to r and the\n"
   "                  virtual address table to v.\n"
   "--bcast-buffers n : Allocate n broadcast buffers.\n"
-  "--connect-freq n s : Allow a maximum of n new connections per s seconds.\n"
   "--learn-address cmd : Run script cmd to validate client virtual addresses.\n"
+  "--connect-freq n s : Allow a maximum of n new connections per s seconds.\n"
+  "--max-clients n : Allow a maximum of n simultaneously connected clients.\n"
   "\n"
   "Client options (when connecting to a multi-client server):\n"
   "--pull          : Accept certain config file options from the peer as if they\n"
@@ -288,9 +291,10 @@ static const char usage_message[] =
 #endif
   "--engine        : Enable OpenSSL hardware crypto engine functionality.\n"
   "--no-replay     : Disable replay protection.\n"
-  "--replay-window n [t] : Use a replay protection sliding window of size n\n"
-  "                        and a time window of t seconds.\n"
-  "                        Default n=%d t=%d\n"
+  "--mute-replay-warnings : Silence the output of replay warnings to log file.\n"
+  "--replay-window n [t]  : Use a replay protection sliding window of size n\n"
+  "                         and a time window of t seconds.\n"
+  "                         Default n=%d t=%d\n"
   "--no-iv         : Disable cipher IV -- only allowed with CBC mode ciphers.\n"
   "--replay-persist file : Persist replay-protection state across sessions\n"
   "                  using file.\n"
@@ -312,6 +316,8 @@ static const char usage_message[] =
   "--cert file     : Local certificate in .pem format -- must be signed\n"
   "                  by a Certificate Authority in --ca file.\n"
   "--key file      : Local private key in .pem format.\n"
+  "--pkcs12 file   : PKCS#12 file containing local private key, local certificate\n"
+  "                  and root CA certificate.\n" 
   "--tls-cipher l  : A list l of allowable TLS ciphers separated by : (optional).\n"
   "                : Use --show-tls to see a list of supported TLS ciphers.\n"
   "--tls-timeout n : Packet retransmit timeout on TLS control channel\n"
@@ -350,7 +356,6 @@ static const char usage_message[] =
 #ifdef WIN32
   "\n"
   "Windows Specific:\n"
-  "--show-adapters : Show all TAP-Win32 adapters.\n"
   "--ip-win32 method : When using --ifconfig on Windows, set TAP-Win32 adapter\n"
   "                    IP address using method = manual, netsh, ipapi, or\n"
   "                    dynamic (default = ipapi).\n"
@@ -375,15 +380,23 @@ static const char usage_message[] =
   "                    NBT type    : Set NetBIOS over TCP/IP Node type\n"
   "                                  1: B, 2: P, 4: M, 8: H\n"
   "                    NBS id      : Set NetBIOS scope ID\n"
+  "--dhcp-renew    : Ask Windows to renew the TAP adapter lease on startup.\n"
+  "--dhcp-release  : Ask Windows to release the TAP adapter lease on shutdown.\n"
   "--tap-sleep n   : Sleep for n seconds after TAP adapter open before\n"
   "                  attempting to set adapter properties.\n"
-  "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n" 
   "--pause-exit         : When run from a console window, pause before exiting.\n"
   "--service ex [0|1]   : For use when OpenVPN is being instantiated by a\n"
   "                       service, and should not be used directly by end-users.\n"
   "                       ex is the name of an event object which, when\n"
   "                       signaled, will cause OpenVPN to exit.  A second\n"
   "                       optional parameter controls the initial state of ex.\n"
+  "--show-net-up   : Show OpenVPN's view of routing table and net adapter list\n"
+  "                  after TAP adapter is up and routes have been added.\n"
+  "Windows Standalone Options:\n"
+  "\n"
+  "--show-adapters : Show all TAP-Win32 adapters.\n"
+  "--show-net      : Show OpenVPN's view of routing table and net adapter list.\n"
+  "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n"
 #endif
   "\n"
   "Generate a random key (only for non-TLS static key encryption mode):\n"
@@ -426,8 +439,10 @@ init_options (struct options *o)
   o->mtu_discover_type = -1;
   o->occ = true;
   o->mssfix = MSSFIX_DEFAULT;
+#ifndef WIN32
   o->rcvbuf = 65536;
   o->sndbuf = 65536;
+#endif
 #ifdef USE_LZO
   o->comp_lzo_adaptive = true;
 #endif
@@ -446,6 +461,7 @@ init_options (struct options *o)
   o->real_hash_size = 256;
   o->virtual_hash_size = 256;
   o->n_bcast_buf = 256;
+  o->max_clients = 1024;
 #endif
 #ifdef USE_CRYPTO
   o->ciphername = "BF-CBC";
@@ -474,11 +490,11 @@ uninit_options (struct options *o)
 }
 
 #define SHOW_PARM(name, value, format) msg(D_SHOW_PARMS, "  " #name " = " format, (value))
-#define SHOW_STR(var)  SHOW_PARM(var, (o->var ? o->var : "[UNDEF]"), "'%s'")
-#define SHOW_INT(var)  SHOW_PARM(var, o->var, "%d")
-#define SHOW_UINT(var)  SHOW_PARM(var, o->var, "%u")
+#define SHOW_STR(var)       SHOW_PARM(var, (o->var ? o->var : "[UNDEF]"), "'%s'")
+#define SHOW_INT(var)       SHOW_PARM(var, o->var, "%d")
+#define SHOW_UINT(var)      SHOW_PARM(var, o->var, "%u")
 #define SHOW_UNSIGNED(var)  SHOW_PARM(var, o->var, "0x%08x")
-#define SHOW_BOOL(var) SHOW_PARM(var, (o->var ? "ENABLED" : "DISABLED"), "%s");
+#define SHOW_BOOL(var)      SHOW_PARM(var, (o->var ? "ENABLED" : "DISABLED"), "%s");
 
 void
 setenv_settings (const struct options *o)
@@ -487,22 +503,39 @@ setenv_settings (const struct options *o)
   setenv_str ("proto", proto2ascii (o->proto, false));
   setenv_str ("local", o->local);
   setenv_int ("local_port", o->local_port);
-#if 0 // JYFIXME -- set remote and remote_port environmental variables
-  setenv_str ("remote", o->remote);
-  setenv_int ("remote_port", o->remote_port);
-#endif
+
+  if (o->remote_list)
+    {
+      int i;
+
+      for (i = 0; i < o->remote_list->len; ++i)
+	{
+	  char remote_string[64];
+	  char remote_port_string[64];
+
+	  openvpn_snprintf (remote_string, sizeof (remote_string), "remote_%d", i+1);
+	  openvpn_snprintf (remote_port_string, sizeof (remote_port_string), "remote_port_%d", i+1);
+
+	  setenv_str (remote_string,      o->remote_list->array[i].hostname);
+	  setenv_int (remote_port_string, o->remote_list->array[i].port);
+	}
+    }
 }
 
 static in_addr_t
-get_ip_addr (const char *ip_string)
+get_ip_addr (const char *ip_string, int msglevel, bool *error)
 {
-  return getaddr (GETADDR_FATAL
-		  | GETADDR_HOST_ORDER
-		  | GETADDR_FATAL_ON_SIGNAL,
-		  ip_string,
-		  0,
-		  NULL,
-		  NULL);
+  unsigned int flags = GETADDR_HOST_ORDER;
+  bool succeeded = false;
+  in_addr_t ret;
+
+  if (msglevel & M_FATAL)
+    flags |= GETADDR_FATAL;
+
+  ret = getaddr (flags, ip_string, 0, &succeeded, NULL);
+  if (!succeeded && error)
+    *error = true;
+  return ret;
 }
 
 static char *
@@ -545,7 +578,7 @@ show_dhcp_option_addrs (const char *name, const in_addr_t *array, int len)
       msg (D_SHOW_PARMS, "  %s[%d] = %s",
 	   name,
 	   i,
-	   print_in_addr_t (array[i], false, &gc));
+	   print_in_addr_t (array[i], 0, &gc));
     }
   gc_free (&gc);
 }
@@ -559,6 +592,8 @@ show_tuntap_options (const struct tuntap_options *o)
   SHOW_INT (dhcp_lease_time);
   SHOW_INT (tap_sleep);
   SHOW_BOOL (dhcp_options);
+  SHOW_BOOL (dhcp_renew);
+  SHOW_BOOL (dhcp_release);
   SHOW_STR (domain);
   SHOW_STR (netbios_scope);
   SHOW_INT (netbios_node_type);
@@ -581,7 +616,10 @@ dhcp_option_address_parse (const char *name, const char *parm, in_addr_t *array,
     }
   else
     {
-      array[(*len)++] = get_ip_addr (parm);
+      bool error = false;
+      const in_addr_t addr = get_ip_addr (parm, msglevel, &error);
+      if (!error)
+	array[(*len)++] = addr;
     }
 }
 
@@ -600,8 +638,8 @@ show_p2mp_parms (const struct options *o)
     }
   SHOW_BOOL (pull);
   SHOW_BOOL (ifconfig_pool_defined);
-  msg (D_SHOW_PARMS, "  ifconfig_pool_start = %s", print_in_addr_t (o->ifconfig_pool_start, false, &gc));
-  msg (D_SHOW_PARMS, "  ifconfig_pool_end = %s", print_in_addr_t (o->ifconfig_pool_end, false, &gc));
+  msg (D_SHOW_PARMS, "  ifconfig_pool_start = %s", print_in_addr_t (o->ifconfig_pool_start, 0, &gc));
+  msg (D_SHOW_PARMS, "  ifconfig_pool_end = %s", print_in_addr_t (o->ifconfig_pool_end, 0, &gc));
   SHOW_INT (n_bcast_buf);
   SHOW_INT (real_hash_size);
   SHOW_INT (virtual_hash_size);
@@ -611,12 +649,13 @@ show_p2mp_parms (const struct options *o)
   SHOW_STR (client_config_dir);
   SHOW_STR (tmp_dir);
   SHOW_BOOL (push_ifconfig_defined);
-  msg (D_SHOW_PARMS, "  push_ifconfig_local = %s", print_in_addr_t (o->push_ifconfig_local, false, &gc));
-  msg (D_SHOW_PARMS, "  push_ifconfig_remote_netmask = %s", print_in_addr_t (o->push_ifconfig_remote_netmask, false, &gc));
+  msg (D_SHOW_PARMS, "  push_ifconfig_local = %s", print_in_addr_t (o->push_ifconfig_local, 0, &gc));
+  msg (D_SHOW_PARMS, "  push_ifconfig_remote_netmask = %s", print_in_addr_t (o->push_ifconfig_remote_netmask, 0, &gc));
   SHOW_BOOL (enable_c2c);
   SHOW_BOOL (duplicate_cn);
   SHOW_INT (cf_max);
   SHOW_INT (cf_per);
+  SHOW_INT (max_clients);
   gc_free (&gc);
 }
 
@@ -637,7 +676,7 @@ option_iroute (struct options *o,
       const in_addr_t netmask = getaddr (GETADDR_HOST_ORDER, netmask_str, 0, NULL, NULL);
       if (!netmask_to_netbits (ir->network, netmask, &ir->netbits))
 	{
-	  msg (msglevel, "Options Error: in --iroute %s %s : Bad network/subnet specification",
+	  msg (msglevel, "Options error: in --iroute %s %s : Bad network/subnet specification",
 	       network_str,
 	       netmask_str);
 	  return;
@@ -824,6 +863,7 @@ show_settings (const struct options *o)
   SHOW_INT (keysize);
   SHOW_BOOL (engine);
   SHOW_BOOL (replay);
+  SHOW_BOOL (mute_replay_warnings);
   SHOW_INT (replay_window);
   SHOW_INT (replay_time);
   SHOW_STR (packet_id_file);
@@ -838,6 +878,7 @@ show_settings (const struct options *o)
   SHOW_STR (dh_file);
   SHOW_STR (cert_file);
   SHOW_STR (priv_key_file);
+  SHOW_STR (pkcs12_file);
   SHOW_STR (cipher_list);
   SHOW_STR (tls_verify);
   SHOW_STR (tls_remote);
@@ -863,6 +904,7 @@ show_settings (const struct options *o)
 #endif
 
 #ifdef WIN32
+  SHOW_BOOL (show_net_up);
   show_tuntap_options (&o->tuntap_options);
 #endif
 }
@@ -1030,7 +1072,7 @@ options_postprocess (struct options *options, bool first_time)
 	  && !options->route_delay_defined)
 	{
 	  options->route_delay_defined = true;
-	  options->route_delay = 10;
+	  options->route_delay = 0;
 	}
 
       if (options->ifconfig_noexec)
@@ -1084,22 +1126,20 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --tun-ipv6 cannot be used with --mode server");
       if (options->shaper)
 	msg (M_USAGE, "Options error: --shaper cannot be used with --mode server");
-
-#if 1 // JYFIXME -- should we allow --mode server --proto tcp?
       if (!(options->proto == PROTO_UDPv4 || options->proto == PROTO_TCPv4_SERVER))
 	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp or --proto tcp-server");
-#else
-      if (!(options->proto == PROTO_UDPv4))
-	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp");
-#endif
+      if (options->proto != PROTO_UDPv4 && (options->cf_max || options->cf_per))
+	msg (M_USAGE, "Options error: --connect-freq only works with --mode server --proto udp.  Try --max-clients instead.");
+      if (dev != DEV_TYPE_TAP && options->ifconfig_pool_netmask)
+	msg (M_USAGE, "Options error: The third parameter to --ifconfig-pool (netmask) is only valid in --dev tap mode");
 
 #ifdef WIN32
       /*
-       * We need to treat --route-delay as --tap-sleep because
+       * We need to explicitly set --tap-sleep because
        * we do not schedule event timers in the top-level context.
        */
       options->route_delay_defined = false;
-      options->tuntap_options.tap_sleep = options->route_delay;
+      options->tuntap_options.tap_sleep = 10;
 #endif
 
     }
@@ -1160,9 +1200,21 @@ options_postprocess (struct options *options, bool first_time)
     }
   if (options->tls_server || options->tls_client)
     {
-      notnull (options->ca_file, "CA file (--ca)");
-      notnull (options->cert_file, "certificate file (--cert)");
-      notnull (options->priv_key_file, "private key file (--key)");
+      if (options->pkcs12_file)
+        {
+          if (options->ca_file) 
+	    msg(M_USAGE, "Options error: Parameter --ca can not be used when --pkcs12 is also specified.");
+          if (options->cert_file) 
+	    msg(M_USAGE, "Options error: Parameter --cert can not be used when --pkcs12 is also specified.");
+          if (options->priv_key_file) 
+	    msg(M_USAGE, "Options error: Parameter --key can not be used when --pkcs12 is also specified.");
+        }
+      else
+        {
+          notnull (options->ca_file, "CA file (--ca) or PKCS#12 file (--pkcs12)");
+          notnull (options->cert_file, "certificate file (--cert) or PKCS#12 file (--pkcs12)");
+          notnull (options->priv_key_file, "private key file (--key) or PKCS#12 file (--pkcs12)");
+	}
       if (first_time && options->askpass)
 	pem_password_callback (NULL, 0, 0, NULL);
     }
@@ -1181,6 +1233,7 @@ options_postprocess (struct options *options, bool first_time)
       MUST_BE_UNDEF (dh_file);
       MUST_BE_UNDEF (cert_file);
       MUST_BE_UNDEF (priv_key_file);
+      MUST_BE_UNDEF (pkcs12_file);
       MUST_BE_UNDEF (cipher_list);
       MUST_BE_UNDEF (tls_verify);
       MUST_BE_UNDEF (tls_remote);
@@ -1671,6 +1724,12 @@ parse_line (char *line, char *p[], int n, const char *file, int line_num, int ms
 	      parm_len = 0;
 	      ++ret;
 	    }
+
+	  if (backslash && out)
+	    {
+	      if (!(out == '\\' || out == '\"' || space (out)))
+		msg (msglevel, "Bad backslash ('\\') usage in %s:%d: remember that backslashes are treated as shell-escapes and if you need to pass backslash characters as part of a Windows filename, you should use double backslashes such as \"c:\\\\openvpn\\\\static.key\"", file, line_num);
+	    }
 	  backslash = false;
 	}
 
@@ -1779,31 +1838,43 @@ parse_argv (struct options* options,
   if (argc <= 1)
     usage ();
 
-  /* parse command line */
-  for (i = 1; i < argc; ++i)
+  /* config filename specified only? */
+  if (argc == 2 && strncmp (argv[1], "--", 2))
     {
       char *p[MAX_PARMS];
       CLEAR (p);
-      p[0] = argv[i];
-      if (strncmp(p[0], "--", 2))
+      p[0] = "config";
+      p[1] = argv[1];
+      add_option (options, 0, p, NULL, 0, 0, msglevel, permission_mask, option_types_found);
+    }
+  else
+    {
+      /* parse command line */
+      for (i = 1; i < argc; ++i)
 	{
-	  msg (msglevel, "I'm trying to parse \"%s\" as an --option parameter but I don't see a leading '--'", p[0]);
-	}
-      else
-	p[0] += 2;
-
-      for (j = 1; j < MAX_PARMS; ++j)
-	{
-	  if (i + j < argc)
+	  char *p[MAX_PARMS];
+	  CLEAR (p);
+	  p[0] = argv[i];
+	  if (strncmp(p[0], "--", 2))
 	    {
-	      char *arg = argv[i + j];
-	      if (strncmp (arg, "--", 2))
-		p[j] = arg;
-	      else
-		break;
+	      msg (msglevel, "I'm trying to parse \"%s\" as an --option parameter but I don't see a leading '--'", p[0]);
 	    }
+	  else
+	    p[0] += 2;
+
+	  for (j = 1; j < MAX_PARMS; ++j)
+	    {
+	      if (i + j < argc)
+		{
+		  char *arg = argv[i + j];
+		  if (strncmp (arg, "--", 2))
+		    p[j] = arg;
+		  else
+		    break;
+		}
+	    }
+	  i = add_option (options, i, p, NULL, 0, 0, msglevel, permission_mask, option_types_found);
 	}
-      i = add_option (options, i, p, NULL, 0, 0, msglevel, permission_mask, option_types_found);
     }
 }
 
@@ -1988,14 +2059,14 @@ add_option (struct options *options,
 	ALLOC_OBJ_CLEAR_GC (options->remote_list, struct remote_list, &options->gc);
       l = options->remote_list;
       if (l->len >= REMOTE_LIST_SIZE)
-	msg (msglevel, "Options Error: Maximum number of --remote options (%d) exceeded", REMOTE_LIST_SIZE);
+	msg (msglevel, "Options error: Maximum number of --remote options (%d) exceeded", REMOTE_LIST_SIZE);
       e.hostname = p[1];
       if (p[2])
 	{
 	  ++i;
 	  e.port = atoi (p[2]);
 	  if (e.port < 1 || e.port > 65535)
-	    msg (msglevel, "Options Error: port number associated with host %s is out of range", e.hostname);
+	    msg (msglevel, "Options error: port number associated with host %s is out of range", e.hostname);
 	}
       else
 	e.port = -1;
@@ -2513,16 +2584,19 @@ add_option (struct options *options,
     }
   else if (streq (p[0], "redirect-gateway"))
     {
+      int j;
       VERIFY_PERMISSION (OPT_P_ROUTE);
       rol_check_alloc (options);
       options->routes->redirect_default_gateway = true;
-      if (p[1])
+      for (j = 1; j < MAX_PARMS && p[j] != NULL; ++j)
 	{
 	  ++i;
-	  if (streq (p[1], "local"))
+	  if (streq (p[j], "local"))
 	    options->routes->redirect_local = true;
+	  else if (streq (p[j], "def1"))
+	    options->routes->redirect_def1 = true;
 	  else
-	    msg (msglevel, "--redirect-gateway currently supports only the 'local' flag");
+	    msg (msglevel, "Options error: unknown --redirect-gateway flag: %s", p[j]);
 	}
     }
   else if (streq (p[0], "setenv") && p[1] && p[2])
@@ -2561,11 +2635,23 @@ add_option (struct options *options,
     }
   else if (streq (p[0], "ifconfig-pool") && p[1] && p[2])
     {
+      const int lev = M_WARN;
+      bool error = false;
       i += 2;
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->ifconfig_pool_defined = true;
-      options->ifconfig_pool_start = get_ip_addr (p[1]);
-      options->ifconfig_pool_end = get_ip_addr (p[2]);
+      options->ifconfig_pool_start = get_ip_addr (p[1], lev, &error);
+      options->ifconfig_pool_end = get_ip_addr (p[2], lev, &error);
+      if (p[3])
+	{
+	  ++i;
+	  options->ifconfig_pool_netmask = get_ip_addr (p[3], lev, &error);
+	}
+      if (error)
+	{
+	  msg (msglevel, "Options error: error parsing --ifconfig-pool parameters");
+	  goto err;
+	}
     }
   else if (streq (p[0], "hash-size") && p[1] && p[2])
     {
@@ -2588,6 +2674,17 @@ add_option (struct options *options,
       if (options->cf_max < 0 || options->cf_per < 0)
 	{
 	  msg (msglevel, "Options error: --connect-freq parms must be > 0");
+	  goto err;
+	}
+    }
+  else if (streq (p[0], "max-clients") && p[1])
+    {
+      i += 1;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->max_clients = atoi (p[1]);
+      if (options->max_clients < 0)
+	{
+	  msg (msglevel, "Options error: --max-clients must be at least 1");
 	  goto err;
 	}
     }
@@ -2627,7 +2724,7 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->n_bcast_buf = atoi (p[1]);
       if (options->n_bcast_buf < 1)
-	msg (msglevel, "Options Error: --bcast-buffers parameter must be > 0");
+	msg (msglevel, "Options error: --bcast-buffers parameter must be > 0");
     }
   else if (streq (p[0], "client-to-client"))
     {
@@ -2782,8 +2879,20 @@ add_option (struct options *options,
   else if (streq (p[0], "show-adapters"))
     {
       VERIFY_PERMISSION (OPT_P_GENERAL);
-      show_tap_win32_adapters ();
-      openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
+      show_tap_win32_adapters (M_INFO|M_NOPREFIX, M_WARN|M_NOPREFIX);
+      openvpn_exit (OPENVPN_EXIT_STATUS_GOOD); /* exit point */
+    }
+  else if (streq (p[0], "show-net"))
+    {
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      show_routes (M_INFO|M_NOPREFIX);
+      show_adapters (M_INFO|M_NOPREFIX);
+      openvpn_exit (OPENVPN_EXIT_STATUS_GOOD); /* exit point */
+    }
+  else if (streq (p[0], "show-net-up"))
+    {
+      VERIFY_PERMISSION (OPT_P_UP);
+      options->show_net_up = true;
     }
   else if (streq (p[0], "tap-sleep") && p[1])
     {
@@ -2797,6 +2906,16 @@ add_option (struct options *options,
 	  goto err;
 	}
       options->tuntap_options.tap_sleep = s;
+    }
+  else if (streq (p[0], "dhcp-renew"))
+    {
+      VERIFY_PERMISSION (OPT_P_IPWIN32);
+      options->tuntap_options.dhcp_renew = true;
+    }
+  else if (streq (p[0], "dhcp-release"))
+    {
+      VERIFY_PERMISSION (OPT_P_IPWIN32);
+      options->tuntap_options.dhcp_release = true;
     }
   else if (streq (p[0], "show-valid-subnets"))
     {
@@ -2951,6 +3070,11 @@ add_option (struct options *options,
 	  goto err;
 	}
     }
+  else if (streq (p[0], "mute-replay-warnings"))
+    {
+      VERIFY_PERMISSION (OPT_P_CRYPTO);
+      options->mute_replay_warnings = true;
+    }
   else if (streq (p[0], "no-iv"))
     {
       VERIFY_PERMISSION (OPT_P_CRYPTO);
@@ -3024,6 +3148,12 @@ add_option (struct options *options,
       ++i;
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->priv_key_file = p[1];
+    }
+  else if (streq (p[0], "pkcs12") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->pkcs12_file = p[1];
     }
   else if (streq (p[0], "askpass"))
     {

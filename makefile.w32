@@ -16,10 +16,13 @@
 # Change these to point to your OpenSSL and LZO top-level
 # directories.
 
-# To build openssl-0.9.7c, remember to edit ms\mw.bat
+# To build openssl-0.9.7d, remember to edit ms\mw.bat
 # adding '--win32' flag to make command:
 #
-#   make --win32 -f ms/mingw32a.mak
+#   make --win32 -f ms/mingw32.mak
+#
+# useful gcc flags:
+#  -fno-inline : turn off inlining
 
 OPENSSL = /c/src/openssl-0.9.7d
 
@@ -62,7 +65,9 @@ HEADERS = \
 	misc.h \
 	mroute.h \
 	mss.h \
+	mtcp.h \
 	mtu.h \
+	mudp.h \
 	multi.h \
 	occ-inline.h \
 	occ.h \
@@ -70,6 +75,7 @@ HEADERS = \
 	options.h \
 	otime.h \
 	packet_id.h \
+	perf.h \
 	ping-inline.h \
 	ping.h \
 	pool.h \
@@ -108,13 +114,16 @@ OBJS =  buffer.o \
 	misc.o \
 	mroute.o \
 	mss.o \
+	mtcp.o \
 	mtu.o \
+	mudp.o \
 	multi.o \
 	occ.o \
         openvpn.o \
 	options.o \
 	otime.o \
 	packet_id.o \
+	perf.o \
 	ping.o \
         pool.o \
 	proxy.o \

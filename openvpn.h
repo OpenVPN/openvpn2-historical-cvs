@@ -42,6 +42,7 @@
 #include "socks.h"
 #include "sig.h"
 #include "misc.h"
+#include "mbuf.h"
 
 /*
  * Our global key schedules, packaged thusly
@@ -151,15 +152,9 @@ struct context_2
 # define TUN_READ      (1<<2)
 # define TUN_WRITE     (1<<3)
 # define ES_ERROR      (1<<4)
-# define ES_TIMEOUT    (1<<6)
+# define ES_TIMEOUT    (1<<5)
 
   unsigned int event_set_status;
-
-#if PASSTOS_CAPABILITY
-  /* used to get/set TOS. */
-  uint8_t ptos;
-  bool ptos_defined;
-#endif
 
   struct link_socket *link_socket;	 /* socket used for TCP/UDP connection to remote */
   bool link_socket_owned;
@@ -298,6 +293,7 @@ struct context_2
 
   /* route stuff */
   struct event_timeout route_wakeup;
+  struct event_timeout route_wakeup_expire;
 
   /* did we open tun/tap dev during this cycle? */
   bool did_open_tun;
@@ -329,7 +325,6 @@ struct context_2
   in_addr_t push_ifconfig_remote_netmask;
 
   struct event_timeout push_request_interval;
-
 #endif
 };
 
@@ -348,11 +343,11 @@ struct context
   //MUTEX_DEFINE (mutex);
 
   /* context modes */
-# define CM_P2P         0 /* standalone point-to-point session */
-# define CM_TOP         1 /* top level of a multi-client or point-to-multipoint server */
-# define CM_THREAD      2 /* clone of a CM_TOP context for one thread */
-# define CM_CHILD_UDP   3 /* child context of a CM_TOP or CM_THREAD */
-# define CM_CHILD_TCP   4 /* child context of a CM_TOP or CM_THREAD */
+# define CM_P2P            0 /* standalone point-to-point session or client */
+# define CM_TOP            1 /* top level of a multi-client or point-to-multipoint server */
+# define CM_TOP_CLONE      2 /* clone of a CM_TOP context for one thread */
+# define CM_CHILD_UDP      3 /* child context of a CM_TOP or CM_THREAD */
+# define CM_CHILD_TCP      4 /* child context of a CM_TOP or CM_THREAD */
   int mode;
 
   /* garbage collection for context scope

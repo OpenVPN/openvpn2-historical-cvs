@@ -26,6 +26,8 @@
 #ifndef SIG_H
 #define SIG_H
 
+#include "status.h"
+
 /*
  * Signal information, including signal code
  * and descriptive text.

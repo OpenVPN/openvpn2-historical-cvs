@@ -229,6 +229,7 @@ struct options
   bool ifconfig_pool_defined;
   in_addr_t ifconfig_pool_start;
   in_addr_t ifconfig_pool_end;
+  in_addr_t ifconfig_pool_netmask;
   int real_hash_size;
   int virtual_hash_size;
   const char *client_connect_script;
@@ -245,6 +246,7 @@ struct options
   bool duplicate_cn;
   int cf_max;
   int cf_per;
+  int max_clients;
 #endif
 
 #ifdef USE_CRYPTO
@@ -258,6 +260,7 @@ struct options
   int keysize;
   bool engine;
   bool replay;
+  bool mute_replay_warnings;
   int replay_window;
   int replay_time;
   const char *packet_id_file;
@@ -272,6 +275,7 @@ struct options
   const char *dh_file;
   const char *cert_file;
   const char *priv_key_file;
+  const char *pkcs12_file;
   const char *cipher_list;
   const char *tls_verify;
   const char *tls_remote;
@@ -309,6 +313,7 @@ struct options
 #ifdef WIN32
   const char *exit_event_name;
   bool exit_event_initial_state;
+  bool show_net_up;
 #endif
 };
 

@@ -109,7 +109,7 @@ check_tls_errors_dowork (struct context *c)
 {
   /* TLS errors are fatal in TCP mode */
   c->sig->signal_received = SIGUSR1;
-  msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
+  msg (D_STREAM_ERRORS, "Fatal decryption error (check_tls_errors_dowork), restarting");
   c->sig->signal_text = "tls-error";
 }
 #endif
@@ -236,12 +236,20 @@ send_control_channel_string (struct context *c, char *str)
 void
 check_add_routes_dowork (struct context *c)
 {
-  if (c->c1.route_list)
+  if (test_routes (c->c1.route_list)
+      || event_timeout_trigger (&c->c2.route_wakeup_expire, &c->c2.timeval, ETT_DEFAULT))
     {
       do_route (&c->options, c->c1.route_list);
       update_time ();
+      event_timeout_clear (&c->c2.route_wakeup);
+      event_timeout_clear (&c->c2.route_wakeup_expire);
     }
-  event_timeout_clear (&c->c2.route_wakeup);
+  else
+    {
+      msg (D_ROUTE, "Route: Waiting for TAP-Win32 interface to come up...");
+      if (c->c2.route_wakeup.n != 1)
+	event_timeout_init (&c->c2.route_wakeup, 1, now);
+    }
 }
 
 /*
@@ -290,11 +298,6 @@ check_fragment_dowork (struct context *c)
 	  /* encrypt a fragment for output to TCP/UDP port */
 	  ASSERT (fragment_ready_to_send (c->c2.fragment, &c->c2.buf, &c->c2.frame_fragment));
 	  encrypt_sign (c, false);
-	}
-      else
-	{
-	  /* output buffer is full */
-	  //tv_clear (&c->c2.timeval);
 	}
     }
 
@@ -501,6 +504,8 @@ read_incoming_link (struct context *c)
    */
   int status;
 
+  perf_push (PERF_READ_IN_LINK);
+
   ASSERT (!c->c2.to_tun.len);
 
   c->c2.buf = c->c2.buffers->read_link_buf;
@@ -521,6 +526,7 @@ read_incoming_link (struct context *c)
 	  msg (D_STREAM_ERRORS, "Connection reset, restarting [%d]", status);
 	}
       c->sig->signal_text = "connection-reset";
+      perf_pop ();
       return;
     }
 
@@ -529,6 +535,8 @@ read_incoming_link (struct context *c)
 
   /* Remove socks header if applicable */
   socks_postprocess_incoming_link (c);
+
+  perf_pop ();
 }
 
 void
@@ -537,6 +545,8 @@ process_incoming_link (struct context *c)
   struct gc_arena gc = gc_new ();
   bool decrypt_status;
   struct link_socket_info *lsi = get_link_socket_info (c);
+
+  perf_push (PERF_PROC_IN_LINK);
 
   if (c->c2.buf.len > 0)
     {
@@ -616,7 +626,7 @@ process_incoming_link (struct context *c)
 	{
 	  /* decryption errors are fatal in TCP mode */
 	  c->sig->signal_received = SIGUSR1;
-	  msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
+	  msg (D_STREAM_ERRORS, "Fatal decryption error (process_incoming_link), restarting");
 	  c->sig->signal_text = "decryption-error";
 	  goto done;
 	}
@@ -676,12 +686,15 @@ process_incoming_link (struct context *c)
       buf_reset (&c->c2.to_tun);
     }
  done:
+  perf_pop ();
   gc_free (&gc);
 }
 
 void
 read_incoming_tun (struct context *c)
 {
+  perf_push (PERF_READ_IN_TUN);
+
   /*
    * Setup for read() call on TUN/TAP device.
    */
@@ -702,17 +715,22 @@ read_incoming_tun (struct context *c)
       c->sig->signal_received = SIGTERM;
       c->sig->signal_text = "tun-stop";
       msg (M_INFO, "TUN/TAP interface has been stopped, exiting");
+      perf_pop ();
       return;		  
     }
 
   /* Check the status return from read() */
   check_status (c->c2.buf.len, "read from TUN/TAP", NULL, c->c1.tuntap);
+
+  perf_pop ();
 }
 
 void
 process_incoming_tun (struct context *c)
 {
   struct gc_arena gc = gc_new ();
+
+  perf_push (PERF_PROC_IN_TUN);
 
   if (c->c2.buf.len > 0)
     c->c2.tun_read_bytes += c->c2.buf.len;
@@ -734,44 +752,62 @@ process_incoming_tun (struct context *c)
        * The --passtos and --mssfix options require
        * us to examine the IPv4 header.
        */
-      if (c->options.mssfix
-#if PASSTOS_CAPABILITY
-	  || c->options.passtos
-#endif
-	  )
-	{
-	  struct buffer ipbuf = c->c2.buf;
-	  if (is_ipv4 (TUNNEL_TYPE (c->c1.tuntap), &ipbuf))
-	    {
-#if PASSTOS_CAPABILITY
-	      /* extract TOS from IP header */
-	      if (c->options.passtos)
-		{
-		  struct openvpn_iphdr *iph = 
-		    (struct openvpn_iphdr *) BPTR (&ipbuf);
-		  c->c2.ptos = iph->tos;
-		  c->c2.ptos_defined = true;
-		}
-#endif
-			  
-	      /* possibly alter the TCP MSS */
-	      if (c->options.mssfix)
-		mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&c->c2.frame)));
-	    }
-	}
+      process_ipv4_header (c, PIPV4_PASSTOS|PIPV4_MSSFIX, &c->c2.buf);
       encrypt_sign (c, true);
     }
   else
     {
       buf_reset (&c->c2.to_link);
     }
+  perf_pop ();
   gc_free (&gc);
+}
+
+void
+process_ipv4_header (struct context *c, unsigned int flags, struct buffer *buf)
+{
+  if (!c->options.mssfix)
+    flags &= ~PIPV4_MSSFIX;
+#if PASSTOS_CAPABILITY
+  if (!c->options.passtos)
+    flags &= ~PIPV4_PASSTOS;
+#endif
+
+  if (buf->len > 0)
+    {
+      /*
+       * The --passtos and --mssfix options require
+       * us to examine the IPv4 header.
+       */
+#if PASSTOS_CAPABILITY
+      if (flags & (PIPV4_PASSTOS|PIPV4_MSSFIX))
+#else
+      if (flags & PIPV4_MSSFIX)
+#endif
+	{
+	  struct buffer ipbuf = *buf;
+	  if (is_ipv4 (TUNNEL_TYPE (c->c1.tuntap), &ipbuf))
+	    {
+#if PASSTOS_CAPABILITY
+	      /* extract TOS from IP header */
+	      if (flags & PIPV4_PASSTOS)
+		link_socket_extract_tos (c->c2.link_socket, &ipbuf);
+#endif
+			  
+	      /* possibly alter the TCP MSS */
+	      if (flags & PIPV4_MSSFIX)
+		mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&c->c2.frame)));
+	    }
+	}
+    }
 }
 
 void
 process_outgoing_link (struct context *c)
 {
   struct gc_arena gc = gc_new ();
+
+  perf_push (PERF_PROC_OUT_LINK);
 
   if (c->c2.to_link.len > 0 && c->c2.to_link.len <= EXPANDED_SIZE (&c->c2.frame))
     {
@@ -802,8 +838,7 @@ process_outgoing_link (struct context *c)
 
 #if PASSTOS_CAPABILITY
 	  /* Set TOS */
-	  if (c->c2.ptos_defined)
-	    setsockopt (c->c2.link_socket->sd, IPPROTO_IP, IP_TOS, &c->c2.ptos, sizeof (c->c2.ptos));
+	  link_socket_set_tos (c->c2.link_socket);
 #endif
 
 	  /* Log packet send */
@@ -866,6 +901,7 @@ process_outgoing_link (struct context *c)
 
   buf_reset (&c->c2.to_link);
 
+  perf_pop ();
   gc_free (&gc);
 }
 
@@ -873,6 +909,8 @@ void
 process_outgoing_tun (struct context *c)
 {
   struct gc_arena gc = gc_new ();
+
+  perf_push (PERF_PROC_OUT_TUN);
 
   /*
    * Set up for write() call to TUN/TAP
@@ -884,18 +922,8 @@ process_outgoing_tun (struct context *c)
    * The --mssfix option requires
    * us to examine the IPv4 header.
    */
-  if (c->options.mssfix)
-    {
-      struct buffer ipbuf = c->c2.to_tun;
+  process_ipv4_header (c, PIPV4_MSSFIX, &c->c2.to_tun);
 
-      if (is_ipv4 (c->c1.tuntap->type, &ipbuf))
-	{
-	  /* possibly alter the TCP MSS */
-	  if (c->options.mssfix)
-	    mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&c->c2.frame)));
-	}
-    }
-	      
   if (c->c2.to_tun.len <= MAX_RW_SIZE_TUN (&c->c2.frame))
     {
       /*
@@ -954,6 +982,7 @@ process_outgoing_tun (struct context *c)
 
   buf_reset (&c->c2.to_tun);
 
+  perf_pop ();
   gc_free (&gc);
 }
 
@@ -970,10 +999,13 @@ pre_select (struct context *c)
   c->c2.timeval.tv_sec = BIG_TIMEOUT;
   c->c2.timeval.tv_usec = 0;
 
-#if defined(WIN32) && defined(TAP_WIN32_DEBUG)
-  c->c2.timeval.tv_sec = 1;
-  if (tuntap_defined (c->c1.tuntap) && check_debug_level (D_TAP_WIN32_DEBUG))
-    tun_show_debug (c->c1.tuntap);
+#if defined(WIN32)
+  if (check_debug_level (D_TAP_WIN32_DEBUG))
+    {
+      c->c2.timeval.tv_sec = 1;
+      if (tuntap_defined (c->c1.tuntap))
+	tun_show_debug (c->c1.tuntap);
+    }
 #endif
 
   /* check coarse timers? */
@@ -1010,7 +1042,7 @@ pre_select (struct context *c)
 
 void
 io_wait (struct context *c,
-	 unsigned int flags)
+	 const unsigned int flags)
 {
   unsigned int socket = 0;
   unsigned int tuntap = 0;
@@ -1030,7 +1062,8 @@ io_wait (struct context *c,
    * On win32 we use the keyboard or an event object as a source
    * of asynchronous signals.
    */
-  wait_signal (c->c2.event_set, (void*)&err_shift);
+  if (flags & IOW_WAIT_SIGNAL)
+    wait_signal (c->c2.event_set, (void*)&err_shift);
 
   /*
    * If outgoing data (for TCP/UDP port) pending, wait for ready-to-send
@@ -1072,15 +1105,9 @@ io_wait (struct context *c,
     }
   else if (!((flags & IOW_FRAG) && TO_LINK_FRAG (c)))
     {
-      if (flags & IOW_READ)
+      if (flags & IOW_READ_TUN)
 	tuntap |= EVENT_READ;
     }
-
-  /*
-   * outgoing bcast buffer waiting to be sent?
-   */
-  if (flags & IOW_MBUF)
-    socket |= EVENT_WRITE;
 
   /*
    * If outgoing data (for TUN/TAP device) pending, wait for ready-to-send status
@@ -1092,15 +1119,27 @@ io_wait (struct context *c,
     }
   else
     {
-      if (flags & IOW_READ)
+      if (flags & IOW_READ_LINK)
 	socket |= EVENT_READ;
     }
 
   /*
+   * outgoing bcast buffer waiting to be sent?
+   */
+  if (flags & IOW_MBUF)
+    socket |= EVENT_WRITE;
+
+  /*
+   * Force wait on TUN input, even if also waiting on TCP/UDP output
+   */
+  if (flags & IOW_READ_TUN_FORCE)
+    tuntap |= EVENT_READ;
+
+  /*
    * Configure event wait based on socket, tuntap flags.
    */
-  socket_set (c->c2.link_socket, c->c2.event_set, socket, (void*)&socket_shift);
-  tun_set (c->c1.tuntap, c->c2.event_set, tuntap, (void*)&tun_shift);
+  socket_set (c->c2.link_socket, c->c2.event_set, socket, (void*)&socket_shift, NULL);
+  tun_set (c->c1.tuntap, c->c2.event_set, tuntap, (void*)&tun_shift, NULL);
 
   /*
    * Possible scenarios:

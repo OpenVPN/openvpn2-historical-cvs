@@ -377,7 +377,11 @@ int
 openvpn_system (const char *command)
 {
 #ifdef HAVE_SYSTEM
-  return system (command);
+  int ret;
+  perf_push (PERF_SCRIPT);
+  ret = system (command);
+  perf_pop ();
+  return ret;
 #else
   msg (M_FATAL, "Sorry but I can't execute the shell command '%s' because this operating system doesn't appear to support the system() call", command);
   return -1; /* NOTREACHED */

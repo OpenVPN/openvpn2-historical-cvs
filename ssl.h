@@ -32,6 +32,7 @@
 #include <openssl/bio.h>
 #include <openssl/rand.h>
 #include <openssl/err.h>
+#include <openssl/pkcs12.h>
 
 #include "basic.h"
 #include "crypto.h"
@@ -295,8 +296,9 @@ struct tls_options
      passed over control channel */
   bool pass_config_info;
 
-  /* use 32 bit or 64 bit packet-id? */
-  bool packet_id_long_form;
+  /* struct crypto_option flags */
+  unsigned int crypto_flags_and;
+  unsigned int crypto_flags_or;
 
   int replay_window;                   /* --replay-window parm */
   int replay_time;                     /* --replay-window parm */
@@ -436,6 +438,7 @@ SSL_CTX *init_ssl (bool server,
 		   const char *ca_file,
 		   const char *dh_file,
 		   const char *cert_file,
+		   const char *pkcs12_file,
 		   const char *priv_key_file, const char *cipher_list);
 
 struct tls_multi *tls_multi_init (struct tls_options *tls_options);

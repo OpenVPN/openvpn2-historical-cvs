@@ -32,7 +32,15 @@
  * Debug level at and above where we
  * display time to microsecond resolution.
  */
-#define DEBUG_LEVEL_USEC_TIME  6
+#define DEBUG_LEVEL_USEC_TIME 4
+
+/*
+ * In non-server modes, delay n milliseconds after certain kinds
+ * of non-fatal network errors to avoid a barrage of errors.
+ *
+ * To disable all delays, set to 0.
+ */
+#define P2P_ERROR_DELAY_MS 0
 
 /*
  * Enable D_LOG_RW
@@ -58,6 +66,7 @@
 #define D_PUSH_ERRORS        LOGLEV(1, 10, M_NONFATAL)  /* show push/pull errors */
 #define D_IMPORT_ERRORS      LOGLEV(1, 11, M_NONFATAL)  /* show server import option errors */
 #define D_EVENT_ERRORS       LOGLEV(1, 12, M_NONFATAL)  /* show event.[ch] errors */
+#define D_REPLAY_ERRORS      LOGLEV(1, 13, M_NONFATAL)  /* show packet replay errors */
 
 #define D_HANDSHAKE          LOGLEV(2, 20, 0)        /* show data & control channel handshakes */
 #define D_MTU_INFO           LOGLEV(2, 21, 0)        /* show terse MTU info */
@@ -102,6 +111,8 @@
 #define D_COMP_LOW           LOGLEV(7, 70, M_DEBUG)  /* show adaptive compression state changes */
 #define D_REMOTE_LIST        LOGLEV(7, 70, M_DEBUG)  /* show --remote list */
 #define D_SETENV             LOGLEV(7, 70, M_DEBUG)  /* show environmental variable assignments */
+#define D_SHOW_NET           LOGLEV(7, 70, M_DEBUG)  /* show routing table and adapter list */
+#define D_ROUTE_DEBUG        LOGLEV(7, 70, M_DEBUG)  /* show verbose route.[ch] output */
 
 #define D_HANDSHAKE_VERBOSE  LOGLEV(8, 70, M_DEBUG)  /* show detailed description of each handshake */
 #define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* limited info from tls_session routines */
@@ -111,6 +122,7 @@
 #define D_REL_DEBUG          LOGLEV(8, 70, M_DEBUG)  /* show detailed info from reliable routines */
 #define D_EVENT_WAIT         LOGLEV(8, 70, M_DEBUG)  /* show detailed info from event waits */
 #define D_TUN_RW             LOGLEV(8, 70, M_DEBUG)  /* show TUN/TAP reads/writes */
+#define D_MULTI_TCP          LOGLEV(8, 70, M_DEBUG)  /* show debug info from mtcp.c */
 
 #define D_TLS_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show detailed info from TLS routines */
 #define D_CRYPTO_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show detailed info from crypto.c routines */

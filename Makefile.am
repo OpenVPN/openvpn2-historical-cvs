@@ -54,13 +54,16 @@ openvpn_SOURCES = \
 	misc.c misc.h \
 	mroute.c mroute.h \
 	mss.c mss.h \
+	mtcp.c mtcp.h \
 	mtu.c mtu.h \
+	mudp.c mudp.h \
 	multi.c multi.h \
 	occ.c occ.h occ-inline.h \
 	openvpn.c openvpn.h \
 	options.c options.h \
 	otime.c otime.h \
 	packet_id.c packet_id.h \
+	perf.c perf.h \
 	ping.c ping.h ping-inline.h \
 	pool.c pool.h \
 	proto.h \

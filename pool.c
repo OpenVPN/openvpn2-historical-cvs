@@ -132,7 +132,7 @@ ifconfig_pool_init (int type, in_addr_t start, in_addr_t end)
   ALLOC_ARRAY_CLEAR (pool->list, struct ifconfig_pool_entry, pool->size);
 
   msg (D_IFCONFIG_POOL, "IFCONFIG POOL: base=%s size=%d",
-       print_in_addr_t (pool->base, false, &gc),
+       print_in_addr_t (pool->base, 0, &gc),
        pool->size);
 
   gc_free (&gc);
@@ -226,8 +226,8 @@ ifconfig_pool_test (in_addr_t start, in_addr_t end)
       if (h < 0)
 	break;
       msg (M_INFO | M_NOPREFIX, "IFCONFIG_POOL TEST pass 1: l=%s r=%s cn=%s",
-	   print_in_addr_t (local, false, &gc),
-	   print_in_addr_t (remote, false, &gc),
+	   print_in_addr_t (local, 0, &gc),
+	   print_in_addr_t (remote, 0, &gc),
 	   buf);
       array[i] = h;
       
@@ -255,8 +255,8 @@ ifconfig_pool_test (in_addr_t start, in_addr_t end)
       if (h < 0)
 	break;
       msg (M_INFO | M_NOPREFIX, "IFCONFIG_POOL TEST pass 3: l=%s r=%s cn=%s",
-	   print_in_addr_t (local, false, &gc),
-	   print_in_addr_t (remote, false, &gc),
+	   print_in_addr_t (local, 0, &gc),
+	   print_in_addr_t (remote, 0, &gc),
 	   buf);
       array[i] = h;
       

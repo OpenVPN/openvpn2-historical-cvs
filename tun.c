@@ -171,7 +171,7 @@ ifconfig_sanity_check (bool tun, in_addr_t addr)
   if (tun)
     {
       if (looks_like_netmask)
-	msg (M_WARN, "WARNING: Since you are using --dev tun, the second argument to --ifconfig must be an IP address.  You are using something (%s) that looks more like a netmask.", print_in_addr_t (addr, false, &gc));
+	msg (M_WARN, "WARNING: Since you are using --dev tun, the second argument to --ifconfig must be an IP address.  You are using something (%s) that looks more like a netmask.", print_in_addr_t (addr, 0, &gc));
     }
   else /* tap */
     {
@@ -206,9 +206,9 @@ check_addr_clash (const char *name,
 #if 0
   msg (M_INFO, "CHECK_ADDR_CLASH type=%d public=%s local=%s, remote_netmask=%s",
        type,
-       print_in_addr_t (public, false, &gc),
-       print_in_addr_t (local, false, &gc),
-       print_in_addr_t (remote_netmask, false, &gc));
+       print_in_addr_t (public, 0, &gc),
+       print_in_addr_t (local, 0, &gc),
+       print_in_addr_t (remote_netmask, 0, &gc));
 #endif
 
   if (public)
@@ -224,17 +224,17 @@ check_addr_clash (const char *name,
 	    msg (M_WARN,
 		 "WARNING: --%s address [%s] conflicts with --ifconfig address pair [%s, %s]",
 		 name,
-		 print_in_addr_t (public, false, &gc),
-		 print_in_addr_t (local, false, &gc),
-		 print_in_addr_t (remote_netmask, false, &gc));
+		 print_in_addr_t (public, 0, &gc),
+		 print_in_addr_t (local, 0, &gc),
+		 print_in_addr_t (remote_netmask, 0, &gc));
 
 	  if (public_net == local_net || public_net == remote_net)
 	    msg (M_WARN,
 		 "WARNING: potential conflict between --%s address [%s] and --ifconfig address pair [%s, %s] -- this is a warning only that is triggered when local/remote addresses exist within the same /24 subnet as --ifconfig endpoints",
 		 name,
-		 print_in_addr_t (public, false, &gc),
-		 print_in_addr_t (local, false, &gc),
-		 print_in_addr_t (remote_netmask, false, &gc));
+		 print_in_addr_t (public, 0, &gc),
+		 print_in_addr_t (local, 0, &gc),
+		 print_in_addr_t (remote_netmask, 0, &gc));
 	}
       else if (type == DEV_TYPE_TAP)
 	{
@@ -244,9 +244,9 @@ check_addr_clash (const char *name,
 	    msg (M_WARN,
 		 "WARNING: --%s address [%s] conflicts with --ifconfig subnet [%s, %s] -- local and remote addresses cannot be inside of the --ifconfig subnet",
 		 name,
-		 print_in_addr_t (public, false, &gc),
-		 print_in_addr_t (local, false, &gc),
-		 print_in_addr_t (remote_netmask, false, &gc));
+		 print_in_addr_t (public, 0, &gc),
+		 print_in_addr_t (local, 0, &gc),
+		 print_in_addr_t (remote_netmask, 0, &gc));
 	}
     }
   gc_free (&gc);
@@ -277,21 +277,21 @@ ifconfig_options_string (const struct tuntap* tt, bool remote, bool disable, str
 	  const char *l, *r;
 	  if (remote)
 	    {
-	      r = print_in_addr_t (tt->local, false, gc);
-	      l = print_in_addr_t (tt->remote_netmask, false, gc);
+	      r = print_in_addr_t (tt->local, 0, gc);
+	      l = print_in_addr_t (tt->remote_netmask, 0, gc);
 	    }
 	  else
 	    {
-	      l = print_in_addr_t (tt->local, false, gc);
-	      r = print_in_addr_t (tt->remote_netmask, false, gc);
+	      l = print_in_addr_t (tt->local, 0, gc);
+	      r = print_in_addr_t (tt->remote_netmask, 0, gc);
 	    }
 	  buf_printf (&out, "%s %s", r, l);
 	}
       else if (tt->type == DEV_TYPE_TAP)
 	{
 	  buf_printf (&out, "%s %s",
-		      print_in_addr_t (tt->local & tt->remote_netmask, false, gc),
-		      print_in_addr_t (tt->remote_netmask, false, gc));
+		      print_in_addr_t (tt->local & tt->remote_netmask, 0, gc),
+		      print_in_addr_t (tt->remote_netmask, 0, gc));
 	}
       else
 	buf_printf (&out, "[undef]");
@@ -311,7 +311,7 @@ tun_stat (const struct tuntap *tt, unsigned int rwflags, struct gc_arena *gc)
       if (rwflags & EVENT_READ)
 	{
 	  buf_printf (&out, "T%s",
-		      (tt->rwflags & EVENT_READ) ? "R" : "r");
+		      (tt->rwflags_debug & EVENT_READ) ? "R" : "r");
 #ifdef WIN32
 	  buf_printf (&out, "%s",
 		      overlapped_io_state_ascii (&tt->reads));
@@ -320,7 +320,7 @@ tun_stat (const struct tuntap *tt, unsigned int rwflags, struct gc_arena *gc)
       if (rwflags & EVENT_WRITE)
 	{
 	  buf_printf (&out, "T%s",
-		      (tt->rwflags & EVENT_WRITE) ? "W" : "w");
+		      (tt->rwflags_debug & EVENT_WRITE) ? "W" : "w");
 #ifdef WIN32
 	  buf_printf (&out, "%s",
 		      overlapped_io_state_ascii (&tt->writes));
@@ -419,8 +419,8 @@ init_tun (const char *dev,       /* --dev option */
       /*
        * Set ifconfig parameters
        */
-      ifconfig_local = print_in_addr_t (tt->local, false, &gc);
-      ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, false, &gc);
+      ifconfig_local = print_in_addr_t (tt->local, 0, &gc);
+      ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, 0, &gc);
 
       /*
        * If TAP-style interface, generate broadcast address.
@@ -428,7 +428,7 @@ init_tun (const char *dev,       /* --dev option */
       if (!tun)
 	{
 	  tt->broadcast = generate_ifconfig_broadcast_addr (tt->local, tt->remote_netmask);
-	  ifconfig_broadcast = print_in_addr_t (tt->broadcast, false, &gc);
+	  ifconfig_broadcast = print_in_addr_t (tt->broadcast, 0, &gc);
 	}
 
       /*
@@ -465,6 +465,7 @@ init_tun_post (struct tuntap *tt,
   overlapped_io_init (&tt->writes, frame, TRUE, true);
   tt->rw_handle.read = tt->reads.overlapped.hEvent;
   tt->rw_handle.write = tt->writes.overlapped.hEvent;
+  tt->adapter_index = ~0;
 #endif
 }
 
@@ -497,14 +498,14 @@ do_ifconfig (struct tuntap *tt,
       /*
        * Set ifconfig parameters
        */
-      ifconfig_local = print_in_addr_t (tt->local, false, &gc);
-      ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, false, &gc);
+      ifconfig_local = print_in_addr_t (tt->local, 0, &gc);
+      ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, 0, &gc);
 
       /*
        * If TAP-style device, generate broadcast address.
        */
       if (!tun)
-	ifconfig_broadcast = print_in_addr_t (tt->broadcast, false, &gc);
+	ifconfig_broadcast = print_in_addr_t (tt->broadcast, 0, &gc);
 
 #if defined(TARGET_LINUX)
 #ifdef CONFIG_FEATURE_IPROUTE
@@ -706,7 +707,7 @@ do_ifconfig (struct tuntap *tt,
 	  {
 	    verify_255_255_255_252 (tt->local, tt->remote_netmask);
 	    tt->adapter_netmask = ~3;
-	    netmask = print_in_addr_t (tt->adapter_netmask, false, &gc);
+	    netmask = print_in_addr_t (tt->adapter_netmask, 0, &gc);
 	  }
 	else
 	  {
@@ -1939,8 +1940,8 @@ verify_255_255_255_252 (in_addr_t local, in_addr_t remote)
 
  error:
   msg (M_FATAL, "There is a problem in your selection of --ifconfig endpoints [local=%s, remote=%s].  The local and remote VPN endpoints %s.  Try '" PACKAGE " --show-valid-subnets' option for more info.",
-       print_in_addr_t (local, false, &gc),
-       print_in_addr_t (remote, false, &gc),
+       print_in_addr_t (local, 0, &gc),
+       print_in_addr_t (remote, 0, &gc),
        err);
   gc_free (&gc);
 }
@@ -1976,7 +1977,7 @@ void show_valid_win32_tun_subnets (void)
 }
 
 void
-show_tap_win32_adapters (void)
+show_tap_win32_adapters (int msglev, int warnlev)
 {
   struct gc_arena gc = gc_new ();
 
@@ -1993,7 +1994,7 @@ show_tap_win32_adapters (void)
   const struct tap_reg *tap_reg = get_tap_reg (&gc);
   const struct panel_reg *panel_reg = get_panel_reg (&gc);
 
-  msg (M_INFO|M_NOPREFIX, "Available TAP-WIN32 adapters [name, GUID]:");
+  msg (msglev, "Available TAP-WIN32 adapters [name, GUID]:");
 
   /* loop through each TAP-Win32 adapter registry entry */
   for (tr = tap_reg; tr != NULL; tr = tr->next)
@@ -2005,7 +2006,7 @@ show_tap_win32_adapters (void)
 	{
 	  if (!strcmp (tr->guid, pr->guid))
 	    {
-	      msg (M_INFO|M_NOPREFIX, "'%s' %s", pr->name, tr->guid);
+	      msg (msglev, "'%s' %s", pr->name, tr->guid);
 	      ++links;
 	    }
 	}
@@ -2019,7 +2020,7 @@ show_tap_win32_adapters (void)
 	  /* a TAP adapter exists without a link from the network
 	     connections control panel */
 	  warn_panel_null = true;
-	  msg (M_INFO|M_NOPREFIX, "[NULL] %s", tr->guid);
+	  msg (msglev, "[NULL] %s", tr->guid);
 	}
     }
 
@@ -2035,13 +2036,13 @@ show_tap_win32_adapters (void)
 
   /* warn on registry inconsistencies */
   if (warn_tap_dup)
-    msg (M_WARN|M_NOPREFIX, "WARNING: Some TAP-Win32 adapters have duplicate GUIDs");
+    msg (warnlev, "WARNING: Some TAP-Win32 adapters have duplicate GUIDs");
 
   if (warn_panel_dup)
-    msg (M_WARN|M_NOPREFIX, "WARNING: Some TAP-Win32 adapters have duplicate links from the network connections control panel");
+    msg (warnlev, "WARNING: Some TAP-Win32 adapters have duplicate links from the network connections control panel");
 
   if (warn_panel_null)
-    msg (M_WARN|M_NOPREFIX, "WARNING: Some TAP-Win32 adapters have no link from the network connections control panel");
+    msg (warnlev, "WARNING: Some TAP-Win32 adapters have no link from the network connections control panel");
 
   gc_free (&gc);
 }
@@ -2161,53 +2162,100 @@ get_device_guid (const char *name,
 }
 
 /*
+ * Get adapter info list
+ */
+static IP_ADAPTER_INFO *
+get_adapt_info_list (struct gc_arena *gc)
+{
+  ULONG size = 0;
+  IP_ADAPTER_INFO *pi = NULL;
+  DWORD status;
+
+  if ((status = GetAdaptersInfo (NULL, &size)) != ERROR_BUFFER_OVERFLOW)
+    {
+      msg (M_INFO, "GetAdaptersInfo #1 failed (status=%u) : %s",
+	   (unsigned int)status,
+	   strerror_win32 (status, gc));
+    }
+  else
+    {
+      pi = (PIP_ADAPTER_INFO) gc_malloc (size, false, gc);
+      if ((status = GetAdaptersInfo (pi, &size)) == NO_ERROR)
+	return pi;
+      else
+	{
+	  msg (M_INFO, "GetAdaptersInfo #2 failed (status=%u) : %s",
+	       (unsigned int)status,
+	       strerror_win32 (status, gc));
+	}
+    }
+  return pi;
+}
+
+static PIP_INTERFACE_INFO
+get_interface_info_list (struct gc_arena *gc)
+{
+  ULONG size = 0;
+  PIP_INTERFACE_INFO ii = NULL;
+  DWORD status;
+
+  if ((status = GetInterfaceInfo (NULL, &size)) != ERROR_INSUFFICIENT_BUFFER)
+    {
+      msg (M_INFO, "GetInterfaceInfo #1 failed (status=%u) : %s",
+	   (unsigned int)status,
+	   strerror_win32 (status, gc));
+    }
+  else
+    {
+      ii = (PIP_INTERFACE_INFO) gc_malloc (size, false, gc);
+      if ((status = GetInterfaceInfo (ii, &size)) == NO_ERROR)
+	return ii;
+      else
+	{
+	  msg (M_INFO, "GetInterfaceInfo #2 failed (status=%u) : %s",
+	       (unsigned int)status,
+	       strerror_win32 (status, gc));
+	}
+    }
+  return ii;
+}
+
+static PIP_ADAPTER_INDEX_MAP
+get_interface_info (DWORD index, struct gc_arena *gc)
+{
+  PIP_INTERFACE_INFO list = get_interface_info_list (gc);
+  if (list)
+    {
+      int i;
+      for (i = 0; i < list->NumAdapters; ++i)
+	{
+	  PIP_ADAPTER_INDEX_MAP inter = &list->Adapter[i];
+	  if (index == inter->Index)
+	    return inter;
+	}
+    }
+  return NULL;
+}
+
+/*
  * Given an adapter index, return a pointer to the
  * IP_ADAPTER_INFO structure for that adapter.
  */
-static PIP_ADAPTER_INFO
-get_adapt_info (DWORD index)
+static IP_ADAPTER_INFO *
+get_adapt_info (DWORD index, struct gc_arena *gc)
 {
-  struct gc_arena gc = gc_new ();
-  ULONG size = 0;
-  DWORD status;
-
   if (index != (DWORD)~0)
     {
-      if ((status = GetAdaptersInfo (NULL, &size)) != ERROR_BUFFER_OVERFLOW)
-	{
-	  msg (M_INFO, "GetAdaptersInfo #1 failed [%u] (status=%u) : %s",
-	       (unsigned int)index,
-	       (unsigned int)status,
-	       strerror_win32 (status, &gc));
-	}
-      else
-	{
-	  PIP_ADAPTER_INFO pi = (PIP_ADAPTER_INFO) gc_malloc (size, false, &gc);
-	  if ((status = GetAdaptersInfo (pi, &size)) != NO_ERROR)
-	    {
-	      msg (M_INFO, "GetAdaptersInfo #2 failed [%u] (status=%u) : %s",
-		   (unsigned int)index,
-		   (unsigned int)status,
-		   strerror_win32 (status, &gc));
-	      gc_free (&gc);
-	      return NULL;
-	    }
+      IP_ADAPTER_INFO *pi = get_adapt_info_list (gc);
+      IP_ADAPTER_INFO *a;
 
-	  /* find index in the linked list */
-	  {
-	    PIP_ADAPTER_INFO a;
-	    for (a = pi; a != NULL; a = a->Next)
-	      {
-		if (a->Index == index)
-		  {
-		    gc_free (&gc);
-		    return a;
-		  }
-	      }
-	  }
+      /* find index in the linked list */
+      for (a = pi; a != NULL; a = a->Next)
+	{
+	  if (a->Index == index)
+	    return a;
 	}
     }
-  gc_free (&gc);
   return NULL;
 }
 
@@ -2218,13 +2266,15 @@ get_adapt_info (DWORD index)
 static bool
 dhcp_disabled (DWORD index)
 {
-  PIP_ADAPTER_INFO a = get_adapt_info (index);
-  if (a)
-    {
-      if (!a->DhcpEnabled)
-	return true;
-    }
-  return false;
+  struct gc_arena gc = gc_new ();
+  IP_ADAPTER_INFO *ai = get_adapt_info (index, &gc);
+  bool ret = false;
+
+  if (ai && !ai->DhcpEnabled)
+    ret = true;
+
+  gc_free (&gc);
+  return ret;
 }
 
 /*
@@ -2234,7 +2284,9 @@ dhcp_disabled (DWORD index)
 static void
 delete_temp_addresses (DWORD index)
 {
-  PIP_ADAPTER_INFO a = get_adapt_info (index);
+  struct gc_arena gc = gc_new ();
+  PIP_ADAPTER_INFO a = get_adapt_info (index, &gc);
+
   if (a)
     {
       PIP_ADDR_STRING ip = &a->IpAddressList;
@@ -2262,6 +2314,7 @@ delete_temp_addresses (DWORD index)
 	  ip = ip->Next;
 	}
     }
+  gc_free (&gc);
 }
 
 /*
@@ -2290,6 +2343,131 @@ get_interface_index (const char *guid)
       gc_free (&gc);
       return index;
     }
+}
+
+/*
+ * Return a string representing a PIP_ADDR_STRING
+ */
+static const char *
+format_ip_addr_string (PIP_ADDR_STRING ip, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (512, gc);
+  while (ip)
+    {
+      buf_printf (&out, "%s", ip->IpAddress.String);
+      if (strlen (ip->IpMask.String))
+	{
+	  buf_printf (&out, "/");
+	  buf_printf (&out, "%s", ip->IpMask.String);
+	}
+      buf_printf (&out, " ");
+      ip = ip->Next;
+    }
+  return BSTR (&out);
+}
+
+/*
+ * Show info for a single adapter
+ */
+static void
+show_adapter (int msglev, IP_ADAPTER_INFO *a, struct gc_arena *gc)
+{
+  msg (msglev, "%s", a->Description);
+  msg (msglev, "  Index = %d", (int)a->Index);
+  msg (msglev, "  GUID = %s", a->AdapterName);
+  msg (msglev, "  IP = %s", format_ip_addr_string (&a->IpAddressList, gc));
+  msg (msglev, "  MAC = %s", format_hex_ex (a->Address, a->AddressLength, 0, 1, ":", gc));
+  msg (msglev, "  GATEWAY = %s", format_ip_addr_string (&a->GatewayList, gc));
+  if (a->DhcpEnabled)
+    {
+      msg (msglev, "  DHCP SERV = %s", format_ip_addr_string (&a->DhcpServer, gc));
+      msg (msglev, "  DHCP LEASE OBTAINED = %s", time_string (a->LeaseObtained, 0, false, gc));
+      msg (msglev, "  DHCP LEASE EXPIRES  = %s", time_string (a->LeaseExpires, 0, false, gc));
+    }
+  if (a->HaveWins)
+    {
+      msg (msglev, "  PRI WINS = %s", format_ip_addr_string (&a->PrimaryWinsServer, gc));
+      msg (msglev, "  SEC WINS = %s", format_ip_addr_string (&a->SecondaryWinsServer, gc));
+    }
+}
+
+/*
+ * Show current adapter list
+ */
+void
+show_adapters (int msglev)
+{
+  struct gc_arena gc = gc_new ();
+  IP_ADAPTER_INFO *ai = get_adapt_info_list (&gc);
+
+  msg (msglev, "SYSTEM ADAPTER LIST");
+  if (ai)
+    {
+      IP_ADAPTER_INFO *a;
+
+      /* find index in the linked list */
+      for (a = ai; a != NULL; a = a->Next)
+	{
+	  show_adapter (msglev, a, &gc);
+	}
+    }
+  gc_free (&gc);
+}
+
+/*
+ * DHCP release/renewal
+ */
+
+bool
+dhcp_release (const struct tuntap *tt)
+{
+  struct gc_arena gc = gc_new ();
+  bool ret = false;
+  if (tt && tt->options.ip_win32_type == IPW32_SET_DHCP_MASQ && tt->adapter_index != ~0)
+    {
+      PIP_ADAPTER_INDEX_MAP inter = get_interface_info (tt->adapter_index, &gc);
+      if (inter)
+	{
+	  DWORD status = IpReleaseAddress (inter);
+	  if (status == NO_ERROR)
+	    {
+	      msg (D_TUNTAP_INFO, "TAP: DHCP address released");
+	      ret = true;
+	    }
+	  else
+	    msg (M_WARN, "NOTE: Release of DHCP-assigned IP address lease on TAP-Win32 adapter failed: %s (code=%u)",
+		 strerror_win32 (status, &gc),
+		 (unsigned int)status);
+	}
+    }
+  gc_free (&gc);
+  return ret;
+}
+
+bool
+dhcp_renew (const struct tuntap *tt)
+{
+  struct gc_arena gc = gc_new ();
+  bool ret = false;
+  if (tt && tt->options.ip_win32_type == IPW32_SET_DHCP_MASQ && tt->adapter_index != ~0)
+    {
+      PIP_ADAPTER_INDEX_MAP inter = get_interface_info (tt->adapter_index, &gc);
+      if (inter)
+	{
+	  DWORD status = IpRenewAddress (inter);
+	  if (status == NO_ERROR)
+	    {
+	      msg (D_TUNTAP_INFO, "TAP: DHCP address renewal succeeded");
+	      ret = true;
+	    }
+	  else
+	    msg (M_WARN, "WARNING: Failed to renew DHCP IP address lease on TAP-Win32 adapter: %s (code=%u)",
+		 strerror_win32 (status, &gc),
+		 (unsigned int)status);
+	}
+    }
+  gc_free (&gc);
+  return ret;
 }
 
 /*
@@ -2365,7 +2543,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   const char *device_guid = NULL;
   DWORD len;
 
-  netcmd_semaphore_lock ();
+  //netcmd_semaphore_lock ();
 
   ipv6_support (ipv6, false, tt);
 
@@ -2499,7 +2677,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	    dsa = (tt->local & tt->adapter_netmask) + tt->options.dhcp_masq_offset;
 
 	  if (dsa == tt->local)
-	    msg (M_FATAL, "ERROR: There is a clash between the --ifconfig local address and the internal DHCP server address -- both are set to %s -- please use the --ip-win32 dynamic option to choose a different free address from the --ifconfig subnet for the internal DHCP server", print_in_addr_t (dsa, false, &gc));
+	    msg (M_FATAL, "ERROR: There is a clash between the --ifconfig local address and the internal DHCP server address -- both are set to %s -- please use the --ip-win32 dynamic option to choose a different free address from the --ifconfig subnet for the internal DHCP server", print_in_addr_t (dsa, 0, &gc));
 
 	  if ((tt->local & tt->adapter_netmask) != (dsa & tt->adapter_netmask))
 	    msg (M_FATAL, "ERROR: --tap-win32 dynamic [offset] : offset is outside of --ifconfig subnet");
@@ -2518,10 +2696,10 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	msg (M_FATAL, "ERROR: The TAP-Win32 driver rejected a DeviceIoControl call to set TAP_IOCTL_CONFIG_DHCP_MASQ mode");
 
       msg (M_INFO, "Notified TAP-Win32 driver to set a DHCP IP/netmask of %s/%s on interface %s [DHCP-serv: %s, lease-time: %d]",
-	   print_in_addr_t (tt->local, false, &gc),
-	   print_in_addr_t (tt->adapter_netmask, false, &gc),
+	   print_in_addr_t (tt->local, 0, &gc),
+	   print_in_addr_t (tt->adapter_netmask, 0, &gc),
 	   device_guid,
-	   print_in_addr_t (ntohl(ep[2]), false, &gc),
+	   print_in_addr_t (ep[2], IA_NET_ORDER, &gc),
 	   ep[3]
 	   );
 
@@ -2539,7 +2717,6 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	}
     }
 
-#if 1
   /* set driver media status to 'connected' */
   {
     ULONG status = TRUE;
@@ -2548,12 +2725,11 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 			  &status, sizeof (status), &len, NULL))
       msg (M_WARN, "WARNING: The TAP-Win32 driver rejected a TAP_IOCTL_SET_MEDIA_STATUS DeviceIoControl call.");
   }
-#endif
 
   /* possible wait for adapter to come up */
   {
     int s = tt->options.tap_sleep;
-    if (s)
+    if (s > 0)
       {
 	msg (M_INFO, "Sleeping for %d seconds...", s);
 	sleep (s);
@@ -2563,6 +2739,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   /* possibly use IP Helper API to set IP address on adapter */
   {
     DWORD index = get_interface_index (device_guid);
+    tt->adapter_index = index;
     
     /* flush arp cache */
     if (index != (DWORD)~0)
@@ -2591,6 +2768,10 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	/* check dhcp enable status */
 	if (dhcp_disabled (index))
 	  msg (M_WARN, "WARNING: You have selected '--ip-win32 dynamic', which will not work unless the TAP-Win32 TCP/IP properties are set to 'Obtain an IP address automatically'");
+
+	/* force an explicit DHCP lease renewal on TAP adapter? */
+	if (tt->options.dhcp_renew)
+	  dhcp_renew (tt);
       }
 
     if (tt->did_ifconfig_setup && tt->options.ip_win32_type == IPW32_SET_IPAPI)
@@ -2621,14 +2802,14 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 				    &tt->ipapi_context,
 				    &tt->ipapi_instance)) == NO_ERROR)
 	  msg (M_INFO, "Succeeded in adding a temporary IP/netmask of %s/%s to interface %s using the Win32 IP Helper API",
-	       print_in_addr_t (tt->local, false, &gc),
-	       print_in_addr_t (tt->adapter_netmask, false, &gc),
+	       print_in_addr_t (tt->local, 0, &gc),
+	       print_in_addr_t (tt->adapter_netmask, 0, &gc),
 	       device_guid
 	       );
 	else
 	  msg (M_FATAL, "ERROR: AddIPAddress %s/%s failed on interface %s, index=%u, status=%u (windows error: '%s') -- %s",
-	       print_in_addr_t (tt->local, false, &gc),
-	       print_in_addr_t (tt->adapter_netmask, false, &gc),
+	       print_in_addr_t (tt->local, 0, &gc),
+	       print_in_addr_t (tt->adapter_netmask, 0, &gc),
 	       device_guid,
 	       (unsigned int)index,
 	       (unsigned int)status,
@@ -2637,7 +2818,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	tt->ipapi_context_defined = true;
       }
   }
-  netcmd_semaphore_release ();
+  //netcmd_semaphore_release ();
   gc_free (&gc);
 }
 
@@ -2659,8 +2840,6 @@ tap_win32_getinfo (const struct tuntap *tt, struct gc_arena *gc)
   return NULL;
 }
 
-#ifdef TAP_WIN32_DEBUG
-
 void
 tun_show_debug (struct tuntap *tt)
 {
@@ -2678,8 +2857,6 @@ tun_show_debug (struct tuntap *tt)
       free_buf (&out);
     }
 }
-
-#endif
 
 void
 close_tun (struct tuntap *tt)
@@ -2701,6 +2878,9 @@ close_tun (struct tuntap *tt)
 	    }
 	}
 #endif
+
+      if (tt->options.dhcp_release)
+	dhcp_release (tt);
 
       if (tt->hand != NULL)
 	{

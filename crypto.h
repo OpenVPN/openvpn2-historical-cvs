@@ -251,9 +251,12 @@ struct crypto_options
   struct key_ctx_bi *key_ctx_bi;
   struct packet_id *packet_id;
   struct packet_id_persist *pid_persist;
-  bool packet_id_long_form;
-  bool use_iv;
-  bool ignore_packet_id;
+
+# define CO_PACKET_ID_LONG_FORM  (1<<0)
+# define CO_USE_IV               (1<<1)
+# define CO_IGNORE_PACKET_ID     (1<<2)
+# define CO_MUTE_REPLAY_WARNINGS (1<<3)
+  unsigned int flags;
 };
 
 void init_key_type (struct key_type *kt, const char *ciphername,
@@ -309,12 +312,12 @@ bool openvpn_decrypt (struct buffer *buf, struct buffer work,
 		      const struct frame* frame);
 
 
-void crypto_adjust_frame_parameters (struct frame *frame,
-				     const struct key_type* kt,
-				     bool cipher_defined,
-				     bool use_iv,
-				     bool packet_id,
-				     bool packet_id_long_form);
+void crypto_adjust_frame_parameters(struct frame *frame,
+				    const struct key_type* kt,
+				    bool cipher_defined,
+				    bool use_iv,
+				    bool packet_id,
+				    bool packet_id_long_form);
 
 void prng_init (void);
 void prng_bytes (uint8_t *output, int len);

@@ -72,6 +72,20 @@ struct rw_handle {
   HANDLE write;
 };
 
+/*
+ * Event-based notification of incoming TCP connections
+ */
+
+static inline bool
+tcp_connect_event_defined (const struct rw_handle *event)
+{
+  return event->read != NULL;
+}
+
+void init_tcp_connect_event (struct rw_handle *event, socket_descriptor_t sd);
+void reset_tcp_connect_event (struct rw_handle *event, socket_descriptor_t sd);
+void free_tcp_connect_event (struct rw_handle *event, socket_descriptor_t sd);
+
 struct win32_signal {
 # define WSO_MODE_UNDEF   0
 # define WSO_MODE_SERVICE 1

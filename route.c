@@ -69,9 +69,9 @@ route_string (const struct route *r, struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (256, gc);
   buf_printf (&out, "ROUTE network %s netmask %s gateway %s",
-	      print_in_addr_t (r->network, false, gc),
-	      print_in_addr_t (r->netmask, false, gc),
-	      print_in_addr_t (r->gateway, false, gc)
+	      print_in_addr_t (r->network, 0, gc),
+	      print_in_addr_t (r->netmask, 0, gc),
+	      print_in_addr_t (r->gateway, 0, gc)
 	      );
   if (r->metric_defined)
     buf_printf (&out, " metric %d", r->metric);
@@ -97,7 +97,7 @@ setenv_route_addr (const char *key, const in_addr_t addr, int i)
     openvpn_snprintf (name, sizeof (name), "route_%s_%d", key, i);
   else
     openvpn_snprintf (name, sizeof (name), "route_%s", key);
-  setenv_str (name, print_in_addr_t (addr, false, &gc));
+  setenv_str (name, print_in_addr_t (addr, 0, &gc));
   gc_free (&gc);
 }
 
@@ -305,6 +305,7 @@ init_route_list (struct route_list *rl,
     }
   rl->redirect_default_gateway = opt->redirect_default_gateway;
   rl->redirect_local = opt->redirect_local;
+  rl->redirect_def1 = opt->redirect_def1;
 
   if (is_route_parm_defined (remote_endpoint))
     {
@@ -400,15 +401,30 @@ redirect_default_route_to_vpn (struct route_list *rl)
 			~0,
 			rl->spec.net_gateway);
 
-	  /* delete default route */
-	  del_route3 (0,
-		      0,
-		      rl->spec.net_gateway);
+	  if (rl->redirect_def1)
+	    {
+	      /* add new default route (1st component) */
+	      add_route3 (0x00000000,
+			  0x80000000,
+			  rl->spec.remote_endpoint);
 
-	  /* add new default route */
-	  add_route3 (0,
-		      0,
-		      rl->spec.remote_endpoint);
+	      /* add new default route (2nd component) */
+	      add_route3 (0x80000000,
+			  0x80000000,
+			  rl->spec.remote_endpoint);
+	    }
+	  else
+	    {
+	      /* delete default route */
+	      del_route3 (0,
+			  0,
+			  rl->spec.net_gateway);
+
+	      /* add new default route */
+	      add_route3 (0,
+			  0,
+			  rl->spec.remote_endpoint);
+	    }
 
 	  /* set a flag so we can undo later */
 	  rl->did_redirect_default_gateway = true;
@@ -427,15 +443,30 @@ undo_redirect_default_route_to_vpn (struct route_list *rl)
 		    ~0,
 		    rl->spec.net_gateway);
 
-      /* delete default route */
-      del_route3 (0,
-		  0,
-		  rl->spec.remote_endpoint);
+      if (rl->redirect_def1)
+	{
+	  /* delete default route (1st component) */
+	  del_route3 (0x00000000,
+		      0x80000000,
+		      rl->spec.remote_endpoint);
 
-      /* restore original default route */
-      add_route3 (0,
-		  0,
-		  rl->spec.net_gateway);
+	  /* delete default route (2nd component) */
+	  del_route3 (0x80000000,
+		      0x80000000,
+		      rl->spec.remote_endpoint);
+	}
+      else
+	{
+	  /* delete default route */
+	  del_route3 (0,
+		      0,
+		      rl->spec.remote_endpoint);
+
+	  /* restore original default route */
+	  add_route3 (0,
+		      0,
+		      rl->spec.net_gateway);
+	}
 
       rl->did_redirect_default_gateway = false;
     }
@@ -564,9 +595,9 @@ add_route (struct route *r)
   gc_init (&gc);
   buf = alloc_buf_gc (256, &gc);
 
-  network = print_in_addr_t (r->network, false, &gc);
-  netmask = print_in_addr_t (r->netmask, false, &gc);
-  gateway = print_in_addr_t (r->gateway, false, &gc);
+  network = print_in_addr_t (r->network, 0, &gc);
+  netmask = print_in_addr_t (r->netmask, 0, &gc);
+  gateway = print_in_addr_t (r->gateway, 0, &gc);
 
 #if defined(TARGET_LINUX)
 #ifdef CONFIG_FEATURE_IPROUTE
@@ -597,10 +628,17 @@ add_route (struct route *r)
   if (r->metric_defined)
     buf_printf (&buf, " METRIC %d", r->metric);
 
-  netcmd_semaphore_lock ();
+  //netcmd_semaphore_lock ();
   msg (D_ROUTE, "%s", BSTR (&buf));
+
+#if 1
+  status = add_route_ipapi (r);
+  msg (D_ROUTE, "Route addition via IPAPI %s", status ? "succeeded" : "failed");
+#else
   status = system_check (BSTR (&buf), "ERROR: Windows route add command failed", false);
-  netcmd_semaphore_release ();
+#endif
+
+  //netcmd_semaphore_release ();
 
 #elif defined (TARGET_SOLARIS)
 
@@ -695,9 +733,9 @@ delete_route (const struct route *r)
   gc_init (&gc);
 
   buf = alloc_buf_gc (256, &gc);
-  network = print_in_addr_t (r->network, false, &gc);
-  netmask = print_in_addr_t (r->netmask, false, &gc);
-  gateway = print_in_addr_t (r->gateway, false, &gc);
+  network = print_in_addr_t (r->network, 0, &gc);
+  netmask = print_in_addr_t (r->netmask, 0, &gc);
+  gateway = print_in_addr_t (r->gateway, 0, &gc);
 
 #if defined(TARGET_LINUX)
 #ifdef CONFIG_FEATURE_IPROUTE
@@ -718,10 +756,19 @@ delete_route (const struct route *r)
   buf_printf (&buf, ROUTE_PATH " DELETE %s",
 	      network);
 
-  netcmd_semaphore_lock ();
+  //netcmd_semaphore_lock ();
   msg (D_ROUTE, "%s", BSTR (&buf));
+
+#if 1
+  {
+    const bool status = del_route_ipapi (r);
+    msg (D_ROUTE, "Route deletion via IPAPI %s", status ? "succeeded" : "failed");
+  }
+#else
   system_check (BSTR (&buf), "ERROR: Windows route delete command failed", false);
-  netcmd_semaphore_release ();
+#endif
+
+  //netcmd_semaphore_release ();
 
 #elif defined (TARGET_SOLARIS)
 
@@ -778,50 +825,286 @@ delete_route (const struct route *r)
 
 #if defined(WIN32)
 
+static PMIB_IPFORWARDTABLE
+get_windows_routing_table (struct gc_arena *gc)
+{
+  ULONG size = 0;
+  PMIB_IPFORWARDTABLE rt = NULL;
+  DWORD status;
+
+  status = GetIpForwardTable (NULL, &size, TRUE);
+  if (status == ERROR_INSUFFICIENT_BUFFER)
+    {
+      rt = (PMIB_IPFORWARDTABLE) gc_malloc (size, false, gc);
+      status = GetIpForwardTable (rt, &size, TRUE);
+      if (status != NO_ERROR)
+	{
+	  msg (D_ROUTE, "NOTE: GetIpForwardTable returned error: %s (code=%u)",
+	       strerror_win32 (status, gc),
+	       (unsigned int)status);
+	  rt = NULL;
+	}
+    }
+  return rt;
+}
+
+static int
+test_route (PMIB_IPFORWARDTABLE routes, const in_addr_t gateway, DWORD *index)
+{
+  int count = 0;
+
+  if (routes)
+    {
+      int i;
+      for (i = 0; i < routes->dwNumEntries; ++i)
+	{
+	  const MIB_IPFORWARDROW *fr = &routes->table[i];
+	  const in_addr_t net = ntohl (fr->dwForwardDest);
+	  const in_addr_t mask = ntohl (fr->dwForwardMask);
+	  
+	  if (fr->dwForwardType == 3) /* route represents directly connected net? */
+	    {
+	      if ((gateway & mask) == net)
+		{
+		  if (!count && index)
+		    *index = fr->dwForwardIfIndex;
+		  ++count;
+		}
+	    }
+	}
+    }
+  return count;
+}
+
+/*
+ * If we tried to add routes now, would we succeed?
+ */
+bool
+test_routes (const struct route_list *rl)
+{
+  struct gc_arena gc = gc_new ();
+  PMIB_IPFORWARDTABLE routes = get_windows_routing_table (&gc);
+  bool ret = true;
+  int count = 0;
+  int good = 0;
+
+  if (rl)
+    {
+      if (routes)
+	{
+	  int i;
+	  for (i = 0; i < rl->n; ++i)
+	    {
+	      ++count;
+	      if (test_route (routes, rl->routes[i].gateway, NULL) == 0)
+		ret = false;
+	      else
+		++good;
+	    }
+	}
+      else
+	{
+	  msg (D_ROUTE, "DEBUG: test_routes: get_windows_routing_table returned NULL"); // JYFIXME: change to D_ROUTE_DEBUG
+	  ret = false;
+	}
+
+      if (rl->redirect_default_gateway && rl->spec.remote_endpoint_defined)
+	{
+	  ++count;
+	  if (test_route (routes, rl->spec.remote_endpoint, NULL) == 0)
+	    ret = false;
+	  else
+	    ++good;
+	}
+    }
+
+  msg (D_ROUTE, "DEBUG: test_routes: %d/%d succeeded, rl->len=%d ret=%d",  // JYFIXME: change to D_ROUTE_DEBUG
+       good,
+       count,
+       rl ? rl->n : -1,
+       (int)ret);
+
+  gc_free (&gc);
+  return ret;
+}
+
 static bool
 get_default_gateway (in_addr_t *ret)
 {
   struct gc_arena gc = gc_new ();
-
-  ULONG size = 0;
-  DWORD status;
   bool ret_bool = false;
+  int i;
+  PMIB_IPFORWARDTABLE routes = get_windows_routing_table (&gc);
 
-  if ((status = GetIpForwardTable (NULL, &size, TRUE)) == ERROR_INSUFFICIENT_BUFFER)
+  if (!routes)
+    goto done;
+
+  for (i = 0; i < routes->dwNumEntries; ++i)
     {
-      int i;
-      PMIB_IPFORWARDTABLE routes = (PMIB_IPFORWARDTABLE) gc_malloc (size, false, &gc);
-      ASSERT (routes);
-      if ((status = GetIpForwardTable (routes, &size, TRUE)) != NO_ERROR)
-	goto done;
-
-      for (i = 0; i < routes->dwNumEntries; ++i)
-	{
-	  const MIB_IPFORWARDROW *row = &routes->table[i];
-	  const in_addr_t net = ntohl (row->dwForwardDest);
-	  const in_addr_t mask = ntohl (row->dwForwardMask);
-	  const in_addr_t gw = ntohl (row->dwForwardNextHop);
+      const MIB_IPFORWARDROW *row = &routes->table[i];
+      const in_addr_t net = ntohl (row->dwForwardDest);
+      const in_addr_t mask = ntohl (row->dwForwardMask);
+      const in_addr_t gw = ntohl (row->dwForwardNextHop);
 
 #if 0
-	  msg (M_INFO, "route[%d] %s %s %s",
-	       i,
-	       print_in_addr_t ((in_addr_t) net, false, &gc),
-	       print_in_addr_t ((in_addr_t) mask, false, &gc),
-	       print_in_addr_t ((in_addr_t) gw, false, &gc));
+      msg (M_INFO, "route[%d] %s %s %s",
+	   i,
+	   print_in_addr_t ((in_addr_t) net, 0, &gc),
+	   print_in_addr_t ((in_addr_t) mask, 0, &gc),
+	   print_in_addr_t ((in_addr_t) gw, 0, &gc));
 #endif
-
-	  if (!net && !mask)
-	    {
-	      *ret = gw;
-	      ret_bool = true;
-	      break;
-	    }
+      if (!net && !mask)
+	{
+	  *ret = gw;
+	  ret_bool = true;
+	  break;
 	}
     }
-
+  
  done:
   gc_free (&gc);
   return ret_bool;
+}
+
+static DWORD
+windows_route_find_if_index (const struct route *r)
+{
+  struct gc_arena gc = gc_new ();
+  DWORD ret = ~0;
+  int count;
+  int i;
+
+  PMIB_IPFORWARDTABLE routes = get_windows_routing_table (&gc);
+
+  count = test_route (routes, r->gateway, &ret);
+
+  ASSERT (count >= 0);
+
+  if (count == 0)
+    msg (M_WARN, "Error: route gateway is not reachable on any active network adapters: %s",
+	 print_in_addr_t (r->gateway, 0, &gc));
+  else if (count > 1)
+    msg (M_WARN, "Warning: route gateway is ambiguous: %s",
+	 print_in_addr_t (r->gateway, 0, &gc));
+
+  gc_free (&gc);
+  return ret;
+}
+
+bool
+add_route_ipapi (const struct route *r)
+{
+  struct gc_arena gc = gc_new ();
+  bool ret = false;
+  DWORD status;
+  const DWORD if_index = windows_route_find_if_index (r);
+
+  if (if_index != ~0)
+    {
+      MIB_IPFORWARDROW fr;
+      CLEAR (fr);
+      fr.dwForwardDest = htonl (r->network);
+      fr.dwForwardMask = htonl (r->netmask);
+      fr.dwForwardPolicy = 0;
+      fr.dwForwardNextHop = htonl (r->gateway);
+      fr.dwForwardIfIndex = if_index;
+      fr.dwForwardType = 4;  /* the next hop is not the final dest */
+      fr.dwForwardProto = 3; /* PROTO_IP_NETMGMT */
+      fr.dwForwardAge = 0;
+      fr.dwForwardNextHopAS = 0;
+      fr.dwForwardMetric1 = r->metric_defined ? r->metric : 1;
+      fr.dwForwardMetric2 = ~0;
+      fr.dwForwardMetric3 = ~0;
+      fr.dwForwardMetric4 = ~0;
+      fr.dwForwardMetric5 = ~0;
+
+      status = CreateIpForwardEntry (&fr);
+
+      if (status == NO_ERROR)
+	ret = true;
+      else
+	msg (M_WARN, "ROUTE: route addition failed using CreateIpForwardEntry: %s",
+	     strerror_win32 (status, &gc));
+    }
+
+  gc_free (&gc);
+  return ret;
+}
+
+bool
+del_route_ipapi (const struct route *r)
+{
+  struct gc_arena gc = gc_new ();
+  bool ret = false;
+  DWORD status;
+  const DWORD if_index = windows_route_find_if_index (r);
+
+  if (if_index != ~0)
+    {
+      MIB_IPFORWARDROW fr;
+      CLEAR (fr);
+
+      fr.dwForwardDest = htonl (r->network);
+      fr.dwForwardMask = htonl (r->netmask);
+      fr.dwForwardPolicy = 0;
+      fr.dwForwardNextHop = htonl (r->gateway);
+      fr.dwForwardIfIndex = if_index;
+
+      status = DeleteIpForwardEntry (&fr);
+
+      if (status == NO_ERROR)
+	ret = true;
+      else
+	msg (M_WARN, "ROUTE: route deletion failed using DeleteIpForwardEntry: %s",
+	     strerror_win32 (status, &gc));
+    }
+
+  gc_free (&gc);
+  return ret;
+}
+
+static const char *
+format_route_entry (MIB_IPFORWARDROW *r, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (256, gc);
+  buf_printf (&out, "%s %s %s p=%d i=%d t=%d pr=%d a=%d h=%d m=%d/%d/%d/%d/%d", 
+	      print_in_addr_t (r->dwForwardDest, IA_NET_ORDER, gc),
+	      print_in_addr_t (r->dwForwardMask, IA_NET_ORDER, gc),
+	      print_in_addr_t (r->dwForwardNextHop, IA_NET_ORDER, gc),
+	      (int)r->dwForwardPolicy,
+	      (int)r->dwForwardIfIndex,
+	      (int)r->dwForwardType,
+	      (int)r->dwForwardProto,
+	      (int)r->dwForwardAge,
+	      (int)r->dwForwardNextHopAS,
+	      (int)r->dwForwardMetric1,
+	      (int)r->dwForwardMetric2,
+	      (int)r->dwForwardMetric3,
+	      (int)r->dwForwardMetric4,
+	      (int)r->dwForwardMetric5);
+  return BSTR (&out);
+}
+
+/*
+ * Show current routing table
+ */
+void
+show_routes (int msglev)
+{
+  struct gc_arena gc = gc_new ();
+  int i;
+
+  MIB_IPFORWARDTABLE *rt = get_windows_routing_table (&gc);
+
+  msg (msglev, "SYSTEM ROUTING TABLE");
+  if (rt)
+    {
+      for (i = 0; i < rt->dwNumEntries; ++i)
+	{
+	  msg (msglev, "%s", format_route_entry(&rt->table[i], &gc));
+	}
+    }
+  gc_free (&gc);
 }
 
 #elif defined(TARGET_LINUX)
@@ -853,9 +1136,9 @@ get_default_gateway (in_addr_t *ret)
 		  const in_addr_t gw = ntohl (gw_x);
 #if 0
 		  msg (M_INFO, "route %s %s %s",
-		       print_in_addr_t ((in_addr_t) net, false, &gc),
-		       print_in_addr_t ((in_addr_t) mask, false, &gc),
-		       print_in_addr_t ((in_addr_t) gw, false, &gc));
+		       print_in_addr_t ((in_addr_t) net, 0, &gc),
+		       print_in_addr_t ((in_addr_t) mask, 0, &gc),
+		       print_in_addr_t ((in_addr_t) gw, 0, &gc));
 #endif
 		  if (!net && !mask)
 		    {
@@ -1017,7 +1300,7 @@ get_default_gateway (in_addr_t *ret)
       *ret = ntohl(((struct sockaddr_in *)gate)->sin_addr.s_addr);
 #if 1
       msg (M_INFO, "gw %s",
-	   print_in_addr_t ((in_addr_t) *ret, false, &gc));
+	   print_in_addr_t ((in_addr_t) *ret, 0, &gc));
 #endif
 
       gc_free (&gc);
@@ -1172,7 +1455,7 @@ get_default_gateway (in_addr_t *ret)
       *ret = ntohl(((struct sockaddr_in *)gate)->sin_addr.s_addr);
 #if 1
       msg (M_INFO, "gw %s",
-	   print_in_addr_t ((in_addr_t) *ret, false, &gc));
+	   print_in_addr_t ((in_addr_t) *ret, 0, &gc));
 #endif
 
       gc_free (&gc);

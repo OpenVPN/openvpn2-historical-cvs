@@ -39,6 +39,7 @@
 #include "socket.h"
 #include "tun.h"
 #include "otime.h"
+#include "perf.h"
 
 #ifdef USE_CRYPTO
 #include <openssl/err.h>
@@ -493,7 +494,7 @@ x_check_status (int status,
       /* get possible driver error from TAP-Win32 driver */
       extended_msg = tap_win32_getinfo (tt, &gc);
 #endif
-      if (true) // JYFIXME: was: if (my_errno != EAGAIN)
+      if (my_errno != EAGAIN)
 	{
 	  if (extended_msg)
 	    msg (x_cs_info_level, "%s %s [%s]: %s (code=%d)",
@@ -509,7 +510,6 @@ x_check_status (int status,
 		 strerror_ts (my_errno, &gc),
 		 my_errno);
 
-	  /* avoid a barrage of errors, JYFIXME -- set this to something */
 	  if (x_cs_err_delay_ms)
 	    sleep_milliseconds (x_cs_err_delay_ms);
 	}
@@ -553,6 +553,17 @@ openvpn_exit (int status)
 #ifdef WIN32
   uninit_win32 ();
 #endif
+
+#ifdef ABORT_ON_ERROR
+  if (status == OPENVPN_EXIT_STATUS_ERROR)
+    {
+      abort ();
+    }
+#endif
+
+  if (status == OPENVPN_EXIT_STATUS_GOOD)
+    perf_output_results ();
+
   exit (status);
 }
 

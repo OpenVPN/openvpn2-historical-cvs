@@ -55,10 +55,15 @@ tunnel_point_to_point (struct context *c)
   /* main event loop */
   while (true)
     {
+      perf_push (PERF_EVENT_LOOP);
+
       /* process timers, TLS, etc. */
       pre_select (c);
       if (IS_SIG (c))
-	break;
+	{
+	  perf_pop ();
+	  break;
+	}
 
       /* set up and do the I/O wait */
       io_wait (c, p2p_iow_flags (c));
@@ -72,19 +77,29 @@ tunnel_point_to_point (struct context *c)
 	      print_status (c, so);
 	      status_close (so);
 	      c->sig->signal_received = 0;
+	      perf_pop ();
 	      continue;
 	    }
+	  perf_pop ();
 	  break;
 	}
 
       /* timeout? */
       if (c->c2.event_set_status == ES_TIMEOUT)
-	continue;
+	{
+	  perf_pop ();
+	  continue;
+	}
 
       /* process the I/O which triggered select */
       process_io (c);
       if (IS_SIG (c))
-	break;
+	{
+	  perf_pop ();
+	  break;
+	}
+
+      perf_pop ();
     }
 
   /* tear down tunnel instance (unless --persist-tun) */
@@ -168,12 +183,7 @@ main (int argc, char *argv[])
 		  break;
 #if P2MP
 		case MODE_SERVER:
-#ifdef USE_PTHREAD
-		  if (c.options.n_threads >= 2)
-		    tunnel_server_multi_threaded (&c);
-		  else
-#endif
-		    tunnel_server_single_threaded (&c);
+		  tunnel_server (&c);
 		  break;
 #endif
 		default:

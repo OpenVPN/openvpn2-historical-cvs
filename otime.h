@@ -23,12 +23,6 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-/*
- * The interval_ routines are designed to optimize the calling of a routine
- * (normally tls_multi_process()) which can be called less frequently
- * between triggers.
- */
-
 #ifndef OTIME_H
 #define OTIME_H
 

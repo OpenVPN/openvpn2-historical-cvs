@@ -34,7 +34,7 @@
 
 #include "otime.h"
 
-#define INTERVAL_DEBUG 1 // JYFIXME
+#define INTERVAL_DEBUG 0
 
 /*
  * Designed to limit calls to expensive functions that need to be called

@@ -34,8 +34,6 @@
 #if P2MP
 
 #include "multi.h"
-#include "init.h"
-#include "forward.h"
 #include "push.h"
 #include "misc.h"
 #include "otime.h"
@@ -44,27 +42,8 @@
 
 #include "forward-inline.h"
 
-#define MULTI_DEBUG // JYFIXME
-//#define MULTI_DEBUG_EVENT_LOOP // JYFIXME
-
-/*
- * Reaper constants.  The reaper is the process where the virtual address
- * and virtual route hash table is scanned for dead entries which are
- * then removed.  The hash table could potentially be quite large, so we
- * don't want to reap in a single pass.
- */
-#define REAP_MAX_WAKEUP   10  /* Do reap pass at least once per n seconds */
-#define REAP_DIVISOR     256  /* How many passes to cover whole hash table */
-#define REAP_MIN          16  /* Minimum number of buckets per pass */
-#define REAP_MAX        1024  /* Maximum number of buckets per pass */
-
-/*
- * Mark a cached host route for deletion after this
- * many seconds without any references.
- */
-#define MULTI_CACHE_ROUTE_TTL 60
-
-static bool multi_process_post (struct multi_thread *mt, struct multi_instance *mi);
+#define MULTI_DEBUG
+//#define MULTI_DEBUG_EVENT_LOOP
 
 #ifdef MULTI_DEBUG_EVENT_LOOP
 static const char *
@@ -156,7 +135,7 @@ multi_reap_new (int buckets_per_pass)
   return mr;
 }
 
-static void
+void
 multi_reap_process_dowork (const struct multi_context *m)
 {
   struct multi_reap *mr = m->reaper;
@@ -165,13 +144,6 @@ multi_reap_process_dowork (const struct multi_context *m)
   multi_reap_range (m, mr->bucket_base, mr->bucket_base + mr->buckets_per_pass); 
   mr->bucket_base += mr->buckets_per_pass;
   mr->last_call = now;
-}
-
-static inline void
-multi_reap_process (const struct multi_context *m)
-{
-  if (m->reaper->last_call != now)
-    multi_reap_process_dowork (m);
 }
 
 static void
@@ -192,8 +164,8 @@ reap_buckets_per_pass (int n_buckets)
 /*
  * Main initialization function, init multi_context object.
  */
-static void
-multi_init (struct multi_context *m, struct context *t)
+void
+multi_init (struct multi_context *m, struct context *t, bool tcp_mode)
 {
   int dev = DEV_TYPE_UNDEF;
 
@@ -298,7 +270,18 @@ multi_init (struct multi_context *m, struct context *t)
    * Remember possible learn_address_script
    */
   m->learn_address_script = t->options.learn_address_script;
+  
+  /*
+   * Limit total number of clients
+   */
+  m->max_clients = t->options.max_clients;
 
+  /*
+   * Initialize multi-socket TCP I/O wait object
+   */
+  if (tcp_mode)
+    m->mtcp = multi_tcp_init (t->options.max_clients, &m->max_clients);
+  
   /*
    * Allow client <-> client communication, without going through
    * tun/tap interface and network stack?
@@ -323,29 +306,6 @@ multi_instance_string (struct multi_instance *mi, bool null, struct gc_arena *gc
     return NULL;
   else
     return "UNDEF";
-}
-
-/*
- * Set a msg() function prefix with our current client instance ID.
- */
-
-static inline void
-set_prefix (struct multi_instance *mi)
-{
-#ifdef MULTI_DEBUG_EVENT_LOOP
-  if (mi->msg_prefix)
-    printf ("[%s]\n", mi->msg_prefix);
-#endif
-  msg_set_prefix (mi->msg_prefix);
-}
-
-static inline void
-clear_prefix (void)
-{
-#ifdef MULTI_DEBUG_EVENT_LOOP
-  printf ("[NULL]\n");
-#endif
-  msg_set_prefix (NULL);
 }
 
 void
@@ -376,15 +336,23 @@ multi_del_iroutes (struct multi_context *m,
     mroute_helper_del_iroute (m->route_helper, ir);
 }
 
-static void
+void
 multi_close_instance (struct multi_context *m,
 		      struct multi_instance *mi,
 		      bool shutdown)
 {
+  perf_push (PERF_MULTI_CLOSE_INSTANCE);
+
   ASSERT (!mi->halt);
   mi->halt = true;
 
   msg (D_MULTI_LOW, "MULTI: multi_close_instance called");
+
+  /* prevent dangling pointers */
+  if (m->pending == mi)
+    m->pending = NULL;
+  if (m->earliest_wakeup == mi)
+    m->earliest_wakeup = NULL;
 
   if (!shutdown)
     {
@@ -402,6 +370,9 @@ multi_close_instance (struct multi_context *m,
       ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle);
 
       multi_del_iroutes (m, mi);
+
+      if (m->mtcp)
+	multi_tcp_dereference_instance (m->mtcp, mi);
 
       mbuf_dereference_instance (m->mbuf, mi);
     }
@@ -431,9 +402,9 @@ multi_close_instance (struct multi_context *m,
     }
 
   if (mi->did_open_context)
-    {
-      close_context (&mi->context, SIGTERM);
-    }
+    close_context (&mi->context, SIGTERM);
+
+  multi_tcp_instance_specific_free (mi);
 
   ungenerate_prefix (mi);
 
@@ -443,12 +414,14 @@ multi_close_instance (struct multi_context *m,
    * vhash reaper deal with it.
    */
   multi_instance_dec_refcount (mi);
+
+  perf_pop ();
 }
 
 /*
  * Called on shutdown or restart.
  */
-static void
+void
 multi_uninit (struct multi_context *m)
 {
   if (m->hash)
@@ -478,32 +451,56 @@ multi_uninit (struct multi_context *m)
       frequency_limit_free (m->new_connection_limiter);
       multi_reap_free (m->reaper);
       mroute_helper_free (m->route_helper);
+      multi_tcp_free (m->mtcp);
     }
 }
 
 /*
  * Create a client instance object for a newly connected client.
  */
-static struct multi_instance *
-multi_create_instance (struct multi_thread *mt, const struct mroute_addr *real)
+struct multi_instance *
+multi_create_instance (struct multi_context *m, const struct mroute_addr *real)
 {
   struct gc_arena gc = gc_new ();
   struct multi_instance *mi;
 
-  ALLOC_OBJ_CLEAR (mi, struct multi_instance);
+  perf_push (PERF_MULTI_CREATE_INSTANCE);
 
   msg (D_MULTI_LOW, "MULTI: multi_create_instance called");
 
+  ALLOC_OBJ_CLEAR (mi, struct multi_instance);
+
   mi->gc = gc_new ();
   multi_instance_inc_refcount (mi);
-  mroute_addr_init (&mi->real);
   mi->vaddr_handle = -1;
   mi->created = now;
+  mroute_addr_init (&mi->real);
 
-  mi->real = *real;
-  generate_prefix (mi);
+  if (real)
+    {
+      mi->real = *real;
+      generate_prefix (mi);
+    }
 
-  if (!hash_add (mt->multi->iter, &mi->real, mi, false))
+  inherit_context_child (&mi->context, &m->top);
+  if (IS_SIG (&mi->context))
+    goto err;
+  mi->did_open_context = true;
+
+  if (hash_n_elements (m->hash) >= m->max_clients)
+    {
+      msg (D_MULTI_ERRORS, "MULTI: new incoming connection would exceed maximum number of clients (%d)", m->max_clients);
+      goto err;
+    }
+
+  if (!real) /* TCP mode? */
+    {
+      if (!multi_tcp_instance_specific_init (m, mi))
+	goto err;
+      generate_prefix (mi);
+    }
+
+  if (!hash_add (m->iter, &mi->real, mi, false))
     {
       msg (D_MULTI_LOW, "MULTI: unable to add real address [%s] to iterator hash table",
 	   mroute_addr_print (&mi->real, &gc));
@@ -511,99 +508,23 @@ multi_create_instance (struct multi_thread *mt, const struct mroute_addr *real)
     }
   mi->did_iter = true;
 
-  inherit_context_child (&mi->context, &mt->top);
-  mi->did_open_context = true;
-
   mi->context.c2.push_reply_deferred = true;
 
-  if (!multi_process_post (mt, mi))
+  if (!multi_process_post (m, mi, MPP_PRE_SELECT))
     {
       msg (D_MULTI_ERRORS, "MULTI: signal occurred during client instance initialization");
       goto err;
     }
 
+  perf_pop ();
   gc_free (&gc);
   return mi;
 
  err:
-  multi_close_instance (mt->multi, mi, false);
+  multi_close_instance (m, mi, false);
+  perf_pop ();
   gc_free (&gc);
   return NULL;
-}
-
-/*
- * Get a client instance based on real address.  If
- * the instance doesn't exist, create it while
- * maintaining real address hash table atomicity.
- */
-static struct multi_instance *
-multi_get_create_instance (struct multi_thread *mt)
-{
-  struct gc_arena gc = gc_new ();
-  struct mroute_addr real;
-  struct multi_instance *mi = NULL;
-  struct hash *hash = mt->multi->hash;
-
-  if (mroute_extract_sockaddr_in (&real, &mt->top.c2.from, true))
-    {
-      struct hash_element *he;
-      const uint32_t hv = hash_value (hash, &real);
-      struct hash_bucket *bucket = hash_bucket (hash, hv);
-  
-      hash_bucket_lock (bucket);
-      he = hash_lookup_fast (hash, bucket, &real, hv);
-
-      if (he)
-	{
-	  mi = (struct multi_instance *) he->value;
-	}
-      else
-	{
-	  if (!mt->top.c2.tls_auth_standalone
-	      || tls_pre_decrypt_lite (mt->top.c2.tls_auth_standalone, &mt->top.c2.from, &mt->top.c2.buf))
-	    {
-	      if (frequency_limit_event_allowed (mt->multi->new_connection_limiter))
-		{
-		  mi = multi_create_instance (mt, &real);
-		  if (mi)
-		    {
-		      hash_add_fast (hash, bucket, &mi->real, hv, mi);
-		      mi->did_real_hash = true;
-		    }
-		}
-	      else
-		{
-		  msg (D_MULTI_ERRORS,
-		       "MULTI: Connection from %s would exceed new connection frequency limit as controlled by --connect-freq",
-		       mroute_addr_print (&real, &gc));
-		}
-	    }
-	}
-
-      hash_bucket_unlock (bucket);
-
-#ifdef MULTI_DEBUG
-      if (check_debug_level (D_MULTI_DEBUG))
-	{
-	  const char *status;
-
-	  if (he && mi)
-	    status = "[succeeded]";
-	  else if (!he && mi)
-	    status = "[created]";
-	  else
-	    status = "[failed]";
-	
-	  msg (D_MULTI_DEBUG, "GET INST BY REAL: %s %s",
-	       mroute_addr_print (&real, &gc),
-	       status);
-	}
-#endif
-    }
-
-  gc_free (&gc);
-  ASSERT (!(mi && mi->halt));
-  return mi;
 }
 
 /*
@@ -611,7 +532,7 @@ multi_get_create_instance (struct multi_thread *mt)
  * If status file is defined, write to file.
  * If status file is NULL, write to syslog.
  */
-static void
+void
 multi_print_status (struct multi_context *m, struct status_output *so)
 {
   if (m->hash)
@@ -672,8 +593,9 @@ multi_print_status (struct multi_context *m, struct status_output *so)
       hash_iterator_free (&hi);
 
       status_printf (so, "GLOBAL STATS");
-      status_printf (so, "Max bcast/mcast queue length,%d",
-	   mbuf_maximum_queued (m->mbuf));
+      if (m->mbuf)
+	status_printf (so, "Max bcast/mcast queue length,%d",
+		       mbuf_maximum_queued (m->mbuf));
 
       status_printf (so, "END");
       status_flush (so);
@@ -871,12 +793,12 @@ multi_add_iroutes (struct multi_context *m,
     {
       if (ir->netbits >= 0)
 	msg (D_MULTI_LOW, "MULTI: internal route %s/%d -> %s",
-	     print_in_addr_t (ir->network, false, &gc),
+	     print_in_addr_t (ir->network, 0, &gc),
 	     ir->netbits,
 	     multi_instance_string (mi, false, &gc));
       else
 	msg (D_MULTI_LOW, "MULTI: internal route %s -> %s",
-	     print_in_addr_t (ir->network, false, &gc),
+	     print_in_addr_t (ir->network, 0, &gc),
 	     multi_instance_string (mi, false, &gc));
 
       mroute_helper_add_iroute (m->route_helper, ir);
@@ -930,6 +852,8 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
   in_addr_t local=0, remote=0;
   const char *dynamic_config_file = NULL;
   bool dynamic_config_file_mark_for_delete = false;
+
+  ASSERT (mi->context.c1.tuntap);
 
   /* acquire script mutex */
   mutex_lock_static (L_SCRIPT);
@@ -1072,8 +996,14 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
 	    }
 	  else if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TAP)
 	    {
-	      mi->context.c2.push_ifconfig_remote_netmask = mi->context.c1.tuntap->remote_netmask;
-	      mi->context.c2.push_ifconfig_defined = true;
+	      mi->context.c2.push_ifconfig_remote_netmask = mi->context.options.ifconfig_pool_netmask;
+	      if (!mi->context.c2.push_ifconfig_remote_netmask)
+		mi->context.c2.push_ifconfig_remote_netmask = mi->context.c1.tuntap->remote_netmask;
+	      if (mi->context.c2.push_ifconfig_remote_netmask)
+		mi->context.c2.push_ifconfig_defined = true;
+	      else
+		msg (D_MULTI_ERRORS, "MULTI: no --ifconfig-pool netmask parameter is available to push to %s",
+		     multi_instance_string (mi, false, &gc));
 	    }
 	}
     }
@@ -1098,7 +1028,7 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
 	  multi_learn_in_addr_t (m, mi, mi->context.c2.push_ifconfig_local, -1);
 	  msg (D_MULTI_LOW, "MULTI: primary virtual IP for %s: %s",
 	       multi_instance_string (mi, false, &gc),
-	       print_in_addr_t (mi->context.c2.push_ifconfig_local, false, &gc));
+	       print_in_addr_t (mi->context.c2.push_ifconfig_local, 0, &gc));
 	}
 
       /* add routes locally, pointing to new client, if
@@ -1121,38 +1051,6 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
 }
 
 /*
- * Compute earliest timeout expiry from the set of
- * all instances.  Output:
- *
- * m->earliest_wakeup : instance needing the earliest service.
- * dest               : earliest timeout as a delta in relation
- *                      to current time.
- */
-static inline void
-multi_get_timeout (struct multi_thread *mt, struct timeval *dest)
-{
-  struct timeval tv, current;
-
-  mt->earliest_wakeup = (struct multi_instance *) schedule_get_earliest_wakeup (mt->multi->schedule, &tv);
-  if (mt->earliest_wakeup)
-    {
-      ASSERT (!gettimeofday (&current, NULL));
-      tv_delta (dest, &current, &tv);
-      if (dest->tv_sec >= REAP_MAX_WAKEUP)
-	{
-	  mt->earliest_wakeup = NULL;
-	  dest->tv_sec = REAP_MAX_WAKEUP;
-	  dest->tv_usec = 0;
-	}
-    }
-  else
-    {
-      dest->tv_sec = REAP_MAX_WAKEUP;
-      dest->tv_usec = 0;
-    }
-}
-
-/*
  * Add a packet to a client instance output queue.
  */
 static inline void
@@ -1165,6 +1063,7 @@ multi_unicast (struct multi_context *m,
   if (BLEN (buf) > 0)
     {
       mb = mbuf_alloc_buf (buf);
+      mb->flags = MF_UNICAST;
       multi_add_mbuf (m, mi, mb);
       mbuf_free_buf (mb);
     }
@@ -1185,6 +1084,7 @@ multi_bcast (struct multi_context *m,
 
   if (BLEN (buf) > 0)
     {
+      perf_push (PERF_MULTI_BCAST);
 #ifdef MULTI_DEBUG_EVENT_LOOP
       printf ("BCAST len=%d\n", BLEN (buf));
 #endif
@@ -1200,6 +1100,7 @@ multi_bcast (struct multi_context *m,
 
       hash_iterator_free (&hi);
       mbuf_free_buf (mb);
+      perf_pop ();
     }
 }
 
@@ -1239,10 +1140,12 @@ compute_wakeup_sigma (const struct timeval *delta)
  *
  * Also close context on signal.
  */
-static bool
-multi_process_post (struct multi_thread *mt, struct multi_instance *mi)
+bool
+multi_process_post (struct multi_context *m, struct multi_instance *mi, const unsigned int flags)
 {
-  if (!IS_SIG (&mi->context))
+  bool ret = true;
+
+  if (!IS_SIG (&mi->context) && (flags & MPP_PRE_SELECT))
     {
       /* figure timeouts and fetch possible outgoing
 	 to_link packets (such as ping or TLS control) */
@@ -1255,7 +1158,7 @@ multi_process_post (struct multi_thread *mt, struct multi_instance *mi)
 	  tv_add (&mi->wakeup, &mi->context.c2.timeval);
 
 	  /* tell scheduler to wake us up at some point in the future */
-	  schedule_add_entry (mt->multi->schedule,
+	  schedule_add_entry (m->schedule,
 			      (struct schedule_entry *) mi,
 			      &mi->wakeup,
 			      compute_wakeup_sigma (&mi->context.c2.timeval));
@@ -1263,144 +1166,123 @@ multi_process_post (struct multi_thread *mt, struct multi_instance *mi)
 	  /* connection is "established" when SSL/TLS key negotiation succeeds */
 	  if (!mi->connection_established_flag && CONNECTION_ESTABLISHED (&mi->context))
 	    {
-	      multi_connection_established (mt->multi, mi);
+	      multi_connection_established (m, mi);
 	      mi->connection_established_flag = true;
 	    }
 	}
     }
   if (IS_SIG (&mi->context))
     {
-      /* make sure that pending is nullified if
-	 it points to our soon-to-be-deleted instance */
-      if (mt->pending == mi)
-	mt->pending = NULL;
-      if (mt->earliest_wakeup == mi)
-	mt->earliest_wakeup = NULL;
-      multi_close_instance (mt->multi, mi, false);
-      return false;
+      if (flags & MPP_CLOSE_ON_SIGNAL)
+	{
+	  multi_close_instance (m, mi, false);
+	  ret = false;
+	}
     }
   else
     {
       /* continue to pend on output? */
-      mt->pending = ANY_OUT (&mi->context) ? mi : NULL;
+      m->pending = ANY_OUT (&mi->context) ? mi : NULL;
 #ifdef MULTI_DEBUG_EVENT_LOOP
       printf ("POST %s[%d] to=%d lo=%d/%d w=%d/%d\n",
 	      id(mi),
-	      (int) (mi == mt->pending),
+	      (int) (mi == m->pending),
 	      mi ? mi->context.c2.to_tun.len : -1,
 	      mi ? mi->context.c2.to_link.len : -1,
 	      (mi && mi->context.c2.fragment) ? mi->context.c2.fragment->outgoing.len : -1,
 	      (int)mi->context.c2.timeval.tv_sec,
 	      (int)mi->context.c2.timeval.tv_usec);
 #endif
-      return true;
     }
+
+  if (flags & MPP_RECORD_TOUCH && m->mpp_touched)
+    *m->mpp_touched = mi;
+
+  return ret;
 }
 
 /*
  * Process packets in the TCP/UDP socket -> TUN/TAP interface direction,
  * i.e. client -> server direction.
  */
-static void
-multi_process_incoming_link (struct multi_thread *mt)
+bool
+multi_process_incoming_link (struct multi_context *m, struct multi_instance *instance, const unsigned int mpp_flags)
 {
   struct gc_arena gc = gc_new ();
-  if (BLEN (&mt->top.c2.buf) > 0)
+
+  struct context *c;
+  struct mroute_addr src, dest;
+  unsigned int mroute_flags;
+  struct multi_instance *mi;
+  bool ret = true;
+
+  ASSERT (!m->pending);
+
+  if (!instance)
     {
-      struct context *c;
-      struct mroute_addr src, dest;
-      unsigned int mroute_flags;
-      struct multi_instance *mi;
-      struct multi_context *m = mt->multi;
-
 #ifdef MULTI_DEBUG_EVENT_LOOP
-      printf ("UDP -> TUN [%d]\n", BLEN (&mt->top.c2.buf));
+      printf ("TCP/UDP -> TUN [%d]\n", BLEN (&m->top.c2.buf));
 #endif
-      ASSERT (!mt->pending);
+      m->pending = multi_get_create_instance_udp (m);
+    }
+  else
+    m->pending = instance;
 
-      mt->pending = multi_get_create_instance (mt);
-      if (!mt->pending)
-	return;
-
-      set_prefix (mt->pending);
+  if (m->pending)
+    {
+      set_prefix (m->pending);
 
       /* get instance context */
-      c = &mt->pending->context;
+      c = &m->pending->context;
 
-      /* transfer packet pointer from top-level context buffer to instance */
-      c->c2.buf = mt->top.c2.buf;
-
-      /* transfer from-addr from top-level context buffer to instance */
-      c->c2.from = mt->top.c2.from;
-
-      /* decrypt in instance context */
-      process_incoming_link (c);
-
-      if (TUNNEL_TYPE (mt->top.c1.tuntap) == DEV_TYPE_TUN)
+      if (!instance)
 	{
-	  /* extract packet source and dest addresses */
-	  mroute_flags = mroute_extract_addr_from_packet (&src,
-							  &dest,
-							  &c->c2.to_tun,
-							  DEV_TYPE_TUN);
+	  /* transfer packet pointer from top-level context buffer to instance */
+	  c->c2.buf = m->top.c2.buf;
 
-	  /* drop packet if extract failed */
-	  if (!(mroute_flags & MROUTE_EXTRACT_SUCCEEDED))
-	    {
-	      c->c2.to_tun.len = 0;
-	    }
-	  /* make sure that source address is associated with this client */
-	  else if (multi_get_instance_by_virtual_addr (m, &src, true) != mt->pending)
-	    {
-	      msg (D_MULTI_DEBUG, "MULTI: bad source address from client [%s], packet dropped",
-		   mroute_addr_print (&src, &gc));
-	      c->c2.to_tun.len = 0;
-	    }
-	  /* client-to-client communication enabled? */
-	  else if (m->enable_c2c)
-	    {
-	      /* multicast? */
-	      if (mroute_flags & MROUTE_EXTRACT_MCAST)
-		{
-		  /* for now, treat multicast as broadcast */
-		  multi_bcast (m, &c->c2.to_tun, mt->pending);
-		}
-	      else /* possible client to client routing */
-		{
-		  ASSERT (!(mroute_flags & MROUTE_EXTRACT_BCAST));
-		  mi = multi_get_instance_by_virtual_addr (m, &dest, true);
-		  
-		  /* if dest addr is a known client, route to it */
-		  if (mi)
-		    {
-		      multi_unicast (m, &c->c2.to_tun, mi);
-		      register_activity (c);
-		      c->c2.to_tun.len = 0;
-		    }
-		}
-	    }
+	  /* transfer from-addr from top-level context buffer to instance */
+	  c->c2.from = m->top.c2.from;
 	}
-      else if (TUNNEL_TYPE (mt->top.c1.tuntap) == DEV_TYPE_TAP)
+
+      if (BLEN (&c->c2.buf) > 0)
 	{
-	  /* extract packet source and dest addresses */
-	  mroute_flags = mroute_extract_addr_from_packet (&src,
-							  &dest,
-							  &c->c2.to_tun,
-							  DEV_TYPE_TAP);
+	  /* decrypt in instance context */
+	  process_incoming_link (c);
 
-	  if (mroute_flags & MROUTE_EXTRACT_SUCCEEDED)
+	  if (TUNNEL_TYPE (m->top.c1.tuntap) == DEV_TYPE_TUN)
 	    {
-	      /* check for broadcast */
-	      if (m->enable_c2c)
-		{
-		  if (mroute_flags & (MROUTE_EXTRACT_BCAST|MROUTE_EXTRACT_MCAST))
-		    {
-		      multi_bcast (m, &c->c2.to_tun, mt->pending);
-		    }
-		  else /* try client-to-client routing */
-		    {
-		      mi = multi_get_instance_by_virtual_addr (m, &dest, false);
+	      /* extract packet source and dest addresses */
+	      mroute_flags = mroute_extract_addr_from_packet (&src,
+							      &dest,
+							      &c->c2.to_tun,
+							      DEV_TYPE_TUN);
 
+	      /* drop packet if extract failed */
+	      if (!(mroute_flags & MROUTE_EXTRACT_SUCCEEDED))
+		{
+		  c->c2.to_tun.len = 0;
+		}
+	      /* make sure that source address is associated with this client */
+	      else if (multi_get_instance_by_virtual_addr (m, &src, true) != m->pending)
+		{
+		  msg (D_MULTI_DEBUG, "MULTI: bad source address from client [%s], packet dropped",
+		       mroute_addr_print (&src, &gc));
+		  c->c2.to_tun.len = 0;
+		}
+	      /* client-to-client communication enabled? */
+	      else if (m->enable_c2c)
+		{
+		  /* multicast? */
+		  if (mroute_flags & MROUTE_EXTRACT_MCAST)
+		    {
+		      /* for now, treat multicast as broadcast */
+		      multi_bcast (m, &c->c2.to_tun, m->pending);
+		    }
+		  else /* possible client to client routing */
+		    {
+		      ASSERT (!(mroute_flags & MROUTE_EXTRACT_BCAST));
+		      mi = multi_get_instance_by_virtual_addr (m, &dest, true);
+		  
 		      /* if dest addr is a known client, route to it */
 		      if (mi)
 			{
@@ -1410,45 +1292,79 @@ multi_process_incoming_link (struct multi_thread *mt)
 			}
 		    }
 		}
-		  
-	      /* learn source address */
-	      multi_learn_addr (m, mt->pending, &src, 0);
 	    }
-	  else
+	  else if (TUNNEL_TYPE (m->top.c1.tuntap) == DEV_TYPE_TAP)
 	    {
-	      c->c2.to_tun.len = 0;
+	      /* extract packet source and dest addresses */
+	      mroute_flags = mroute_extract_addr_from_packet (&src,
+							      &dest,
+							      &c->c2.to_tun,
+							      DEV_TYPE_TAP);
+
+	      if (mroute_flags & MROUTE_EXTRACT_SUCCEEDED)
+		{
+		  /* check for broadcast */
+		  if (m->enable_c2c)
+		    {
+		      if (mroute_flags & (MROUTE_EXTRACT_BCAST|MROUTE_EXTRACT_MCAST))
+			{
+			  multi_bcast (m, &c->c2.to_tun, m->pending);
+			}
+		      else /* try client-to-client routing */
+			{
+			  mi = multi_get_instance_by_virtual_addr (m, &dest, false);
+
+			  /* if dest addr is a known client, route to it */
+			  if (mi)
+			    {
+			      multi_unicast (m, &c->c2.to_tun, mi);
+			      register_activity (c);
+			      c->c2.to_tun.len = 0;
+			    }
+			}
+		    }
+		  
+		  /* learn source address */
+		  multi_learn_addr (m, m->pending, &src, 0);
+		}
+	      else
+		{
+		  c->c2.to_tun.len = 0;
+		}
 	    }
 	}
-      
+
       /* postprocess and set wakeup */
-      multi_process_post (mt, mt->pending);
+      ret = multi_process_post (m, m->pending, mpp_flags);
 
       clear_prefix ();
     }
+
   gc_free (&gc);
+  return ret;
 }
 
 /*
  * Process packets in the TUN/TAP interface -> TCP/UDP socket direction,
  * i.e. server -> client direction.
  */
-static void
-multi_process_incoming_tun (struct multi_thread *mt)
+bool
+multi_process_incoming_tun (struct multi_context *m, const unsigned int mpp_flags)
 {
   struct gc_arena gc = gc_new ();
-  struct multi_context *m = mt->multi;
+  bool ret = true;
 
-  if (BLEN (&mt->top.c2.buf) > 0)
+  if (BLEN (&m->top.c2.buf) > 0)
     {
       unsigned int mroute_flags;
       struct mroute_addr src, dest;
-      const int dev_type = TUNNEL_TYPE (mt->top.c1.tuntap);
+      const int dev_type = TUNNEL_TYPE (m->top.c1.tuntap);
 
 #ifdef MULTI_DEBUG_EVENT_LOOP
-      printf ("TUN -> UDP [%d]\n", BLEN (&mt->top.c2.buf));
+      printf ("TUN -> TCP/UDP [%d]\n", BLEN (&m->top.c2.buf));
 #endif
 
-      ASSERT (!mt->pending);
+      ASSERT (!m->pending);
 
       /* 
        * Route an incoming tun/tap packet to
@@ -1457,7 +1373,7 @@ multi_process_incoming_tun (struct multi_thread *mt)
 
       mroute_flags = mroute_extract_addr_from_packet (&src,
 						      &dest,
-						      &mt->top.c2.buf,
+						      &m->top.c2.buf,
 						      dev_type);
 
       if (mroute_flags & MROUTE_EXTRACT_SUCCEEDED)
@@ -1468,26 +1384,26 @@ multi_process_incoming_tun (struct multi_thread *mt)
 	  if (mroute_flags & (MROUTE_EXTRACT_BCAST|MROUTE_EXTRACT_MCAST))
 	    {
 	      /* for now, treat multicast as broadcast */
-	      multi_bcast (m, &mt->top.c2.buf, NULL);
+	      multi_bcast (m, &m->top.c2.buf, NULL);
 	    }
 	  else
 	    {
-	      mt->pending = multi_get_instance_by_virtual_addr (m, &dest, dev_type == DEV_TYPE_TUN);
-	      if (mt->pending)
+	      m->pending = multi_get_instance_by_virtual_addr (m, &dest, dev_type == DEV_TYPE_TUN);
+	      if (m->pending)
 		{
-		  set_prefix (mt->pending);
-
 		  /* get instance context */
-		  c = &mt->pending->context;
+		  c = &m->pending->context;
+		  
+		  set_prefix (m->pending);
 
 		  /* transfer packet pointer from top-level context buffer to instance */
-		  c->c2.buf = mt->top.c2.buf;
+		  c->c2.buf = m->top.c2.buf;
      
 		  /* encrypt in instance context */
 		  process_incoming_tun (c);
 	      
 		  /* postprocess and set wakeup */
-		  multi_process_post (mt, mt->pending);
+		  ret = multi_process_post (m, m->pending, mpp_flags);
 
 		  clear_prefix ();
 		}
@@ -1495,6 +1411,7 @@ multi_process_incoming_tun (struct multi_thread *mt)
 	}
     }
   gc_free (&gc);
+  return ret;
 }
 
 /*
@@ -1502,17 +1419,21 @@ multi_process_incoming_tun (struct multi_thread *mt)
  * queue.
  */
 struct multi_instance *
-multi_bcast_instance (struct multi_context *m)
+multi_get_queue (struct mbuf_set *ms)
 {
   struct mbuf_item item;
-  if (mbuf_extract_item_lock (m->mbuf, &item, true))
-    {
-      set_prefix (item.instance);
 
+  if (mbuf_extract_item (ms, &item)) /* cleartext IP packet */
+    {
+      unsigned int pipv4_flags = PIPV4_PASSTOS;
+
+      set_prefix (item.instance);
       item.instance->context.c2.buf = item.buffer->buf;
+      if (item.buffer->flags & MF_UNICAST) /* --mssfix doesn't make sense for broadcast or multicast */
+	pipv4_flags |= PIPV4_MSSFIX;
+      process_ipv4_header (&item.instance->context, pipv4_flags, &item.instance->context.c2.buf);
       encrypt_sign (&item.instance->context, true);
       mbuf_free_buf (item.buffer);
-      mbuf_extract_item_unlock (m->mbuf);
 
 #ifdef MULTI_DEBUG
       msg (D_MULTI_DEBUG, "MULTI: C2C/MCAST/BCAST");
@@ -1527,317 +1448,79 @@ multi_bcast_instance (struct multi_context *m)
 }
 
 /*
- * Send a packet to TCP/UDP socket.
- */
-static inline void
-multi_process_outgoing_link (struct multi_thread *mt)
-{
-  struct multi_instance *mi;
-
-  if (mt->pending)
-    {
-      mi = mt->pending;
-#ifdef MULTI_DEBUG_EVENT_LOOP
-      printf ("%s -> UDP [U] l=%d f=%d\n",
-	      id(mi),
-	      mi->context.c2.to_link.len,
-	      mi->context.c2.fragment ? mi->context.c2.fragment->outgoing.len : -1);
-#endif
-
-    }
-  else
-    {
-      mi = multi_bcast_instance (mt->multi);
-#ifdef MULTI_DEBUG_EVENT_LOOP
-      printf ("%s -> UDP [B] len=%d frag=%d\n",
-	      id(mi),
-	      mi ? mi->context.c2.to_link.len : -1,
-	      (mi && mi->context.c2.fragment) ? mi->context.c2.fragment->outgoing.len : -1);
-#endif
-    }
-  
-  if (mi)
-    {
-      set_prefix (mi);
-      process_outgoing_link (&mi->context);
-      multi_process_post (mt, mi);
-      clear_prefix ();
-    }
-}
-
-/*
- * Send a packet to TUN/TAP interface.
- */
-static inline void
-multi_process_outgoing_tun (struct multi_thread *mt)
-{
-  struct multi_instance *mi = mt->pending;
-  ASSERT (mi);
-#ifdef MULTI_DEBUG_EVENT_LOOP
-  printf ("%s -> TUN len=%d\n",
-	  id(mi),
-	  mi->context.c2.to_tun.len);
-#endif
-  set_prefix (mi);
-  process_outgoing_tun (&mi->context);
-  multi_process_post (mt, mi);
-  clear_prefix ();
-}
-
-/*
- * Process an I/O event.
- */
-void
-multi_process_io (struct multi_thread *mt)
-{
-  const unsigned int status = mt->top.c2.event_set_status;
-
-#ifdef MULTI_DEBUG_EVENT_LOOP
-  char buf[16];
-  buf[0] = 0;
-  if (status & SOCKET_READ)
-    strcat (buf, "SR/");
-  else if (status & SOCKET_WRITE)
-    strcat (buf, "SW/");
-  else if (status & TUN_READ)
-    strcat (buf, "TR/");
-  else if (status & TUN_WRITE)
-    strcat (buf, "TW/");
-  printf ("IO %s\n", buf);
-#endif
-
-  /* TCP/UDP port ready to accept write */
-  if (status & SOCKET_WRITE)
-    {
-      multi_process_outgoing_link (mt);
-    }
-  /* TUN device ready to accept write */
-  else if (status & TUN_WRITE)
-    {
-      multi_process_outgoing_tun (mt);
-    }
-  /* Incoming data on TCP/UDP port */
-  else if (status & SOCKET_READ)
-    {
-      read_incoming_link (&mt->top);
-      if (!IS_SIG (&mt->top))
-	multi_process_incoming_link (mt);
-    }
-  /* Incoming data on TUN device */
-  else if (status & TUN_READ)
-    {
-      read_incoming_tun (&mt->top);
-      if (!IS_SIG (&mt->top))
-	multi_process_incoming_tun (mt);
-    }
-}
-
-/*
  * Called when an I/O wait times out.  Usually means that a particular
  * client instance object needs timer-based service.
  */
-static inline void
-multi_process_timeout (struct multi_thread *mt)
+bool
+multi_process_timeout (struct multi_context *m, const unsigned int mpp_flags)
 {
+  bool ret = true;
+
 #ifdef MULTI_DEBUG_EVENT_LOOP
-  printf ("%s -> TIMEOUT\n", id(mt->earliest_wakeup));
+  printf ("%s -> TIMEOUT\n", id(m->earliest_wakeup));
 #endif
 
   /* instance marked for wakeup? */
-  if (mt->earliest_wakeup)
+  if (m->earliest_wakeup)
     {
-      set_prefix (mt->earliest_wakeup);
-      multi_process_post (mt, mt->earliest_wakeup);
-      mt->earliest_wakeup = NULL;
+      set_prefix (m->earliest_wakeup);
+      ret = multi_process_post (m, m->earliest_wakeup, mpp_flags);
+      m->earliest_wakeup = NULL;
       clear_prefix ();
     }
+  return ret;
 }
 
 /*
- * Check for signals.
- */
-#define TNUS_SIG() \
-  if (IS_SIG (&thread->top)) \
-  { \
-    if (thread->top.sig->signal_received == SIGUSR2) \
-      { \
-        struct status_output *so = status_open (NULL, 0, M_INFO); \
-        multi_print_status (thread->multi, so); \
-        status_close (so); \
-        thread->top.sig->signal_received = 0; \
-        continue; \
-      } \
-    break; \
-  }
-
-/*
- * The idea of struct multi_thread is that multiple threads could handle
- * the event loop simultaneously.
- */
-
-static struct multi_thread *
-multi_thread_init (struct multi_context *multi, const struct context *top)
-{
-  struct multi_thread *thread;
-  ALLOC_OBJ_CLEAR (thread, struct multi_thread);
-  thread->multi = multi;
-  inherit_context_thread (&thread->top, top);
-  thread->context_buffers = thread->top.c2.buffers = init_context_buffers (&top->c2.frame);
-  return thread;
-}
-
-static void
-multi_thread_free (struct multi_thread *thread)
-{
-  close_context (&thread->top, -1);
-  free_context_buffers (thread->context_buffers);
-  free (thread);
-}
-
-/*
- * Return the io_wait() flags appropriate for
- * a point-to-multipoint tunnel.
- */
-static inline unsigned int
-p2mp_iow_flags (const struct multi_thread *mt)
-{
-  unsigned int flags = 0;
-  if (mt->pending)
-    {
-      if (TUN_OUT (&mt->pending->context))
-	flags |= IOW_TO_TUN;
-      if (LINK_OUT (&mt->pending->context))
-	flags |= IOW_TO_LINK;
-    }
-  else if (mbuf_defined (mt->multi->mbuf))
-    flags |= IOW_MBUF;
-  else
-    flags |= IOW_READ;
-
-  return flags;
-}
-
-static inline void
-process_per_second_timers (struct multi_thread *thread)
-{
-  if (thread->per_second_trigger != now)
-    {
-      /* possibly reap instances/routes in vhash */
-      multi_reap_process (thread->multi);
-
-      /* possibly print to status log */
-      if (thread->top.c1.status_output) {
-	if (status_trigger (thread->top.c1.status_output))
-	  multi_print_status (thread->multi, thread->top.c1.status_output);
-      }
-
-      thread->per_second_trigger = now;
-    }
-}
-
-/*
- * Top level event loop for single-threaded operation.
- * UDP mode.
- */
-static void
-tunnel_server_single_threaded_udp (struct context *top)
-{
-  struct multi_context multi;
-  struct multi_thread *thread;
-
-  top->mode = CM_TOP;
-  context_clear_2 (top);
-
-  /* initialize top-tunnel instance */
-  init_instance (top);
-  if (IS_SIG (top))
-    return;
-  
-  /* initialize global multi_context object */
-  multi_init (&multi, top);
-
-  /* initialize a single multi_thread object */
-  thread = multi_thread_init (&multi, top);
-
-  /* per-packet event loop */
-  while (true)
-    {
-      /* set up and do the io_wait() */
-      multi_get_timeout (thread, &thread->top.c2.timeval);
-      io_wait (&thread->top, p2mp_iow_flags (thread));
-      TNUS_SIG ();
-
-      /* check on status of coarse timers */
-      process_per_second_timers (thread);
-
-      /* timeout? */
-      if (thread->top.c2.event_set_status == ES_TIMEOUT)
-	{
-	  multi_process_timeout (thread);
-	}
-      else
-	{
-	  /* process the I/O which triggered select */
-	  multi_process_io (thread);
-	  TNUS_SIG ();
-	}
-    }
-
-  /* tear down tunnel instance (unless --persist-tun) */
-  multi_thread_free (thread);
-  close_instance (top);
-  multi_uninit (&multi);
-  top->first_time = false;
-}
-
-/*
- * Top level event loop for single-threaded operation.
- * TCP mode.
- */
-static void
-tunnel_server_single_threaded_tcp (struct context *top)
-{
-  //struct multi_context multi;
-  //struct multi_thread *thread;
-
-  msg (M_FATAL, "Sorry, TCP support in server mode is not finished yet");
-}
-
-/*
- * Top level event loop for single-threaded operation.
+ * Process timers in the top-level context
  */
 void
-tunnel_server_single_threaded (struct context *top)
+multi_process_per_second_timers_dowork (struct multi_context *m)
+{
+  /* possibly reap instances/routes in vhash */
+  multi_reap_process (m);
+
+  /* possibly print to status log */
+  if (m->top.c1.status_output)
+    {
+      if (status_trigger (m->top.c1.status_output))
+	multi_print_status (m, m->top.c1.status_output);
+    }
+}
+
+void
+multi_top_init (struct multi_context *m, const struct context *top)
+{
+  inherit_context_top (&m->top, top);
+  m->top.c2.buffers = init_context_buffers (&top->c2.frame);
+}
+
+void
+multi_top_free (struct multi_context *m)
+{
+  close_context (&m->top, -1);
+  free_context_buffers (m->top.c2.buffers);
+}
+
+/*
+ * Top level event loop.
+ */
+void
+tunnel_server (struct context *top)
 {
   ASSERT (top->options.mode == MODE_SERVER);
 
   switch (top->options.proto) {
   case PROTO_UDPv4:
-    tunnel_server_single_threaded_udp (top);
+    tunnel_server_udp (top);
     break;
   case PROTO_TCPv4_SERVER:
-    tunnel_server_single_threaded_tcp (top);
+    tunnel_server_tcp (top);
     break;
   default:
     ASSERT (0);
   }
 }
-
-#ifdef USE_PTHREAD
-
-/*
- * NOTE: multi-threaded mode is not finished yet.
- */
-
-void
-tunnel_server_multi_threaded (struct context *top)
-{
-  ASSERT (top->options.n_threads >= 2);
-  openvpn_thread_init ();
-  tunnel_server_single_threaded (top);
-  openvpn_thread_cleanup ();
-}
-#endif
 
 #else
 static void dummy(void) {}

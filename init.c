@@ -520,13 +520,27 @@ do_init_route_list (const struct options *options,
 void
 do_route (const struct options *options, struct route_list *route_list)
 {
-  if (!options->route_noexec)
+  if (!options->route_noexec && route_list)
     add_routes (route_list, false);
+
   if (options->route_script)
     {
       setenv_str ("script_type", "route-up");
       system_check (options->route_script, "Route script failed", false);
     }
+
+#ifdef WIN32
+  if (options->show_net_up)
+    {
+      show_routes (M_INFO|M_NOPREFIX);
+      show_adapters (M_INFO|M_NOPREFIX);
+    }
+  else if (check_debug_level (D_SHOW_NET))
+    {
+      show_routes (D_SHOW_NET|M_NOPREFIX);
+      show_adapters (D_SHOW_NET|M_NOPREFIX);
+    }
+#endif
 }
 
 /*
@@ -603,12 +617,12 @@ do_open_tun (struct context *c)
 		  c->c1.tuntap->actual_name,
 		  TUN_MTU_SIZE (&c->c2.frame),
 		  EXPANDED_SIZE (&c->c2.frame),
-		  print_in_addr_t (c->c1.tuntap->local, true, &gc),
-		  print_in_addr_t (c->c1.tuntap->remote_netmask, true, &gc),
+		  print_in_addr_t (c->c1.tuntap->local, IA_EMPTY_IF_UNDEF, &gc),
+		  print_in_addr_t (c->c1.tuntap->remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
 		  "init", NULL, "up");
 
       /* possibly add routes */
-      if (!c->options.route_delay_defined && c->c1.route_list)
+      if (!c->options.route_delay_defined)
 	do_route (&c->options, c->c1.route_list);
 
       /*
@@ -632,8 +646,8 @@ do_open_tun (struct context *c)
 		    c->c1.tuntap->actual_name,
 		    TUN_MTU_SIZE (&c->c2.frame),
 		    EXPANDED_SIZE (&c->c2.frame),
-		    print_in_addr_t (c->c1.tuntap->local, true, &gc),
-		    print_in_addr_t (c->c1.tuntap->remote_netmask, true, &gc),
+		    print_in_addr_t (c->c1.tuntap->local, IA_EMPTY_IF_UNDEF, &gc),
+		    print_in_addr_t (c->c1.tuntap->remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
 		    "restart", NULL, "up");
     }
   gc_free (&gc);
@@ -709,7 +723,10 @@ do_up (struct context *c, bool pulled_options, unsigned int option_types_found)
 	{
 	  /* if --route-delay was specified, start timer */
 	  if (c->options.route_delay_defined)
-	    event_timeout_init (&c->c2.route_wakeup, c->options.route_delay, now);
+	    {
+	      event_timeout_init (&c->c2.route_wakeup, c->options.route_delay, now);
+	      event_timeout_init (&c->c2.route_wakeup_expire, c->options.route_delay + ROUTE_DELAY_WINDOW, now);
+	    }
 	}
       else if (pulled_options && (option_types_found & (OPT_P_UP|OPT_P_ROUTE|OPT_P_IPWIN32)))
 	{
@@ -794,7 +811,12 @@ init_crypto_pre (struct context *c, const unsigned int flags)
     }
 
   /* Initialize crypto options */
-  c->c2.crypto_options.use_iv = c->options.use_iv;
+
+  if (c->options.use_iv)
+    c->c2.crypto_options.flags |= CO_USE_IV;
+
+  if (c->options.mute_replay_warnings)
+    c->c2.crypto_options.flags |= CO_MUTE_REPLAY_WARNINGS;
 }
 
 /*
@@ -815,7 +837,7 @@ do_init_crypto_static (struct context *c, const unsigned int flags)
 		      options->replay_time);
       c->c2.crypto_options.packet_id = &c->c2.packet_id;
       c->c2.crypto_options.pid_persist = &c->c1.pid_persist;
-      c->c2.crypto_options.packet_id_long_form = true;
+      c->c2.crypto_options.flags |= CO_PACKET_ID_LONG_FORM;
       packet_id_persist_load_obj (&c->c1.pid_persist,
 				  c->c2.crypto_options.packet_id);
     }
@@ -891,6 +913,7 @@ do_init_crypto_tls_c1 (struct context *c)
 				   options->dh_file,
 				   options->cert_file,
 				   options->priv_key_file,
+				   options->pkcs12_file,
 				   options->cipher_list);
 
       /* Get cipher & hash algorithms */
@@ -946,12 +969,16 @@ do_init_crypto_tls (struct context *c, const unsigned int flags)
 
   /* Set all command-line TLS-related options */
   CLEAR (to);
+
+  to.crypto_flags_and = ~(CO_PACKET_ID_LONG_FORM);
+  if (packet_id_long_form)
+    to.crypto_flags_or = CO_PACKET_ID_LONG_FORM;
+
   to.ssl_ctx = c->c1.ks.ssl_ctx;
   to.key_type = c->c1.ks.key_type;
   to.server = options->tls_server;
   to.key_method = options->key_method;
   to.replay = options->replay;
-  to.packet_id_long_form = packet_id_long_form;
   to.replay_window = options->replay_window;
   to.replay_time = options->replay_time;
   to.transition_window = options->transition_window;
@@ -971,7 +998,7 @@ do_init_crypto_tls (struct context *c, const unsigned int flags)
     {
       to.tls_auth_key = c->c1.ks.tls_auth_key;
       to.tls_auth.pid_persist = &c->c1.pid_persist;
-      to.tls_auth.packet_id_long_form = true;
+      to.tls_auth.flags |= CO_PACKET_ID_LONG_FORM;
       crypto_adjust_frame_parameters (&to.frame,
 				      &c->c1.ks.key_type,
 				      false, false, true, true);
@@ -1105,6 +1132,23 @@ do_init_frame (struct context *c)
 	 "WARNING: normally if you use --mssfix and/or --fragment, you should also set --tun-mtu %d (currently it is %d)",
 	 ETHERNET_MTU, TUN_MTU_SIZE (&c->c2.frame_fragment));
 
+}
+
+static void
+do_option_warnings (struct context *c)
+{
+  const struct options *o = &c->options;
+
+#if P2MP
+  if (o->pull && o->ifconfig_local)
+    msg (M_WARN, "WARNING: using --pull and --ifconfig together is probably not what you want");
+
+  if (o->mode == MODE_SERVER)
+    {
+      if (o->duplicate_cn && o->client_config_dir)
+	msg (M_WARN, "WARNING: using --duplicate-cn and --client-config-dir together is probably not what you want");
+    }
+#endif
 }
 
 static void
@@ -1459,8 +1503,8 @@ do_close_tuntap (struct context *c)
 		      tuntap_actual,
 		      TUN_MTU_SIZE (&c->c2.frame),
 		      EXPANDED_SIZE (&c->c2.frame),
-		      print_in_addr_t (local, true, &gc),
-		      print_in_addr_t (remote_netmask, true, &gc),
+		      print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
+		      print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
 		      "init",
 		      signal_description (c->sig->signal_received,
 					  c->sig->signal_text),
@@ -1474,8 +1518,8 @@ do_close_tuntap (struct context *c)
 			tuntap_actual,
 			TUN_MTU_SIZE (&c->c2.frame),
 			EXPANDED_SIZE (&c->c2.frame),
-			print_in_addr_t (local, true, &gc),
-			print_in_addr_t (remote_netmask, true, &gc),
+			print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
+			print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
 			"restart",
 			signal_description (c->sig->signal_received,
 					    c->sig->signal_text),
@@ -1551,7 +1595,7 @@ do_event_set_init (struct context *c,
 {
   unsigned int flags = 0;
 
-  c->c2.event_set_max = 3;
+  c->c2.event_set_max = BASE_N_EVENTS;
 
   flags |= EVENT_METHOD_FAST;
 
@@ -1565,7 +1609,7 @@ do_event_set_init (struct context *c,
 static void
 do_close_event_set (struct context *c)
 {
-  if (c->c2.event_set_owned)
+  if (c->c2.event_set && c->c2.event_set_owned)
     {
       event_free (c->c2.event_set);
     }
@@ -1606,6 +1650,14 @@ init_instance (struct context *c)
 
   /* initialize context level 2 --verb/--mute parms */
   init_verb_mute (c, IVM_LEVEL_2);
+
+  /* set error message delay for non-server modes */
+  if (c->mode == CM_P2P)
+    set_check_status_error_delay (P2P_ERROR_DELAY_MS);
+    
+  /* warn about inconsistent options */
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_option_warnings (c);
 
   /* should we disable paging? */
   if (c->first_time && options->mlock)
@@ -1709,7 +1761,7 @@ init_instance (struct context *c)
       if (IS_SIG (c))
 	{
 	  c->sig->signal_text = "socket";
-	  close_instance (c);
+	  close_context (c, -1);
 	  return;
 	}
     }
@@ -1818,6 +1870,15 @@ inherit_context_child (struct context *dest,
   dest->options = src->options;
   options_detach (&dest->options);
 
+  if (dest->mode == CM_CHILD_TCP)
+    {
+      /*
+       * The CM_TOP context does the socket listen(),
+       * and the CM_CHILD_TCP context does the accept().
+       */
+      dest->c2.accept_from = src->c2.link_socket;
+    }
+
   /* context init */
   init_instance (dest);
   if (IS_SIG (dest))
@@ -1842,23 +1903,15 @@ inherit_context_child (struct context *dest,
       dest->c2.link_socket_info->lsa = &dest->c1.link_socket_addr;
       dest->c2.link_socket_info->connection_established = false;
     }
-  else if (dest->mode == CM_CHILD_TCP)
-    {
-      /*
-       * The CM_TOP context does the socket listen(),
-       * and the CM_CHILD_TCP context does the accept().
-       */
-      dest->c2.accept_from = src->c2.link_socket;
-    }
 }
 
 void
-inherit_context_thread (struct context *dest,
-			const struct context *src)
+inherit_context_top (struct context *dest,
+		     const struct context *src)
 {
   *dest = *src;
 
-  dest->mode = CM_THREAD;
+  dest->mode = CM_TOP_CLONE;
   dest->first_time = false;
 
   options_detach (&dest->options);
@@ -1875,7 +1928,9 @@ inherit_context_thread (struct context *dest,
   dest->c2.buffers_owned = false;
   dest->c2.event_set_owned = false;
 
-  do_event_set_init (dest, false);
+  dest->c2.event_set = NULL;
+  if (src->options.proto == PROTO_UDPv4)
+    do_event_set_init (dest, false);
 }
 
 void

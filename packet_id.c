@@ -439,7 +439,7 @@ packet_id_persist_print (const struct packet_id_persist *p, struct gc_arena *gc)
   return (char *)out.data;
 }
 
-#if 1 // JYFIXME was: #ifdef PID_TEST
+#ifdef PID_TEST
 
 void
 packet_id_interactive_test ()

@@ -51,6 +51,7 @@
 #include "fdmisc.h"
 #include "interval.h"
 #include "options.h"
+#include "perf.h"
 
 #include "memdbg.h"
 
@@ -573,6 +574,7 @@ init_ssl (bool server,
 	  const char *dh_file,
 	  const char *cert_file,
 	  const char *priv_key_file,
+	  const char *pkcs12_file,
 	  const char *cipher_list)
 {
   SSL_CTX *ctx;
@@ -614,35 +616,96 @@ init_ssl (bool server,
   /* Set callback for getting password from user to decrypt private key */
   SSL_CTX_set_default_passwd_cb (ctx, pem_password_callback);
 
-  /* Load Certificate */
-  if (!SSL_CTX_use_certificate_file (ctx, cert_file, SSL_FILETYPE_PEM))
-    msg (M_SSLERR, "Cannot load certificate file %s", cert_file);
+  if (pkcs12_file)
+    {
+    /* Use PKCS #12 file for key, cert and CA certs */
 
-  /* Load Private Key */
-  if (!SSL_CTX_use_PrivateKey_file (ctx, priv_key_file, SSL_FILETYPE_PEM))
-    msg (M_SSLERR, "Cannot load private key file %s", priv_key_file);
-  warn_if_group_others_accessible (priv_key_file);
+      FILE *fp;
+      EVP_PKEY *pkey;
+      X509 *cert;
+      STACK_OF(X509) *ca = NULL;
+      PKCS12 *p12;
+      int i;
+      char password[256];
 
-  /* Check Private Key */
-  if (!SSL_CTX_check_private_key (ctx))
-    msg (M_SSLERR, "Private key does not match the certificate");
+      /* Load the PKCS #12 file */
+      if (!(fp = fopen(pkcs12_file, "rb")))
+        msg (M_SSLERR, "Error opening file %s", pkcs12_file);
+      p12 = d2i_PKCS12_fp(fp, NULL);
+      fclose (fp);
+      if (!p12) msg (M_SSLERR, "Error reading PKCS#12 file %s", pkcs12_file);
+      
+      /* Parse the PKCS #12 file */
+      if (!PKCS12_parse(p12, "", &pkey, &cert, &ca))
+        {
+          pem_password_callback (password, sizeof(password) - 1, 0, NULL);
+          /* Reparse the PKCS #12 file with password */
+          ca = NULL;
+          if (!PKCS12_parse(p12, password, &pkey, &cert, &ca))
+             msg (M_SSLERR, "Error parsing PKCS#12 file %s", pkcs12_file);
+        }
+      PKCS12_free(p12);
 
-  /* Load CA file for verifying peer supplied certificate */
-  if (!SSL_CTX_load_verify_locations (ctx, ca_file, NULL))
-    msg (M_SSLERR, "Cannot load CA certificate file %s (SSL_CTX_load_verify_locations)", ca_file);
+      /* Load Certificate */
+      if (!SSL_CTX_use_certificate (ctx, cert))
+        msg (M_SSLERR, "Cannot use certificate");
 
-  /* Load names of CAs from file and use it as a client CA list */
-  {
-    STACK_OF(X509_NAME) *cert_names;
-    cert_names = SSL_load_client_CA_file (ca_file);
-    if (!cert_names)
-      msg (M_SSLERR, "Cannot load CA certificate file %s (SSL_load_client_CA_file)", ca_file);
-    SSL_CTX_set_client_CA_list (ctx, cert_names);
-  }
+      /* Load Private Key */
+      if (!SSL_CTX_use_PrivateKey (ctx, pkey))
+        msg (M_SSLERR, "Cannot use private key");
+      warn_if_group_others_accessible (pkcs12_file);
 
-  /* Enable the use of certificate chains */
-  if (!SSL_CTX_use_certificate_chain_file (ctx, cert_file))
-    msg (M_SSLERR, "Cannot load certificate chain file %s (SSL_use_certificate_chain_file)", cert_file);
+      /* Check Private Key */
+      if (!SSL_CTX_check_private_key (ctx))
+        msg (M_SSLERR, "Private key does not match the certificate");
+
+      /* Set Certificate Verification chain */
+      if (ca && sk_num(ca))
+        {
+          for (i = 0; i < sk_X509_num(ca); i++)
+            {
+	      if (!X509_STORE_add_cert(ctx->cert_store,sk_X509_value(ca, i)))
+                 msg (M_SSLERR, "Cannot add certificate to certificate chain (X509_STORE_add_cert)");
+              if (!SSL_CTX_add_client_CA(ctx, sk_X509_value(ca, i)))
+                msg (M_SSLERR, "Cannot add certificate to client CA list (SSL_CTX_add_client_CA)");
+            }
+        }
+    }
+  else
+    {
+    /* Use seperate PEM files for key, cert and CA certs */
+
+      /* Load Certificate */
+      if (!SSL_CTX_use_certificate_file (ctx, cert_file, SSL_FILETYPE_PEM))
+        msg (M_SSLERR, "Cannot load certificate file %s", cert_file);
+
+      /* Load Private Key */
+      if (!SSL_CTX_use_PrivateKey_file (ctx, priv_key_file, SSL_FILETYPE_PEM))
+        msg (M_SSLERR, "Cannot load private key file %s", priv_key_file);
+      warn_if_group_others_accessible (priv_key_file);
+
+      /* Check Private Key */
+      if (!SSL_CTX_check_private_key (ctx))
+        msg (M_SSLERR, "Private key does not match the certificate");
+
+      /* Load CA file for verifying peer supplied certificate */
+      if (!SSL_CTX_load_verify_locations (ctx, ca_file, NULL))
+        msg (M_SSLERR, "Cannot load CA certificate file %s (SSL_CTX_load_verify_locations)", ca_file);
+
+      /* Load names of CAs from file and use it as a client CA list */
+      {
+        STACK_OF(X509_NAME) *cert_names;
+        cert_names = SSL_load_client_CA_file (ca_file);
+        if (!cert_names)
+          msg (M_SSLERR, "Cannot load CA certificate file %s (SSL_load_client_CA_file)", ca_file);
+        SSL_CTX_set_client_CA_list (ctx, cert_names);
+      }
+
+      /* Enable the use of certificate chains */
+      if (!SSL_CTX_use_certificate_chain_file (ctx, cert_file))
+        msg (M_SSLERR, "Cannot load certificate chain file %s (SSL_use_certificate_chain_file)", cert_file);
+    }
+
 
   /* Require peer certificate verification */
   SSL_CTX_set_verify (ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
@@ -1009,30 +1072,46 @@ bio_read (struct tls_multi* multi, BIO *bio, struct buffer *buf, int maxlen, con
  * to BIOs.
  */
 
-static inline int
+static int
 key_state_write_plaintext (struct tls_multi *multi, struct key_state *ks, struct buffer *buf)
 {
-  return bio_write (multi, ks->ssl_bio, buf, "tls_write_plaintext");
+  int ret;
+  perf_push (PERF_BIO_WRITE_PLAINTEXT);
+  ret = bio_write (multi, ks->ssl_bio, buf, "tls_write_plaintext");
+  perf_pop ();
+  return ret;
 }
 
-static inline int
+static int
 key_state_write_ciphertext (struct tls_multi *multi, struct key_state *ks, struct buffer *buf)
 {
-  return bio_write (multi, ks->ct_in, buf, "tls_write_ciphertext");
+  int ret;
+  perf_push (PERF_BIO_WRITE_CIPHERTEXT);
+  ret = bio_write (multi, ks->ct_in, buf, "tls_write_ciphertext");
+  perf_pop ();
+  return ret;
 }
 
-static inline int
+static int
 key_state_read_plaintext (struct tls_multi *multi, struct key_state *ks, struct buffer *buf,
 			  int maxlen)
 {
-  return bio_read (multi, ks->ssl_bio, buf, maxlen, "tls_read_plaintext");
+  int ret;
+  perf_push (PERF_BIO_READ_PLAINTEXT);
+  ret = bio_read (multi, ks->ssl_bio, buf, maxlen, "tls_read_plaintext");
+  perf_pop ();
+  return ret;
 }
 
-static inline int
+static int
 key_state_read_ciphertext (struct tls_multi *multi, struct key_state *ks, struct buffer *buf,
 			   int maxlen)
 {
-  return bio_read (multi, ks->ct_out, buf, maxlen, "tls_read_ciphertext");
+  int ret;
+  perf_push (PERF_BIO_READ_CIPHERTEXT);
+  ret = bio_read (multi, ks->ct_out, buf, maxlen, "tls_read_ciphertext");
+  perf_pop ();
+  return ret;
 }
 
 /*
@@ -1379,7 +1458,7 @@ tls_auth_standalone_init (struct tls_options *tls_options,
   /* set up pointer to HMAC object for TLS packet authentication */
   tas->tls_auth_key = tls_options->tls_auth_key;
   tas->tls_auth_options.key_ctx_bi = &tas->tls_auth_key;
-  tas->tls_auth_options.packet_id_long_form = true;
+  tas->tls_auth_options.flags |= CO_PACKET_ID_LONG_FORM;
 
   /* get initial frame parms, still need to finalize */
   tas->frame = tls_options->frame;
@@ -2460,6 +2539,8 @@ tls_multi_process (struct tls_multi *multi,
   int i;
   bool active = false;
 
+  perf_push (PERF_TLS_MULTI_PROCESS);
+
   /*
    * Process each session object having state of S_INITIAL or greater,
    * and which has a defined remote IP addr.
@@ -2530,6 +2611,7 @@ tls_multi_process (struct tls_multi *multi,
     msg (D_TLS_DEBUG_LOW, "TLS: tls_multi_process: untrusted session promoted to trusted");
   }
 
+  perf_pop ();
   gc_free (&gc);
   return active;
 }
@@ -2649,7 +2731,8 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  opt->key_ctx_bi = &ks->key;
 		  opt->packet_id = multi->opt.replay ? &ks->packet_id : NULL;
 		  opt->pid_persist = NULL;
-		  opt->packet_id_long_form = multi->opt.packet_id_long_form;
+		  opt->flags &= multi->opt.crypto_flags_and;
+		  opt->flags |= multi->opt.crypto_flags_or;
 		  ASSERT (buf_advance (buf, 1));
 		  ++ks->n_packets;
 		  ks->n_bytes += buf->len;
@@ -3000,7 +3083,7 @@ tls_pre_decrypt (struct tls_multi *multi,
   opt->key_ctx_bi = NULL;
   opt->packet_id = NULL;
   opt->pid_persist = NULL;
-  opt->packet_id_long_form = false;
+  opt->flags &= multi->opt.crypto_flags_and;
   gc_free (&gc);
   return ret;
 
@@ -3081,7 +3164,7 @@ tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
 	 * control channel state.  After we fork, we will process this
 	 * session-initiating packet for real.
 	 */
-	co.ignore_packet_id = true;
+	co.flags |= CO_IGNORE_PACKET_ID;
 
 	/* HMAC test, if --tls-auth was specified */
 	status = read_control_auth (&newbuf, &co, from);
@@ -3130,7 +3213,8 @@ tls_pre_encrypt (struct tls_multi *multi,
 	      opt->key_ctx_bi = &ks->key;
 	      opt->packet_id = multi->opt.replay ? &ks->packet_id : NULL;
 	      opt->pid_persist = NULL;
-	      opt->packet_id_long_form = multi->opt.packet_id_long_form;
+	      opt->flags &= multi->opt.crypto_flags_and;
+	      opt->flags |= multi->opt.crypto_flags_or;
 	      multi->save_ks = ks;
 	      msg (D_TLS_DEBUG, "TLS: tls_pre_encrypt: key_id=%d", ks->key_id);
 	      return;
@@ -3149,7 +3233,7 @@ tls_pre_encrypt (struct tls_multi *multi,
   opt->key_ctx_bi = NULL;
   opt->packet_id = NULL;
   opt->pid_persist = NULL;
-  opt->packet_id_long_form = false;
+  opt->flags &= multi->opt.crypto_flags_and;
 }
 
 /* Prepend the appropriate opcode to encrypted buffer prior to TCP/UDP send */

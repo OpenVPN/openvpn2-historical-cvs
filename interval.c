@@ -71,7 +71,7 @@ event_timeout_trigger (struct event_timeout *et,
 	    }
 	}
 
-      if (wakeup < tv->tv_sec)
+      if (tv && wakeup < tv->tv_sec)
 	{
 #if INTERVAL_DEBUG
 	  msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d) etcr=%d", wakeup, et->n, et_const_retry);

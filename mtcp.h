@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -23,20 +23,44 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef BASIC_H
-#define BASIC_H
+/*
+ * TCP specific code for --mode server
+ */
 
-/* bool definitions */
-#define bool int
-#define true 1
-#define false 0
+#ifndef MTCP_H
+#define MTCP_H
 
-#define BOOL_CAST(x) ((x) ? (true) : (false))
+#if P2MP
 
-/* size of an array */
-#define SIZE(x) (sizeof(x)/sizeof(x[0]))
+#include "event.h"
 
-/* clear an object */
-#define CLEAR(x) memset(&(x), 0, sizeof(x))
+#define MULTI_TCP_TUN_WRITE_TIMEOUT 10
 
+/*
+ * Extra state info needed for TCP mode
+ */
+struct multi_tcp
+{
+  struct event_set *es;
+  struct event_set_return *esr;
+  int n_esr;
+  int maxevents;
+  unsigned int tun_rwflags;
+};
+
+struct multi_instance;
+struct context;
+
+struct multi_tcp *multi_tcp_init (int maxevents, int *maxclients);
+void multi_tcp_free (struct multi_tcp *mtcp);
+void multi_tcp_dereference_instance (struct multi_tcp *mtcp, struct multi_instance *mi);
+
+bool multi_tcp_instance_specific_init (struct multi_context *m, struct multi_instance *mi);
+void multi_tcp_instance_specific_free (struct multi_instance *mi);
+
+void multi_tcp_link_out_deferred (struct multi_context *m, struct multi_instance *mi);
+
+void tunnel_server_tcp (struct context *top);
+
+#endif
 #endif

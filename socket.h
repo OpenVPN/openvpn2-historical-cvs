@@ -29,6 +29,7 @@
 #include "buffer.h"
 #include "common.h"
 #include "error.h"
+#include "proto.h"
 #include "mtu.h"
 #include "win32.h"
 #include "event.h"
@@ -51,7 +52,7 @@ struct remote_list
 };
 
 /* 
- * packet_size_type is used communicate packet size
+ * packet_size_type is used to communicate packet size
  * over the wire when stream oriented protocols are
  * being used
  */
@@ -126,10 +127,14 @@ struct link_socket
   struct overlapped_io reads;
   struct overlapped_io writes;
   struct rw_handle rw_handle;
+  struct rw_handle listen_handle; /* For listening on TCP socket in server mode */
 #endif
 
   /* used for printing status info only */
-  unsigned int rwflags;
+  unsigned int rwflags_debug;
+
+  /* used for long-term queueing of pre-accepted socket listen */
+  bool listen_persistent_queued;
 
   /* set on initial call to init phase 1 */
   struct remote_list *remote_list;
@@ -174,6 +179,12 @@ struct link_socket
   /* The OpenVPN server we will use the proxy to connect to */
   const char *proxy_dest_host;
   int proxy_dest_port;
+
+#if PASSTOS_CAPABILITY
+  /* used to get/set TOS. */
+  uint8_t ptos;
+  bool ptos_defined;
+#endif
 };
 
 /*
@@ -257,9 +268,9 @@ const char *print_sockaddr_ex (const struct sockaddr_in *addr,
 const char *print_sockaddr (const struct sockaddr_in *addr,
 			    struct gc_arena *gc);
 
-const char *print_in_addr_t (in_addr_t addr,
-			     bool empty_if_undef,
-			     struct gc_arena *gc);
+#define IA_EMPTY_IF_UNDEF (1<<0)
+#define IA_NET_ORDER      (1<<1)
+const char *print_in_addr_t (in_addr_t addr, unsigned int flags, struct gc_arena *gc);
 
 void setenv_sockaddr (const char *name_prefix,
 		      const struct sockaddr_in *addr);
@@ -651,6 +662,35 @@ link_socket_write (struct link_socket *sock,
     }
 }
 
+#if PASSTOS_CAPABILITY
+
+/*
+ * Extract TOS bits.  Assumes that ipbuf is a valid IPv4 packet.
+ */
+static inline void
+link_socket_extract_tos (struct link_socket *ls, const struct buffer *ipbuf)
+{
+  if (ls && ipbuf)
+    {
+      struct openvpn_iphdr *iph = (struct openvpn_iphdr *) BPTR (ipbuf);
+      ls->ptos = iph->tos;
+      ls->ptos_defined = true;
+    }
+}
+
+/*
+ * Set socket properties to reflect TOS bits which were extracted
+ * from tunnel packet.
+ */
+static inline void
+link_socket_set_tos (struct link_socket *ls)
+{
+  if (ls && ls->ptos_defined)
+    setsockopt (ls->sd, IPPROTO_IP, IP_TOS, &ls->ptos, sizeof (ls->ptos));
+}
+
+#endif
+
 /*
  * Socket I/O wait functions
  */
@@ -671,23 +711,33 @@ socket_event_handle (const struct link_socket *s)
 #endif
 }
 
+event_t socket_listen_event_handle (struct link_socket *s);
+
+unsigned int
+socket_set (struct link_socket *s,
+	    struct event_set *es,
+	    unsigned int rwflags,
+	    void *arg,
+	    unsigned int *persistent);
+
 static inline void
-socket_set (struct link_socket *s, struct event_set *es, unsigned int rwflags, void *arg)
+socket_set_listen_persistent (struct link_socket *s,
+			      struct event_set *es,
+			      void *arg)
 {
-  if (s)
+  if (s && !s->listen_persistent_queued)
     {
-      if (rwflags & EVENT_READ)
-	{
-	  if (!stream_buf_read_setup (s))
-	    rwflags &= ~EVENT_READ;
-	}
-      event_ctl (es, socket_event_handle (s), rwflags, arg);
-#ifdef WIN32
-      if (rwflags & EVENT_READ)
-	socket_recv_queue (s, 0);
-#endif
-      s->rwflags = rwflags;
+      event_ctl (es, socket_listen_event_handle (s), EVENT_READ, arg);
+      s->listen_persistent_queued = true;
     }
+}
+
+static inline void
+socket_reset_listen_persistent (struct link_socket *s)
+{
+#ifdef WIN32
+  reset_tcp_connect_event (&s->listen_handle, s->sd);
+#endif
 }
 
 const char *socket_stat (const struct link_socket *s, unsigned int rwflags, struct gc_arena *gc);

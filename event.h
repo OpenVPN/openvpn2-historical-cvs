@@ -27,10 +27,19 @@
 #define EVENT_H
 
 #include "win32.h"
+#include "sig.h"
+#include "perf.h"
 
+/*
+ * rwflags passed to event_ctl and returned by
+ * struct event_set_return.
+ */
 #define EVENT_READ     (1<<0)
 #define EVENT_WRITE    (1<<1)
 
+/*
+ * Initialization flags passed to event_set_init
+ */
 #define EVENT_METHOD_SCALABLE     (1<<0)
 #define EVENT_METHOD_US_TIMEOUT   (1<<1)
 #define EVENT_METHOD_FAST         (1<<2)
@@ -115,7 +124,11 @@ event_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
 static inline int
 event_wait (struct event_set *es, const struct timeval *tv, struct event_set_return *out, int outlen)
 {
-  return (*es->func.wait)(es, tv, out, outlen);
+  int ret;
+  perf_push (PERF_IO_WAIT);
+  ret = (*es->func.wait)(es, tv, out, outlen);
+  perf_pop ();
+  return ret;
 }
 
 static inline void
@@ -150,6 +163,9 @@ wait_signal (struct event_set *es, void *arg)
 static inline void
 get_signal (volatile int *sig)
 {
+  const int i = siginfo_static.signal_received;
+  if (i)
+    *sig = i;
 }
 
 #endif

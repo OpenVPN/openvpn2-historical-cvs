@@ -26,7 +26,7 @@
 #ifndef SHAPER_H
 #define SHAPER_H
 
-#define SHAPER_DEBUG // JYFIXME
+//#define SHAPER_DEBUG
 
 #ifdef HAVE_GETTIMEOFDAY
 

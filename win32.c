@@ -36,6 +36,7 @@
 #include "buffer.h"
 #include "error.h"
 #include "mtu.h"
+#include "sig.h"
 #include "win32.h"
 
 #include "memdbg.h"
@@ -166,6 +167,49 @@ overlapped_io_state_ascii (const struct overlapped_io *o)
       return "1";
     }
   return "?";
+}
+
+/*
+ * Event-based notification of incoming TCP connections
+ */
+
+void
+init_tcp_connect_event (struct rw_handle *event, socket_descriptor_t sd)
+{
+  event->write = NULL;
+
+  /* manual reset event, initially set to unsignaled */
+  event->read = CreateEvent (NULL, TRUE, FALSE, NULL);
+  if (event->read == NULL)
+    msg (M_ERR, "Error: init_tcp_connect_rw_handle: CreateEvent failed");
+  
+  if (WSAEventSelect (sd, event->read, FD_ACCEPT) != 0)
+    msg (M_FATAL | M_ERRNO_SOCK, "Error: init_tcp_connect_rw_handle: WSAEventSelect call failed");
+}
+
+void
+reset_tcp_connect_event (struct rw_handle *event, socket_descriptor_t sd)
+{
+  WSANETWORKEVENTS wne;  
+  if (WSAEnumNetworkEvents (sd, event->read, &wne) != 0)
+    msg (M_FATAL | M_ERRNO_SOCK, "Error: reset_tcp_connect_event: WSAEnumNetworkEvents call failed");
+}
+
+void
+free_tcp_connect_event (struct rw_handle *event, socket_descriptor_t sd)
+{
+  ASSERT (event->write == NULL);
+  if (event->read)
+    {
+      if (sd >= 0)
+	{
+	  if (WSAEventSelect (sd, event->read, 0) != 0)
+	    msg (M_WARN | M_ERRNO_SOCK, "Warning: free_tcp_connect_rw_handle: WSAEventSelect call failed");
+	}
+      if (!CloseHandle (event->read))
+	msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed in free_tcp_connect_rw_handle");
+      event->read = NULL;
+    }
 }
 
 /*
@@ -321,30 +365,36 @@ win32_signal_close (struct win32_signal *ws)
 int
 win32_signal_get (struct win32_signal *ws)
 {
+  int ret = 0;
   if (ws->mode == WSO_MODE_SERVICE)
     {
       if (HANDLE_DEFINED (ws->in.read)
 	  && WaitForSingleObject (ws->in.read, 0) == WAIT_OBJECT_0)
-	return SIGTERM;
-      else
-	return 0;
+	ret = SIGTERM;
     }
   else if (ws->mode == WSO_MODE_CONSOLE)
     {
       switch (win32_keyboard_get (ws)) {
       case 0x3B: /* F1 -> USR1 */
-	return SIGUSR1;
+	ret = SIGUSR1;
+	break;
       case 0x3C: /* F2 -> USR2 */
-	return SIGUSR2;
+	ret = SIGUSR2;
+	break;
       case 0x3D: /* F3 -> HUP */
-	return SIGHUP;
+	ret = SIGHUP;
+	break;
       case 0x3E: /* F4 -> TERM */
-	return SIGTERM;
-      default:
-	return 0;
+	ret = SIGTERM;
+	break;
       }
     }
-  return 0;
+  if (ret)
+    {
+      siginfo_static.signal_received = ret;
+      siginfo_static.hard = true;
+    }
+  return ret;
 }
 
 void

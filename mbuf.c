@@ -45,7 +45,6 @@ mbuf_init (unsigned int size)
 {
   struct mbuf_set *ret;
   ALLOC_OBJ_CLEAR (ret, struct mbuf_set);
-  //mutex_init (&ret->mutex);
   ret->capacity = adjust_power_of_2 (size);
   ALLOC_ARRAY (ret->array, struct mbuf_item, ret->capacity);
   return ret;
@@ -54,15 +53,17 @@ mbuf_init (unsigned int size)
 void
 mbuf_free (struct mbuf_set *ms)
 {
-  int i;
-  for (i = 0; i < (int) ms->len; ++i)
+  if (ms)
     {
-      struct mbuf_item *item = &ms->array[MBUF_INDEX(ms->head, i, ms->capacity)];
-      mbuf_free_buf (item->buffer);
+      int i;
+      for (i = 0; i < (int) ms->len; ++i)
+	{
+	  struct mbuf_item *item = &ms->array[MBUF_INDEX(ms->head, i, ms->capacity)];
+	  mbuf_free_buf (item->buffer);
+	}
+      free (ms->array);
+      free (ms);
     }
-  free (ms->array);
-  //mutex_destroy (&ms->mutex);
-  free (ms);
 }
 
 struct mbuf_buffer *
@@ -72,6 +73,7 @@ mbuf_alloc_buf (const struct buffer *buf)
   ALLOC_OBJ (ret, struct mbuf_buffer);
   ret->buf = clone_buf (buf);
   ret->refcount = 1;
+  ret->flags = 0;
   return ret;
 }
 
@@ -88,12 +90,11 @@ mbuf_free_buf (struct mbuf_buffer *mb)
 void
 mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item)
 {
-  //mutex_lock (&ms->mutex);
-
+  ASSERT (ms);
   if (ms->len == ms->capacity)
     {
       struct mbuf_item rm;
-      ASSERT (mbuf_extract_item_lock (ms, &rm, false));
+      ASSERT (mbuf_extract_item (ms, &rm));
       mbuf_free_buf (rm.buffer);
       msg (D_MBUF, "MBUF: mbuf packet dropped");
     }
@@ -104,55 +105,59 @@ mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item)
   if (++ms->len > ms->max_queued)
     ms->max_queued = ms->len;
   ++item->buffer->refcount;
-
-  //mutex_unlock (&ms->mutex);
 }
 
-/* if true return, caller must unlock mutex
-   after it has processed return item */
 bool
-mbuf_extract_item_lock (struct mbuf_set *ms, struct mbuf_item *item, bool lock)
+mbuf_extract_item (struct mbuf_set *ms, struct mbuf_item *item)
 {
-  if (lock)
+  if (ms)
     {
-      //mutex_lock (&ms->mutex);
-    }
-
-  while (ms->len)
-    {
-      *item = ms->array[ms->head];
-      ms->head = MBUF_INDEX(ms->head, 1, ms->capacity);
-      --ms->len;
-      if (item->instance) /* ignore dereferenced instances */
-	return true;
-    }
-
-  if (lock)
-    {
-      //mutex_unlock (&ms->mutex);
+      while (ms->len)
+	{
+	  *item = ms->array[ms->head];
+	  ms->head = MBUF_INDEX(ms->head, 1, ms->capacity);
+	  --ms->len;
+	  if (item->instance) /* ignore dereferenced instances */
+	    return true;
+	}
     }
   return false;
+}
+
+struct multi_instance *
+mbuf_peek_dowork (struct mbuf_set *ms)
+{
+  if (ms)
+    {
+      int i;
+      for (i = 0; i < (int) ms->len; ++i)
+	{
+	  struct mbuf_item *item = &ms->array[MBUF_INDEX(ms->head, i, ms->capacity)];
+	  if (item->instance)
+	    return item->instance;
+	}
+    }
+  return NULL;
 }
 
 void
 mbuf_dereference_instance (struct mbuf_set *ms, struct multi_instance *mi)
 {
-  //mutex_lock (&ms->mutex);
-
-  int i;
-  for (i = 0; i < (int) ms->len; ++i)
+  if (ms)
     {
-      struct mbuf_item *item = &ms->array[MBUF_INDEX(ms->head, i, ms->capacity)];
-      if (item->instance == mi)
+      int i;
+      for (i = 0; i < (int) ms->len; ++i)
 	{
-	  mbuf_free_buf (item->buffer);
-	  item->buffer = NULL;
-	  item->instance = NULL;
-	  msg (D_MBUF, "MBUF: dereferenced queued packet");
+	  struct mbuf_item *item = &ms->array[MBUF_INDEX(ms->head, i, ms->capacity)];
+	  if (item->instance == mi)
+	    {
+	      mbuf_free_buf (item->buffer);
+	      item->buffer = NULL;
+	      item->instance = NULL;
+	      msg (D_MBUF, "MBUF: dereferenced queued packet");
+	    }
 	}
     }
-
-  //mutex_unlock (&ms->mutex);
 }
 
 #else

@@ -87,6 +87,9 @@ struct tuntap_options {
   /* NBDD (45) */
   in_addr_t nbdd[N_DHCP_ADDR];
   int nbdd_len;
+
+  bool dhcp_renew;
+  bool dhcp_release;
 };
 
 #elif TARGET_LINUX
@@ -141,6 +144,10 @@ struct tuntap
   ULONG ipapi_context;
   ULONG ipapi_instance;
   in_addr_t adapter_netmask;
+
+  /* Windows adapter index for TAP-Win32 adapter,
+     ~0 if undefined */
+  DWORD adapter_index;
 #else
   int fd;   /* file descriptor for TUN/TAP dev */
 #endif
@@ -150,10 +157,10 @@ struct tuntap
 #endif
 
   /* used for printing status info only */
-  unsigned int rwflags;
+  unsigned int rwflags_debug;
 
   /* Some TUN/TAP drivers like to be ioctled for mtu
-   after open */
+     after open */
   int post_open_mtu;
 };
 
@@ -280,10 +287,15 @@ const char *get_device_guid (const char *name,
 
 void verify_255_255_255_252 (in_addr_t local, in_addr_t remote);
 
-void show_tap_win32_adapters (void);
+void show_tap_win32_adapters (int msglev, int warnlev);
+void show_adapters (int msglev);
+
 void show_valid_win32_tun_subnets (void);
 const char *tap_win32_getinfo (const struct tuntap *tt, struct gc_arena *gc);
 void tun_show_debug (struct tuntap *tt);
+
+bool dhcp_release (const struct tuntap *tt);
+bool dhcp_renew (const struct tuntap *tt);
 
 int tun_read_queue (struct tuntap *tt, int maxsize);
 int tun_write_queue (struct tuntap *tt, struct buffer *buf);
@@ -360,18 +372,29 @@ tun_event_handle (const struct tuntap *tt)
 #endif
 }
 
-static inline void
-tun_set (struct tuntap *tt, struct event_set *es, unsigned int rwflags, void *arg)
+static inline unsigned int
+tun_set (struct tuntap *tt,
+	 struct event_set *es,
+	 unsigned int rwflags,
+	 void *arg,
+	 unsigned int *persistent)
 {
   if (tuntap_defined (tt))
     {
-      event_ctl (es, tun_event_handle (tt), rwflags, arg);
+      /* if persistent is defined, call event_ctl only if rwflags has changed since last call */
+      if (!persistent || *persistent != rwflags)
+	{
+	  event_ctl (es, tun_event_handle (tt), rwflags, arg);
+	  if (persistent)
+	    *persistent = rwflags;
+	}
 #ifdef WIN32
       if (rwflags & EVENT_READ)
 	tun_read_queue (tt, 0);
 #endif
-      tt->rwflags = rwflags;
+      tt->rwflags_debug = rwflags;
     }
+  return rwflags;
 }
 
 const char *tun_stat (const struct tuntap *tt, unsigned int rwflags, struct gc_arena *gc);

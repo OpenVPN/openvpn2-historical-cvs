@@ -34,6 +34,14 @@
 
 #define MAX_ROUTES 100
 
+/*
+ * On Windows, after --route-delay triggers our
+ * addition of routes, wait up to n seconds for
+ * interfaces referenced by the route destination
+ * to come up.
+ */
+#define ROUTE_DELAY_WINDOW 30
+
 struct route_special_addr
 {
   in_addr_t remote_endpoint;
@@ -55,6 +63,7 @@ struct route_option_list {
   int n;
   bool redirect_default_gateway;
   bool redirect_local;
+  bool redirect_def1;
   struct route_option routes[MAX_ROUTES];
 };
 
@@ -73,6 +82,7 @@ struct route_list {
   struct route_special_addr spec;
   bool redirect_default_gateway;
   bool redirect_local;
+  bool redirect_def1;
   bool did_redirect_default_gateway;
 
   int n;
@@ -117,6 +127,15 @@ void print_route_options (const struct route_option_list *rol,
 void print_routes (const struct route_list *rl, int level);
 
 bool netmask_to_netbits (in_addr_t network, in_addr_t netmask, int *netbits);
+
+#ifdef WIN32
+void show_routes (int msglev);
+bool test_routes (const struct route_list *rl);
+bool add_route_ipapi (const struct route *r);
+bool del_route_ipapi (const struct route *r);
+#else
+static inline bool test_routes (const struct route_list *rl) { return true; }
+#endif
 
 static inline in_addr_t
 netbits_to_netmask (int netbits)

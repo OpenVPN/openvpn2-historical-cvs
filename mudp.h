@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -23,20 +23,21 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef BASIC_H
-#define BASIC_H
+/*
+ * UDP specific code for --mode server
+ */
 
-/* bool definitions */
-#define bool int
-#define true 1
-#define false 0
+#ifndef MUDP_H
+#define MUDP_H
 
-#define BOOL_CAST(x) ((x) ? (true) : (false))
+#if P2MP
 
-/* size of an array */
-#define SIZE(x) (sizeof(x)/sizeof(x[0]))
+struct context;
+struct multi_context;
 
-/* clear an object */
-#define CLEAR(x) memset(&(x), 0, sizeof(x))
+void tunnel_server_udp (struct context *top);
 
+struct multi_instance *multi_get_create_instance_udp (struct multi_context *m);
+
+#endif
 #endif

@@ -32,6 +32,7 @@
 #include "syshead.h"
 
 #include "status.h"
+#include "perf.h"
 
 #include "memdbg.h"
 
@@ -83,6 +84,7 @@ status_trigger_tv (struct status_output *so, struct timeval *tv)
 void
 status_reset (struct status_output *so)
 {
+  perf_push (PERF_MULTI_SHOW_STATS);
   if (so && so->fd >= 0)
     lseek (so->fd, (off_t)0, SEEK_SET);
 }
@@ -120,6 +122,7 @@ status_flush (struct status_output *so)
 #warning both ftruncate and chsize functions appear to be missing from this OS
 #endif
     }
+  perf_pop ();
 }
 
 void

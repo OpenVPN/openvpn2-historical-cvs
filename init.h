@@ -28,6 +28,12 @@
 
 #include "openvpn.h"
 
+/*
+ * Baseline maximum number of events
+ * to wait for.
+ */
+#define BASE_N_EVENTS 3
+
 void context_clear (struct context *c);
 void context_clear_1 (struct context *c);
 void context_clear_2 (struct context *c);
@@ -77,8 +83,8 @@ void do_deferred_options (struct context *c, const unsigned int found);
 void inherit_context_child (struct context *dest,
 			    const struct context *src);
 
-void inherit_context_thread (struct context *dest,
-			     const struct context *src);
+void inherit_context_top (struct context *dest,
+			  const struct context *src);
 
 void close_context (struct context *c, int sig);
 

@@ -29,6 +29,8 @@
 #include "basic.h"
 #include "thread.h"
 
+//#define ABORT_ON_ERROR
+
 struct gc_arena;
 
 /*

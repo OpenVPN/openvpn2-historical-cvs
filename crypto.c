@@ -103,15 +103,15 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	      CLEAR (iv_buf);
 
 	      /* generate pseudo-random IV */
-	      if (opt->use_iv)
+	      if (opt->flags & CO_USE_IV)
 		prng_bytes (iv_buf, iv_size);
 
 	      /* Put packet ID in plaintext buffer or IV, depending on cipher mode */
 	      if (opt->packet_id)
 		{
 		  struct packet_id_net pin;
-		  packet_id_alloc_outgoing (&opt->packet_id->send, &pin, opt->packet_id_long_form);
-		  ASSERT (packet_id_write (&pin, buf, opt->packet_id_long_form, true));
+		  packet_id_alloc_outgoing (&opt->packet_id->send, &pin, BOOL_CAST (opt->flags & CO_PACKET_ID_LONG_FORM));
+		  ASSERT (packet_id_write (&pin, buf, BOOL_CAST (opt->flags & CO_PACKET_ID_LONG_FORM), true));
 		}
 	    }
 	  else if (mode == EVP_CIPH_CFB_MODE || mode == EVP_CIPH_OFB_MODE)
@@ -119,7 +119,7 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	      struct packet_id_net pin;
 	      struct buffer b;
 
-	      ASSERT (opt->use_iv);    /* IV and packet-ID required */
+	      ASSERT (opt->flags & CO_USE_IV);    /* IV and packet-ID required */
 	      ASSERT (opt->packet_id); /*  for this mode. */
 
 	      packet_id_alloc_outgoing (&opt->packet_id->send, &pin, true);
@@ -136,7 +136,7 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	  ASSERT (buf_init (&work, FRAME_HEADROOM (frame)));
 
 	  /* set the IV pseudo-randomly */
-	  if (opt->use_iv)
+	  if (opt->flags & CO_USE_IV)
 	    msg (D_PACKET_CONTENT, "ENCRYPT IV: %s", format_hex (iv_buf, iv_size, 0, &gc));
 
 	  msg (D_PACKET_CONTENT, "ENCRYPT FROM: %s",
@@ -158,7 +158,7 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	  ASSERT (outlen == iv_size);
 
 	  /* prepend the IV to the ciphertext */
-	  if (opt->use_iv)
+	  if (opt->flags & CO_USE_IV)
 	    {
 	      uint8_t *output = buf_prepend (&work, iv_size);
 	      ASSERT (output);
@@ -173,8 +173,8 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	  if (opt->packet_id)
 	    {
 	      struct packet_id_net pin;
-	      packet_id_alloc_outgoing (&opt->packet_id->send, &pin, opt->packet_id_long_form);
-	      ASSERT (packet_id_write (&pin, buf, opt->packet_id_long_form, true));
+	      packet_id_alloc_outgoing (&opt->packet_id->send, &pin, BOOL_CAST (opt->flags & CO_PACKET_ID_LONG_FORM));
+	      ASSERT (packet_id_write (&pin, buf, BOOL_CAST (opt->flags & CO_PACKET_ID_LONG_FORM), true));
 	    }
 	  work = *buf;
 	}
@@ -200,7 +200,7 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 }
 
 /*
- * If opt->use_iv is not NULL, we will read an IV from the packet.
+ * If (opt->flags & CO_USE_IV) is not NULL, we will read an IV from the packet.
  *
  * Set buf->len to 0 and return false on decrypt error.
  *
@@ -264,7 +264,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 
 	  /* use IV if user requested it */
 	  CLEAR (iv_buf);
-	  if (opt->use_iv)
+	  if (opt->flags & CO_USE_IV)
 	    {
 	      if (buf->len < iv_size)
 		CRYPT_ERROR ("missing IV info");
@@ -273,7 +273,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	    }
 
 	  /* show the IV's initial state */
-	  if (opt->use_iv)
+	  if (opt->flags & CO_USE_IV)
 	    msg (D_PACKET_CONTENT, "DECRYPT IV: %s", format_hex (iv_buf, iv_size, 0, &gc));
 
 	  if (buf->len < 1)
@@ -306,7 +306,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	      {
 		if (opt->packet_id)
 		  {
-		    if (!packet_id_read (&pin, &work, opt->packet_id_long_form))
+		    if (!packet_id_read (&pin, &work, BOOL_CAST (opt->flags & CO_PACKET_ID_LONG_FORM)))
 		      CRYPT_ERROR ("error reading CBC packet-id");
 		    have_pin = true;
 		  }
@@ -315,7 +315,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	      {
 		struct buffer b;
 
-		ASSERT (opt->use_iv);    /* IV and packet-ID required */
+		ASSERT (opt->flags & CO_USE_IV);    /* IV and packet-ID required */
 		ASSERT (opt->packet_id); /*  for this mode. */
 
 		buf_set_read (&b, iv_buf, iv_size);
@@ -334,9 +334,9 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	  work = *buf;
 	  if (opt->packet_id)
 	    {
-	      if (!packet_id_read (&pin, &work, opt->packet_id_long_form))
+	      if (!packet_id_read (&pin, &work, BOOL_CAST (opt->flags & CO_PACKET_ID_LONG_FORM)))
 		CRYPT_ERROR ("error reading packet-id");
-	      have_pin = !opt->ignore_packet_id;
+	      have_pin = !BOOL_CAST (opt->flags & CO_IGNORE_PACKET_ID);
 	    }
 	}
       
@@ -346,12 +346,13 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	  if (packet_id_test (&opt->packet_id->rec, &pin))
 	    {
 	      packet_id_add (&opt->packet_id->rec, &pin);
-	      if (opt->pid_persist && opt->packet_id_long_form)
+	      if (opt->pid_persist && (opt->flags & CO_PACKET_ID_LONG_FORM))
 		packet_id_persist_save_obj (opt->pid_persist, opt->packet_id);
 	    }
 	  else
 	    {
-	      msg (D_CRYPT_ERRORS, "%s: bad packet ID (may be a replay): %s -- see the man page entry for --no-replay and --replay-window for more info",
+	      if (!(opt->flags & CO_MUTE_REPLAY_WARNINGS))
+	      msg (D_REPLAY_ERRORS, "%s: bad packet ID (may be a replay): %s -- see the man page entry for --no-replay and --replay-window for more info or silence this warning with --mute-replay-warnings",
 		   error_prefix, packet_id_net_print (&pin, true, &gc));
 	      goto error_exit;
 	    }

@@ -46,6 +46,9 @@ struct mbuf_buffer
 {
   struct buffer buf;
   int refcount;
+
+# define MF_UNICAST (1<<0)
+  unsigned int flags;
 };
 
 struct mbuf_item
@@ -56,7 +59,6 @@ struct mbuf_item
 
 struct mbuf_set
 {
-  //MUTEX_DEFINE (mutex);
   unsigned int head;
   unsigned int len;
   unsigned int capacity;
@@ -72,7 +74,7 @@ void mbuf_free_buf (struct mbuf_buffer *mb);
 
 void mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item);
 
-bool mbuf_extract_item_lock (struct mbuf_set *ms, struct mbuf_item *item, bool lock);
+bool mbuf_extract_item (struct mbuf_set *ms, struct mbuf_item *item);
 
 void mbuf_dereference_instance (struct mbuf_set *ms, struct multi_instance *mi);
 
@@ -82,16 +84,20 @@ mbuf_defined (const struct mbuf_set *ms)
   return ms && ms->len;
 }
 
-static inline void
-mbuf_extract_item_unlock (struct mbuf_set *ms)
-{
-  //mutex_unlock (&ms->mutex);
-}
-
 static inline int
 mbuf_maximum_queued (const struct mbuf_set *ms)
 {
   return (int) ms->max_queued;
+}
+
+static inline struct multi_instance *
+mbuf_peek (struct mbuf_set *ms)
+{
+  struct multi_instance *mbuf_peek_dowork (struct mbuf_set *ms);
+  if (mbuf_defined (ms))
+    return mbuf_peek_dowork (ms);
+  else
+    return NULL;
 }
 
 #endif

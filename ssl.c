@@ -3128,17 +3128,20 @@ tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
 
       if (op != P_CONTROL_HARD_RESET_CLIENT_V2)
 	{
+	  /*
+	   * This can occur due to bogus data or DoS packets.
+	   */
 	  msg (D_TLS_ERRORS,
-	       "TLS Error: Unknown opcode (%d) received from %s",
-	       op,
-	       print_sockaddr (from, &gc));
+	       "TLS State Error: No TLS state for client %s, opcode=%d",
+	       print_sockaddr (from, &gc),
+	       op);
 	  goto error;
 	}
 
       if (key_id != 0)
 	{
 	  msg (D_TLS_ERRORS,
-	       "TLS Error: Unknown key ID (%d) received from %s -- 0 was expected",
+	       "TLS State Error: Unknown key ID (%d) received from %s -- 0 was expected",
 	       key_id,
 	       print_sockaddr (from, &gc));
 	  goto error;
@@ -3147,7 +3150,7 @@ tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
       if (buf->len > EXPANDED_SIZE_DYNAMIC (&tas->frame))
 	{
 	  msg (D_TLS_ERRORS,
-	       "TLS Error: Large packet (size %d) received from %s -- a packet no larger than %d bytes was expected",
+	       "TLS State Error: Large packet (size %d) received from %s -- a packet no larger than %d bytes was expected",
 	       buf->len,
 	       print_sockaddr (from, &gc),
 	       EXPANDED_SIZE_DYNAMIC (&tas->frame));

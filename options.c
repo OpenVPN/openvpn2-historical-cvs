@@ -1288,15 +1288,18 @@ pre_pull_restore (struct options *o)
   const struct options_pre_pull *pp = o->pre_pull;
   if (pp)
     {
-      
+      CLEAR (o->tuntap_options);
       if (pp->tuntap_options_defined)
-	{
 	  o->tuntap_options = pp->tuntap_options;
-	}
-      if (pp->routes_defined && o->routes)
+
+      if (pp->routes_defined)
 	{
+	  rol_check_alloc (o);
 	  *o->routes = pp->routes;
 	}
+      else
+	o->routes = NULL;
+
       o->foreign_option_index = pp->foreign_option_index;
     }
 }
@@ -1638,11 +1641,13 @@ string_defined_equal (const char *s1, const char *s2)
     return false;
 }
 
+#if 0
 static void
 ping_rec_err (int msglevel)
 {
   msg (msglevel, "Options error: only one of --ping-exit or --ping-restart options may be specified");
 }
+#endif
 
 static inline int
 positive (int i)
@@ -1719,7 +1724,7 @@ parse_line (char *line, char *p[], int n, const char *file, int line_num, int ms
 	      p[ret] = gc_malloc (parm_len + 1, true, gc);
 	      memcpy (p[ret], parm, parm_len);
 	      p[ret][parm_len] = '\0';
-	      state = 0;
+	      state = STATE_INITIAL;
 	      parm_len = 0;
 	      ++ret;
 	    }
@@ -2498,8 +2503,6 @@ add_option (struct options *options,
     {
       ++i;
       VERIFY_PERMISSION (OPT_P_TIMER);
-      if (options->ping_rec_timeout_action)
-	ping_rec_err (msglevel);
       options->ping_rec_timeout = positive (atoi (p[1]));
       options->ping_rec_timeout_action = PING_EXIT;
     }
@@ -2507,8 +2510,6 @@ add_option (struct options *options,
     {
       ++i;
       VERIFY_PERMISSION (OPT_P_TIMER);
-      if (options->ping_rec_timeout_action)
-	ping_rec_err (msglevel);
       options->ping_rec_timeout = positive (atoi (p[1]));
       options->ping_rec_timeout_action = PING_RESTART;
     }

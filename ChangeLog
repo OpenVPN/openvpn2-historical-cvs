@@ -1,7 +1,17 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.37 2004/07/31 03:33:08 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.38 2004/08/02 12:55:25 jimyonan Exp $
+
+2004.08.02 -- Version 2.0-beta10
+
+* Fixed possible reference after free of option strings
+  after a restart, bug was introduced in beta8.
+* Fixed segfault at route.c:919 in the beta9
+  Windows version that was being caused by indirection
+  through a NULL pointer.
+* Mistakenly built debug version of TAP-Win32 driver
+  for beta9.  Beta10 has correct release build.
 
 2004.07.30 -- Version 2.0-beta9
 

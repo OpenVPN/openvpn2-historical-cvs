@@ -86,7 +86,9 @@ void inherit_context_child (struct context *dest,
 void inherit_context_top (struct context *dest,
 			  const struct context *src);
 
-void close_context (struct context *c, int sig);
+#define CC_GC_FREE     (1<<0)
+#define CC_USR1_TO_HUP (1<<1)
+void close_context (struct context *c, int sig, unsigned int flags);
 
 struct context_buffers *init_context_buffers (const struct frame *frame);
 

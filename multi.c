@@ -402,7 +402,7 @@ multi_close_instance (struct multi_context *m,
     }
 
   if (mi->did_open_context)
-    close_context (&mi->context, SIGTERM);
+    close_context (&mi->context, SIGTERM, CC_GC_FREE);
 
   multi_tcp_instance_specific_free (mi);
 
@@ -1498,7 +1498,7 @@ multi_top_init (struct multi_context *m, const struct context *top)
 void
 multi_top_free (struct multi_context *m)
 {
-  close_context (&m->top, -1);
+  close_context (&m->top, -1, CC_GC_FREE);
   free_context_buffers (m->top.c2.buffers);
 }
 

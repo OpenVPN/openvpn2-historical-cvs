@@ -379,9 +379,9 @@ init_tun (const char *dev,       /* --dev option */
 
       tt->local = getaddr (
 			   GETADDR_RESOLVE
-			   | GETADDR_FATAL
 			   | GETADDR_HOST_ORDER
-			   | GETADDR_FATAL_ON_SIGNAL,
+			   | GETADDR_FATAL_ON_SIGNAL
+			   | GETADDR_FATAL,
 			   ifconfig_local_parm,
 			   0,
 			   NULL,
@@ -389,9 +389,9 @@ init_tun (const char *dev,       /* --dev option */
 
       tt->remote_netmask = getaddr (
 				    (tun ? GETADDR_RESOLVE : 0)
-				    | GETADDR_FATAL
 				    | GETADDR_HOST_ORDER
-				    | GETADDR_FATAL_ON_SIGNAL,
+				    | GETADDR_FATAL_ON_SIGNAL
+				    | GETADDR_FATAL,
 				    ifconfig_remote_netmask_parm,
 				    0,
 				    NULL,

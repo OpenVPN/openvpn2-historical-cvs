@@ -110,11 +110,6 @@ context_init_1 (struct context *c)
 
   init_remote_list (c);
   
-  c->c1.status_output = status_open (c->options.status_file,
-				     c->options.status_file_update_freq,
-				     -1);
-  c->c1.status_output_owned = true;
-
   if (c->options.http_proxy_server)
     {
       c->c1.http_proxy = new_http_proxy (c->options.http_proxy_server,
@@ -1143,6 +1138,9 @@ do_option_warnings (struct context *c)
   if (o->pull && o->ifconfig_local)
     msg (M_WARN, "WARNING: using --pull and --ifconfig together is probably not what you want");
 
+  if (o->pull && is_persist_option (o))
+    msg (M_WARN, "WARNING: using a --persist option may conflict with --pull");
+
   if (o->mode == MODE_SERVER)
     {
       if (o->duplicate_cn && o->client_config_dir)
@@ -1558,16 +1556,6 @@ do_close_packet_id (struct context *c)
 #endif
 }
 
-static void
-do_close_status_output (struct context *c)
-{
-  if (!(c->sig->signal_received == SIGUSR1))
-    {
-      if (c->c1.status_output_owned && c->c1.status_output)
-	status_close (c->c1.status_output);
-    }
-}
-
 /*
  * Close fragmentation handler.
  */
@@ -1612,6 +1600,36 @@ do_close_event_set (struct context *c)
   if (c->c2.event_set && c->c2.event_set_owned)
     {
       event_free (c->c2.event_set);
+    }
+}
+
+/*
+ * Open and close --status file
+ */
+
+static void
+do_open_status_output (struct context *c)
+{
+  if (!c->c1.status_output)
+    {
+      c->c1.status_output = status_open (c->options.status_file,
+					 c->options.status_file_update_freq,
+					 -1);
+      c->c1.status_output_owned = true;
+    }
+}
+
+static void
+do_close_status_output (struct context *c)
+{
+  if (!(c->sig->signal_received == SIGUSR1))
+    {
+      if (c->c1.status_output_owned && c->c1.status_output)
+	{
+	  status_close (c->c1.status_output);
+	  c->c1.status_output = NULL;
+	  c->c1.status_output_owned = false;
+	}
     }
 }
 
@@ -1667,6 +1685,11 @@ init_instance (struct context *c)
   if ((c->mode == CM_P2P || c->mode == CM_TOP) && !c->first_time)
     socket_restart_pause (options->proto, options->http_proxy_server != NULL,
 			  options->socks_proxy_server != NULL);
+
+
+  /* open --status file */
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_open_status_output (c);
 
   /* reset OCC state */
   if (c->mode == CM_P2P || child)
@@ -1756,19 +1779,18 @@ init_instance (struct context *c)
 
   /* finalize the TCP/UDP socket */
   if (c->mode == CM_P2P || c->mode == CM_TOP || c->mode == CM_CHILD_TCP)
-    {
-      do_init_socket_2 (c);
-      if (IS_SIG (c))
-	{
-	  c->sig->signal_text = "socket";
-	  close_context (c, -1);
-	  return;
-	}
-    }
+    do_init_socket_2 (c);
 
   /* initialize timers */
   if (c->mode == CM_P2P || child)
     do_init_timers (c, false);
+
+  /* Check for signals */
+  if (IS_SIG (c))
+    {
+      c->sig->signal_text = "init_instance";
+      close_context (c, -1, CC_USR1_TO_HUP | CC_GC_FREE);
+    }
 }
 
 /*
@@ -1934,12 +1956,15 @@ inherit_context_top (struct context *dest,
 }
 
 void
-close_context (struct context *c, int sig)
+close_context (struct context *c, int sig, unsigned int flags)
 {
   if (sig >= 0)
     c->sig->signal_received = sig;
+  if ((flags & CC_USR1_TO_HUP) && c->sig->signal_received == SIGUSR1)
+    c->sig->signal_received = SIGHUP;
   close_instance (c);
-  context_gc_free (c);
+  if (flags & CC_GC_FREE)
+    context_gc_free (c);
 }
 
 #ifdef USE_CRYPTO
@@ -2004,7 +2029,9 @@ test_crypto_thread (void *arg)
 #endif
 
   test_crypto (&c->c2.crypto_options, &c->c2.frame);
+
   key_schedule_free (&c->c1.ks, true);
+  packet_id_free (&c->c2.packet_id);
 
 #if defined(USE_PTHREAD)
   if (c->first_time && options->n_threads > 1)

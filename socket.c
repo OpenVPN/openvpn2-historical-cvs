@@ -670,10 +670,7 @@ resolve_bind_local (struct link_socket *sock)
     {
       sock->info.lsa->local.sin_family = AF_INET;
       sock->info.lsa->local.sin_addr.s_addr =
-	(sock->local_host ? getaddr (
-				     GETADDR_RESOLVE
-				     | GETADDR_FATAL
-				     | GETADDR_FATAL_ON_SIGNAL,
+	(sock->local_host ? getaddr (GETADDR_RESOLVE | GETADDR_WARN_ON_SIGNAL | GETADDR_FATAL,
 				     sock->local_host,
 				     0,
 				     NULL,

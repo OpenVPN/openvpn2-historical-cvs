@@ -197,7 +197,6 @@ struct link_socket
 
 #ifdef WIN32
 
-#define ECONNRESET WSAECONNRESET
 #define openvpn_close_socket(s) closesocket(s)
 
 int inet_aton (const char *name, struct in_addr *addr);
@@ -426,7 +425,11 @@ socket_connection_reset (const struct link_socket *sock, int status)
       else if (status < 0)
 	{
 	  const int err = openvpn_errno_socket ();
+#ifdef WIN32
+	  return err == WSAECONNRESET || err == WSAECONNABORTED;
+#else
 	  return err == ECONNRESET;
+#endif
 	}
     }
   return false;

@@ -79,11 +79,13 @@ packet_id_init (struct packet_id *p, int seq_backtrack, int time_backtrack)
 void
 packet_id_free (struct packet_id *p)
 {
-  ASSERT (p);
-  msg (D_PID_DEBUG_LOW, "PID packet_id_free");
-  if (p->rec.seq_list)
-    free (p->rec.seq_list);
-  CLEAR (*p);
+  if (p)
+    {
+      msg (D_PID_DEBUG_LOW, "PID packet_id_free");
+      if (p->rec.seq_list)
+	free (p->rec.seq_list);
+      CLEAR (*p);
+    }
 }
 
 void

@@ -166,7 +166,7 @@ init_route (struct route *r,
       r->network = getaddr (
 			    GETADDR_RESOLVE
 			    | GETADDR_HOST_ORDER
-			    | GETADDR_FATAL_ON_SIGNAL,
+			    | GETADDR_WARN_ON_SIGNAL,
 			    ro->network,
 			    0,
 			    &status,
@@ -182,7 +182,7 @@ init_route (struct route *r,
     {
       r->netmask = getaddr (
 			    GETADDR_HOST_ORDER
-			    | GETADDR_FATAL_ON_SIGNAL,
+			    | GETADDR_WARN_ON_SIGNAL,
 			    ro->netmask,
 			    0,
 			    &status,
@@ -202,7 +202,7 @@ init_route (struct route *r,
 	  r->gateway = getaddr (
 				GETADDR_RESOLVE
 				| GETADDR_HOST_ORDER
-				| GETADDR_FATAL_ON_SIGNAL,
+				| GETADDR_WARN_ON_SIGNAL,
 				ro->gateway,
 				0,
 				&status,
@@ -311,7 +311,7 @@ init_route_list (struct route_list *rl,
       rl->spec.remote_endpoint = getaddr (
 				     GETADDR_RESOLVE
 				     | GETADDR_HOST_ORDER
-				     | GETADDR_FATAL_ON_SIGNAL,
+				     | GETADDR_WARN_ON_SIGNAL,
 				     remote_endpoint,
 				     0,
 				     &rl->spec.remote_endpoint_defined,
@@ -909,15 +909,16 @@ test_routes (const struct route_list *rl, const struct tuntap *tt)
     {
       ret = true;
       adapter_up = true;
+
       if (rl)
 	{
 	  int i;
 	  for (i = 0; i < rl->n; ++i)
 	    test_route_helper (&ret, &count, &good, &ambig, adapters, rl->routes[i].gateway);
-	}
 
-      if (rl->redirect_default_gateway && rl->spec.remote_endpoint_defined)
-	test_route_helper (&ret, &count, &good, &ambig, adapters, rl->spec.remote_endpoint);
+	  if (rl->redirect_default_gateway && rl->spec.remote_endpoint_defined)
+	    test_route_helper (&ret, &count, &good, &ambig, adapters, rl->spec.remote_endpoint);
+	}
     }
 
   msg (D_ROUTE, "DEBUG: test_routes: %d/%d succeeded len=%d ret=%d a=%d u/d=%s",  // JYFIXME: change to D_ROUTE_DEBUG

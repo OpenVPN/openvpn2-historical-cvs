@@ -75,8 +75,11 @@ overlapped_io_init (struct overlapped_io *o,
 void
 overlapped_io_close (struct overlapped_io *o)
 {
-  if (!CloseHandle (o->overlapped.hEvent))
-    msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on overlapped I/O event object");
+  if (o->overlapped.hEvent)
+    {
+      if (!CloseHandle (o->overlapped.hEvent))
+	msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on overlapped I/O event object");
+    }
   free_buf (&o->buf_init);
 }
 
@@ -98,6 +101,128 @@ overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix)
       break;
     }
   return BSTR (&out);
+}
+
+/* keyboard functions */
+
+struct keyboard keyboard;
+
+void
+keyboard_init (void)
+{
+  keyboard_open (&keyboard);
+}
+
+void
+keyboard_open (struct keyboard *kb)
+{
+  kb->in = GetStdHandle (STD_INPUT_HANDLE);
+  
+  if (kb->in != INVALID_HANDLE_VALUE)
+    {
+      DWORD console_mode;
+
+      if (!GetConsoleMode(kb->in, &console_mode))
+        msg (M_ERR, "GetConsoleMode failed");
+
+      console_mode &= ~(ENABLE_WINDOW_INPUT
+			| ENABLE_PROCESSED_INPUT
+			| ENABLE_LINE_INPUT
+			| ENABLE_ECHO_INPUT 
+			| ENABLE_MOUSE_INPUT);
+
+      if (!SetConsoleMode(kb->in, console_mode))
+        msg (M_ERR, "SetConsoleMode failed");
+    }
+}
+
+bool
+keyboard_input_available (struct keyboard *kb)
+{
+  if (kb->in != INVALID_HANDLE_VALUE)
+    {
+      DWORD n;
+      if (GetNumberOfConsoleInputEvents (kb->in, &n))
+	return n > 0;
+    }
+  return false;
+}
+
+static unsigned int
+keyboard_ir_to_key (INPUT_RECORD *ir)
+{
+  if (ir->Event.KeyEvent.uChar.AsciiChar == 0)
+    return ir->Event.KeyEvent.wVirtualScanCode;
+
+  if ((ir->Event.KeyEvent.dwControlKeyState
+       & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED))
+      && (ir->Event.KeyEvent.wVirtualKeyCode != 18))
+    return ir->Event.KeyEvent.wVirtualScanCode * 256;
+
+  return ir->Event.KeyEvent.uChar.AsciiChar;
+}
+
+unsigned int
+keyboard_get (struct keyboard *kb)
+{
+  if (kb->in != INVALID_HANDLE_VALUE)
+    {
+      INPUT_RECORD ir;
+      do {
+	DWORD n;
+	if (!keyboard_input_available (kb))
+	  return 0;
+	if (!ReadConsoleInput (kb->in, &ir, 1, &n))
+	  return 0;
+      } while (ir.EventType != KEY_EVENT || ir.Event.KeyEvent.bKeyDown != TRUE);
+
+      return keyboard_ir_to_key (&ir);
+    }
+  else
+    return 0;
+}
+
+int
+keyboard_input_to_signal (struct keyboard *kb)
+{
+  switch (keyboard_get (kb)) {
+  case 0x3B: /* F1 -> USR1 */
+    return SIGUSR1;
+  case 0x3C: /* F2 -> USR2 */
+    return SIGUSR2;
+  case 0x3D: /* F3 -> HUP */
+    return SIGHUP;
+  case 0x3E: /* F4 -> TERM */
+    return SIGTERM;
+  default:
+    return 0;
+  }
+}
+
+/* window functions */
+
+static char old_window_title [256];
+
+void
+save_window_title ()
+{
+  if (!GetConsoleTitle (old_window_title, sizeof (old_window_title)))
+    old_window_title[0] = 0;
+}
+
+void
+restore_window_title ()
+{
+  if (strlen (old_window_title))
+    SetConsoleTitle (old_window_title);
+}
+
+void
+generate_window_title (const char *title)
+{
+  struct buffer out = alloc_buf_gc (256);
+  buf_printf (&out, "[%s] OpenVPN " VERSION " F1:USR1 F2:USR2 F3:HUP F4:TERM", title);
+  SetConsoleTitle (BSTR (&out));
 }
 
 #endif

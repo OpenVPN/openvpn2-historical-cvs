@@ -44,6 +44,35 @@ void alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tun
 
 #ifdef WIN32
 
+/*
+ * Use keyboard input to simulate incoming signals
+ */
+
+#define SIGUSR1   1
+#define SIGUSR2   2
+#define SIGHUP    3
+#define SIGTERM   4
+#define SIGINT    5
+
+struct keyboard {
+  HANDLE in;
+};
+
+extern struct keyboard keyboard;
+
+void keyboard_init (void); 
+void keyboard_open (struct keyboard *kb);
+bool keyboard_input_available (struct keyboard *kb);
+unsigned int keyboard_get (struct keyboard *kb);
+int keyboard_input_to_signal (struct keyboard *kb);
+
+/*
+ * Set the text on the window title bar
+ */
+void generate_window_title (const char *title);
+void save_window_title ();
+void restore_window_title ();
+
 /* 
  * We try to do all Win32 I/O using overlapped
  * (i.e. asynchronous) I/O for a performance win.
@@ -84,18 +113,25 @@ overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix);
  * On Win32, use WSAWaitForMultipleEvents instead of select as our main event
  * loop I/O wait mechanism.  This is done for efficiency and also for the simple
  * reason that Win32 select() can only wait on sockets, not on the TAP-Win32 file
- * handle.
+ * handle which we must also wait on.
  */
 
-#define MAX_EVENTS 4
+#define MAX_EVENTS 5
 
 struct event_wait {
-  HANDLE events[4];
+  HANDLE events[MAX_EVENTS];
   DWORD n_events;
   HANDLE trigger;  /* handle that satisfied the most recent wait */
 };
 
 #define SELECT() my_select (&event_wait, tv)
+#define WAIT_KEYBOARD(ew) { if (keyboard.in != INVALID_HANDLE_VALUE) \
+                                wait_add ((ew), keyboard.in); }
+#define GET_SIGNAL(sig) { (sig) = keyboard_input_to_signal (&keyboard); }
+#define SELECT_SIGNAL_RECEIVED() { if (keyboard.in != INVALID_HANDLE_VALUE \
+                                && wait_trigger (&event_wait, keyboard.in)) \
+                                GET_SIGNAL (signal_received); }
+
 
 static inline int
 my_select (struct event_wait *ew, const struct timeval *tv)
@@ -163,6 +199,9 @@ struct event_wait {
 };
 
 #define SELECT() select (event_wait.max_fd_plus_one, &event_wait.reads, &event_wait.writes, NULL, tv)
+#define SELECT_SIGNAL_RECEIVED()
+#define GET_SIGNAL(sig)
+#define WAIT_KEYBOARD(ew)
 
 static inline void
 wait_init (struct event_wait *ew)

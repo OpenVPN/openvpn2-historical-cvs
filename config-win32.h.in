@@ -39,9 +39,6 @@
 
 #define sleep(x) Sleep((x)*1000)
 
-#define SIGHUP 1
-#define SIGUSR1 10
-
 #define random rand
 #define srandom srand
 

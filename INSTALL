@@ -34,12 +34,13 @@ SUPPORTED PLATFORMS:
   (4) Mac OS X Darwin (Experimental)
   (5) FreeBSD
   (6) NetBSD
-  (7) Windows (XP only so far -- see INSTALL.w32 for more info)
+  (7) Windows (Win 2K + XP only so far
+      -- see INSTALL-win32.txt for more info)
 
 SUPPORTED PROCESSOR ARCHITECTURES:
    In general, OpenVPN is word size and endian independent, so
    most processors should be supported.  Architectures known to
-   work include Intel x86, Alpha, and Sparc.
+   work include Intel x86, Alpha, Sparc, and ARM.
 
 REQUIRES:
   (1) TUN and/or TAP driver to allow user-space programs to control
@@ -58,7 +59,7 @@ OPTIONAL (but recommended):
   (3) Pthread library.
 
 OPTIONAL (for developers only):
-  (1) Autoconf 2.50 or higher + Automake 1.6 or higher
+  (1) Autoconf 2.50 or higher + Automake 1.5 or higher
       -- available from http://www.gnu.org/software/software.html
   (2) Dmalloc library
       -- available from http://dmalloc.com/
@@ -217,9 +218,9 @@ TUN/TAP Driver Configuration:
   needs to be manually copied to /kernel/drv/sparcv9/ and then a 
   reconfiguration reboot. (boot -r).
 
-* Windows
+* Windows 2000 and XP
 
-  See INSTALL.w32 for more info
+  See INSTALL-win32.txt for more info
 
  See the man page for more information, usage examples, and
  information on firewall configuration.

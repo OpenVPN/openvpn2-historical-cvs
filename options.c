@@ -86,7 +86,6 @@ static const char usage_message[] =
   "                  DHCP (this is the default if --remote is not used).\n"
   "--ipchange cmd  : Execute shell command cmd on remote ip address initial\n"
   "                  setting or change -- execute as: cmd ip-address port#\n"
-  "                  (',' may be used to separate multiple args in cmd)\n"
   "--port port     : TCP/UDP port # for both local and remote.\n"
   "--lport port    : TCP/UDP port # for local (default=%d).\n"
   "--rport port    : TCP/UDP port # for remote (default=%d).\n"
@@ -244,17 +243,18 @@ static const char usage_message[] =
   "                  tests of certification.  cmd should return 0 to allow\n"
   "                  TLS handshake to proceed, or 1 to fail.  (cmd is\n"
   "                  executed as 'cmd certificate_depth X509_NAME_oneline')\n"
-  "                  (',' may be used to separate multiple args in cmd)\n"
   "--disable-occ   : Disable options compatibility check between peers.\n"
 #endif				/* USE_SSL */
   "\n"
   "SSL Library information:\n"
-  "--show-ciphers  : Show all cipher algorithms to use with --cipher option.\n"
-  "--show-digests  : Show all message digest algorithms to use with --auth option.\n"
+  "--show-ciphers  : Show cipher algorithms to use with --cipher option.\n"
+  "--show-digests  : Show message digest algorithms to use with --auth option.\n"
 #ifdef USE_SSL
   "--show-tls      : Show all TLS ciphers (TLS used only as a control channel).\n"
 #endif
 #ifdef WIN32
+  "\n"
+  "Windows Specific:\n"
   "--show-adapters : Show all TAP-Win32 adapters\n"
 #endif
   "\n"

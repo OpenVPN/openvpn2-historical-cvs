@@ -42,24 +42,25 @@
 #define M_INFO               LOGLEV(1, 0, 0)         /* default informational messages */
 
 #define D_LINK_ERRORS        LOGLEV(1, 10, M_NONFATAL)   /* show link errors from main event loop */
-#define D_CRYPT_ERRORS       LOGLEV(1, 10, M_NONFATAL)   /* show errors from encrypt/decrypt */
-#define D_TLS_ERRORS         LOGLEV(1, 10, M_NONFATAL)   /* show TLS control channel errors */
-#define D_RESOLVE_ERRORS     LOGLEV(1, 10, M_NONFATAL)   /* show hostname resolve errors */
-#define D_COMP_ERRORS        LOGLEV(1, 10, M_NONFATAL)   /* show compression errors */
-#define D_PID_PERSIST        LOGLEV(1, 10, M_NONFATAL)   /* show packet_id persist errors */
-#define D_FRAG_ERRORS        LOGLEV(1, 10, M_NONFATAL)   /* show fragmentation errors */
+#define D_CRYPT_ERRORS       LOGLEV(1, 11, M_NONFATAL)   /* show errors from encrypt/decrypt */
+#define D_TLS_ERRORS         LOGLEV(1, 12, M_NONFATAL)   /* show TLS control channel errors */
+#define D_RESOLVE_ERRORS     LOGLEV(1, 13, M_NONFATAL)   /* show hostname resolve errors */
+#define D_COMP_ERRORS        LOGLEV(1, 14, M_NONFATAL)   /* show compression errors */
+#define D_PID_PERSIST        LOGLEV(1, 15, M_NONFATAL)   /* show packet_id persist errors */
+#define D_FRAG_ERRORS        LOGLEV(1, 16, M_NONFATAL)   /* show fragmentation errors */
 
 #define D_HANDSHAKE          LOGLEV(2, 20, 0)        /* show data & control channel handshakes */
 #define D_MTU_INFO           LOGLEV(2, 21, 0)        /* show debugging MTU info */
+#define D_CLOSE              LOGLEV(2, 22, 0)        /* show socket and TUN/TAP close */
 
 #define D_TLS_DEBUG_LOW      LOGLEV(3, 20, 0)        /* low frequency info from tls_session routines */
 #define D_GREMLIN            LOGLEV(3, 30, 0)        /* show simulated outage info from gremlin module */
 #define D_COMP_LOW           LOGLEV(3, 31, 0)        /* show adaptive compression state changes */
 
 #define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
-#define D_SHOW_DC_OPT        LOGLEV(4, 40, 0)        /* show data channel options string */
+#define D_SHOW_DC_OPT        LOGLEV(4, 41, 0)        /* show data channel options string */
 
-#define D_LOG_RW             LOGLEV(5, 0, 0)         /* Print 'R' or 'W' to stdout for read/write */
+#define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 
 #define D_LINK_RW            LOGLEV(6, 60, M_DEBUG)  /* show TCP/UDP reads/writes (terse) */
 

@@ -281,17 +281,18 @@ close_syslog ()
 
 #ifdef WIN32
 
-/*
- * The following code was adapted from stunnel under
- * the terms of the GPL.
- * Copyright (c) 1998-2001 Michal Trojnara <Michal.Trojnara@mirt.net>
- */
-
 const char *
 strerror_win32 (int errnum)
 {
-#if 0
+  /*
+   * This code can be omitted, though often the Windows
+   * WSA error messages are less informative than the
+   * Posix equivalents.
+   */
+#if 1
   switch (errnum) {
+  case ERROR_GEN_FAILURE:
+    return "I/O failure possibly related to sleep/resume activity (ERROR_GEN_FAILURE)";
   case ERROR_IO_PENDING:
     return "I/O Operation in progress (ERROR_IO_PENDING)";
   case WSA_IO_INCOMPLETE:

@@ -1,41 +1,73 @@
+
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.5 2003/07/22 22:59:49 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.6 2003/07/31 08:16:21 jimyonan Exp $
 	
 Upcoming version 1.5.0
 
 * Added TCP support via the new --proto
-  option.
+  option (beta1).
 * Renamed udp-centric options such as
   --udp-mtu to --link-mtu (old option
-  names preserved for compatibility).
-* Ported to Windows XP using mingw and a
-  TAP driver derived from the Cipe-Win32
-  project by Damion K. Wilson
-  (still experimental and I have not
-  yet tested on non-XP Windows).
+  names preserved for compatibility)
+  (beta1).
+* Ported to Windows 2000 + XP
+  using mingw and a TAP driver derived
+  from the Cipe-Win32 project by Damion
+  K. Wilson (beta1).
+  This port is still experimental and
+  will probably not work without further
+  hacking on NT 4 or the 9x/me series.
 * Added --show-adapters flag for
-  windows version.
+  windows version (beta1).
 * Reworked the SSL/TLS packet acknowledge
   code to better handle certain corner
-  cases.
+  cases (beta1).
 * Turned off the default enabling of
   IP forwarding in the
   sample-scripts/openvpn.init script
   for Redhat.
   Forwarding can be enabled by users
   in their --up scripts or firewall
-  config.
+  config (beta1).
 * Added --up-restart option based on
-  suggestion from Sean Reifschneider.
+  suggestion from Sean Reifschneider
+  (beta1).
 * If --dev tap or --dev-type tap
   is specified, --tun-mtu
   defaults to 1500 and --tun-mtu-extra
-  defaults to 64.
+  defaults to 64 (beta1).
 * Enabled --verb 5 debugging mode that
   prints 'R' and 'W' for each packet
-  read or write on the TCP/UDP socket.
+  read or write on the TCP/UDP socket
+  (beta1).
+* Renamed INSTALL.w32 to
+  INSTALL-win32.txt and reformatted
+  in Windows ASCII so it's easier to
+  click and view (beta2).
+* Added postscript and PDF versions
+  of the HOWTO to the web site
+  (C R Zamana) (beta2).
+* Merged Michael Clarke's stability
+  patch into TAP-Win32 driver (beta2)
+  which appears to fix the suspend/resume
+  driver bug and significantly
+  improve driver stability.
+* Added Christof Meerwald's
+  Media Status patch to
+  the TAP-Win32 driver which shows
+  the TAP adapter to be disconnected
+  when OpenVPN is not running (beta2).
+* Moved socket connect and TCP server
+  listen code to a later point in
+  openvpn() function so that the TCP
+  server listen state is entered after
+  daemonization (beta2).
+* Added keyboard shortcuts to simulate
+  signals in the Windows version, see
+  the window title bar for
+  descriptions (beta2).
 * Protocol compatibility is maintained
   with the 1.4.x and 1.3.x series.
   If you are connecting to a 1.3.x peer,

@@ -95,16 +95,21 @@ x_check_status (int status, const char *description, struct link_socket *sock)
       if (my_errno != EAGAIN)
 	{
 	  if (extended_msg)
-	    msg (x_cs_info_level, "%s %s [%s]: %s",
+	    msg (x_cs_info_level, "%s %s [%s]: %s (code=%d)",
 		 description,
 		 sock ? proto2ascii (sock->proto, true) : "",
 		 extended_msg,
-		 strerror_ts (my_errno));
+		 strerror_ts (my_errno),
+		 my_errno);
 	  else
-	    msg (x_cs_info_level, "%s %s: %s",
+	    msg (x_cs_info_level, "%s %s: %s (code=%d)",
 		 description,
 		 sock ? proto2ascii (sock->proto, true) : "",
-		 strerror_ts (my_errno));
+		 strerror_ts (my_errno),
+		 my_errno);
+
+	  sleep (0); /* these errors often arrive in herds, so don't
+			lock up the machine on account of them */
 	}
     }
 }
@@ -136,27 +141,35 @@ h_errno_msg(int h_errno_err)
  * resolve_retry_seconds seconds.
  */
 static in_addr_t
-getaddr (const char *hostname, int resolve_retry_seconds)
+getaddr (const char *hostname, int resolve_retry_seconds, bool fatal)
 {
   struct in_addr ia;
-  const int status = inet_aton (hostname, &ia);
+  int status;
+
+  CLEAR (ia);
+  status = inet_aton (hostname, &ia);
 
   if (!status)
     {
       const int fail_wait_interval = 5; /* seconds */
       int resolve_retries = resolve_retry_seconds / fail_wait_interval;
+      struct hostent *h;
+
+      CLEAR (ia);
 
       /*
        * Resolve hostname
        */
-      struct hostent *h;
       while ( !(h = gethostbyname (hostname)) )
 	{
-	  msg ((resolve_retries > 0  ? D_RESOLVE_ERRORS : M_FATAL),
+	  msg (((resolve_retries > 0 || !fatal) ? D_RESOLVE_ERRORS : M_FATAL),
 	       "Cannot resolve host address: %s: %s",
 	       hostname, h_errno_msg (h_errno));
+
+	  if (--resolve_retries <= 0 && !fatal)
+	    return ia.s_addr;
+
 	  sleep (fail_wait_interval);
-	  --resolve_retries;
 	}
 
       /* potentially more than one address returned, but we take first */
@@ -165,10 +178,26 @@ getaddr (const char *hostname, int resolve_retry_seconds)
       if (ia.s_addr)
 	{
 	  if (h->h_addr_list[1])
-	    msg (M_WARN, "Warning: %s has multiple addresses", hostname);
+	    msg (D_RESOLVE_ERRORS, "Warning: %s has multiple addresses", hostname);
 	}
     }
   return ia.s_addr;
+}
+
+static void
+update_remote (const char* host,
+	       struct sockaddr_in *addr,
+	       bool *changed)
+{
+  if (host && addr)
+    {
+      const in_addr_t new_addr = getaddr (host, 1, false);
+      if (new_addr && addr->sin_addr.s_addr != new_addr)
+	{
+	  addr->sin_addr.s_addr = new_addr;
+	  *changed = true;
+	}
+    }
 }
 
 /*
@@ -178,10 +207,13 @@ getaddr (const char *hostname, int resolve_retry_seconds)
 static int
 socket_listen_accept (int sd,
 		      struct sockaddr_in *remote,
-		      const struct sockaddr_in *local)
+		      const char *remote_dynamic,
+		      bool *remote_changed,
+		      const struct sockaddr_in *local,
+		      volatile int *signal_received)
 {
   socklen_t remote_len = sizeof (*remote);
-  const struct sockaddr_in remote_orig = *remote;
+  struct sockaddr_in remote_verify = *remote;
   int new_sd;
 
   msg (M_INFO, "Listening for incoming TCP connection on %s", 
@@ -189,21 +221,57 @@ socket_listen_accept (int sd,
   if (listen (sd, 1))
     msg (M_SOCKERR, "listen() failed");
 
+  /* set socket to non-blocking mode */
+  set_nonblock (sd);
+
   while (true)
     {
+      int status;
+      fd_set reads;
+      struct timeval tv;
+
+      FD_ZERO (&reads);
+      FD_SET (sd, &reads);
+      tv.tv_sec = 5;
+      tv.tv_usec = 0;
+
+      status = select (sd + 1, &reads, NULL, NULL, &tv);
+
+      GET_SIGNAL (*signal_received);
+      if (*signal_received)
+	return sd;
+
+      if (status < 0)
+	msg (D_LINK_ERRORS | M_ERRNO_SOCK, "select() failed");
+
+      if (status <= 0)
+	continue;
+
       new_sd = accept (sd, (struct sockaddr *) remote, &remote_len);
       if (new_sd == -1)
-	msg (M_SOCKERR, "accept() failed");
-      if (addr_defined (&remote_orig) && !addr_match (&remote_orig, remote))
 	{
-	  msg (M_WARN, "Rejected connection attempt from %s due to --remote setting",
-	       print_sockaddr (remote));
-	  if (openvpn_close_socket (new_sd))
-	    msg (M_SOCKERR, "close socket failed (new_sd)");
-	  sleep (1);
+	  msg (D_LINK_ERRORS | M_ERRNO_SOCK, "accept() failed");
+	}
+      else if (remote_len != sizeof (*remote))
+	{
+	  msg (D_LINK_ERRORS, "received strange incoming connection with unknown address length=%d", remote_len);
 	}
       else
-	break;
+	{
+	  update_remote (remote_dynamic, &remote_verify, remote_changed);
+	  if (addr_defined (&remote_verify)
+	      && !addr_match (&remote_verify, remote))
+	    {
+	      msg (M_WARN,
+		   "Rejected connection attempt from %s due to --remote setting",
+		   print_sockaddr (remote));
+	      if (openvpn_close_socket (new_sd))
+		msg (M_SOCKERR, "close socket failed (new_sd)");
+	    }
+	  else
+	    break;
+	}
+      sleep (1);
     }
 
   if (openvpn_close_socket (sd))
@@ -215,7 +283,10 @@ socket_listen_accept (int sd,
 
 static void
 socket_connect (int sd,
-		struct sockaddr_in *remote)
+		struct sockaddr_in *remote,
+		const char *remote_dynamic,
+		bool *remote_changed,
+		volatile int *signal_received)
 {
   const int try_again_seconds = 5;
 
@@ -223,21 +294,61 @@ socket_connect (int sd,
        print_sockaddr (remote));
   while (true)
     {
-      if (connect (sd, (struct sockaddr *) remote, sizeof (*remote)))
-	msg (D_LINK_ERRORS | M_ERRNO_SOCK, "connect() failed, will try again in %d seconds, error",
+      const int status = connect (sd, (struct sockaddr *) remote,
+				  sizeof (*remote));
+
+      GET_SIGNAL (*signal_received);
+      if (*signal_received)
+	return;
+
+      if (status)
+	msg (D_LINK_ERRORS | M_ERRNO_SOCK,
+	     "connect() failed, will try again in %d seconds, error",
 	     try_again_seconds);
       else
 	break;
+
       sleep (try_again_seconds);
+      update_remote (remote_dynamic, remote, remote_changed);
     }
   msg (M_INFO, "TCP connection established with %s", 
        print_sockaddr (remote));
+}
+
+/* For stream protocols, allocate a buffer to build up packet.
+   Called after frame has been finalized. */
+
+static void
+socket_frame_init (const struct frame *frame, struct link_socket *sock)
+{
+#ifdef WIN32
+  overlapped_io_init (&sock->reads, frame, FALSE, false);
+  overlapped_io_init (&sock->writes, frame, TRUE, false);
+#endif
+
+  if (link_socket_connection_oriented (sock))
+    {
+#ifdef WIN32
+      stream_buf_init (&sock->stream_buf, &sock->reads.buf_init);
+#else
+      alloc_buf_sock_tun (&sock->stream_buf_data, frame, false);
+      stream_buf_init (&sock->stream_buf, &sock->stream_buf_data);
+#endif
+    }
 }
 
 /*
  * SOCKET INITALIZATION CODE.
  * Create a TCP/UDP socket
  */
+
+void
+link_socket_reset (struct link_socket *sock)
+{
+  CLEAR (*sock);
+  sock->sd = -1;
+}
+
 void
 link_socket_init (struct link_socket *sock,
 		  const char *local_host,
@@ -251,10 +362,14 @@ link_socket_init (struct link_socket *sock,
 		  struct link_socket_addr *lsa,
 		  const char *ipchange_command,
 		  int resolve_retry_seconds,
-		  int mtu_discover_type)
+		  int mtu_discover_type,
+		  const struct frame *frame,
+		  volatile int *signal_received)
 {
-  CLEAR (*sock);
+  const char *remote_dynamic = NULL;
+  bool remote_changed = false;
 
+  link_socket_reset (sock);
   sock->remote_float = remote_float;
   sock->addr = lsa;
   sock->ipchange_command = ipchange_command;
@@ -266,6 +381,14 @@ link_socket_init (struct link_socket *sock,
   else if (sock->proto == PROTO_TCPv4_CLIENT)
     bind_local = false;
 
+  /*
+   * Pass a remote name to connect/accept so that
+   * they can test for dynamic IP address changes
+   * and throw a SIGUSR1 if appropriate.
+   */
+  if (resolve_retry_seconds)
+    remote_dynamic = remote_host;
+
   /* were we started by inetd or xinetd? */
   if (inetd)
     {
@@ -274,7 +397,7 @@ link_socket_init (struct link_socket *sock,
     }
   else
     {
-      /* create socket */
+       /* create socket */
       if (sock->proto == PROTO_UDPv4)
 	{
 	  if ((sock->sd = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
@@ -300,7 +423,7 @@ link_socket_init (struct link_socket *sock,
 	{
 	  lsa->local.sin_family = AF_INET;
 	  lsa->local.sin_addr.s_addr =
-	    (local_host ? getaddr (local_host, resolve_retry_seconds)
+	    (local_host ? getaddr (local_host, resolve_retry_seconds, true)
 	     : htonl (INADDR_ANY));
 	  lsa->local.sin_port = htons (local_port);
 	}
@@ -322,22 +445,38 @@ link_socket_init (struct link_socket *sock,
 	{
 	  lsa->remote.sin_family = AF_INET;
 	  lsa->remote.sin_addr.s_addr =
-	    (remote_host ? getaddr (remote_host, resolve_retry_seconds) : 0);
+	    (remote_host ? getaddr (remote_host, resolve_retry_seconds, true) : 0);
 	  lsa->remote.sin_port = htons (remote_port);
 	}
 
       /* should we re-use previous active remote address? */
       if (addr_defined (&lsa->actual))
-	msg (M_INFO, "Preserving recently used remote address: %s",
-	     print_sockaddr (&lsa->actual));
+	{
+	  msg (M_INFO, "Preserving recently used remote address: %s",
+	       print_sockaddr (&lsa->actual));
+	  remote_dynamic = NULL;
+	}
       else
 	lsa->actual = lsa->remote;
 
       /* TCP client/server */
       if (sock->proto == PROTO_TCPv4_SERVER)
-	sock->sd = socket_listen_accept (sock->sd, &lsa->actual, &lsa->local);
+	sock->sd = socket_listen_accept (sock->sd, &lsa->actual,
+					 remote_dynamic, &remote_changed,
+					 &lsa->local, signal_received);
       else if (sock->proto == PROTO_TCPv4_CLIENT)
-	socket_connect (sock->sd, &lsa->actual);
+	socket_connect (sock->sd, &lsa->actual,
+			remote_dynamic, &remote_changed,
+			signal_received);
+
+      if (*signal_received)
+	return;
+
+      if (remote_changed)
+	{
+	  msg (M_INFO, "Note: Dynamic remote address changed during TCP connection establishment");
+	  lsa->remote.sin_addr.s_addr = lsa->actual.sin_addr.s_addr;
+	}
     }
 
   /* set socket to non-blocking mode */
@@ -368,42 +507,23 @@ link_socket_init (struct link_socket *sock,
   msg (M_INFO, "%s link remote: %s",
        proto2ascii (sock->proto, true),
        print_sockaddr_ex (&lsa->actual, addr_defined (&lsa->actual), ":"));
+
+  /* initialize buffers */
+  socket_frame_init (frame, sock);
 }
 
 /* for stream protocols, allow for packet length prefix */
 void
-socket_adjust_frame_parameters (struct frame *frame, struct link_socket *sock)
+socket_adjust_frame_parameters (struct frame *frame, int proto)
 {
-  if (link_socket_connection_oriented (sock))
+  if (link_socket_proto_connection_oriented (proto))
     frame_add_to_extra_frame (frame, sizeof (packet_size_type));
-}
-
-/* For stream protocols, allocate a buffer to build up packet.
-   Called after frame has been finalized. */
-
-void
-socket_frame_init (struct frame *frame, struct link_socket *sock)
-{
-#ifdef WIN32
-  overlapped_io_init (&sock->reads, frame, FALSE, false);
-  overlapped_io_init (&sock->writes, frame, TRUE, false);
-#endif
-
-  if (link_socket_connection_oriented (sock))
-    {
-#ifdef WIN32
-      stream_buf_init (&sock->stream_buf, &sock->reads.buf_init);
-#else
-      alloc_buf_sock_tun (&sock->stream_buf_data, frame, false);
-      stream_buf_init (&sock->stream_buf, &sock->stream_buf_data);
-#endif
-    }
 }
 
 void
 link_socket_set_outgoing_addr (const struct buffer *buf,
-			      struct link_socket *sock,
-			      const struct sockaddr_in *addr)
+			       struct link_socket *sock,
+			       const struct sockaddr_in *addr)
 {
   mutex_lock (L_SOCK);
   if (!buf || buf->len > 0)
@@ -412,8 +532,8 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
       ASSERT (addr_defined (addr));
       if ((sock->remote_float
 	   || !addr_defined (&lsa->remote)
-	   || addr_port_match (addr, &lsa->remote))
-	  && (!addr_port_match (addr, &lsa->actual)
+	   || addr_match_proto (addr, &lsa->remote, sock->proto))
+	  && (!addr_match_proto (addr, &lsa->actual, sock->proto)
 	      || !sock->set_outgoing_initial))
 	{
 	  lsa->actual = *addr;
@@ -451,17 +571,8 @@ link_socket_incoming_addr (struct buffer *buf,
 	goto bad;
       if (sock->remote_float || !addr_defined (&sock->addr->remote))
 	goto good;
-
-      if (link_socket_connection_oriented (sock))
-	{
-	  if (addr_match (from_addr, &sock->addr->remote))
-	    goto good;
-	}
-      else
-	{
-	  if (addr_port_match (from_addr, &sock->addr->remote))
-	    goto good;
-	}
+      if (addr_match_proto (from_addr, &sock->addr->remote, sock->proto))
+	goto good;
     }
 
 bad:
@@ -506,13 +617,13 @@ link_socket_get_outgoing_addr (struct buffer *buf,
 void
 link_socket_close (struct link_socket *sock)
 {
-  if (sock->sd >= 0 && sock->sd != INETD_SOCKET_DESCRIPTOR)
+  if (sock->sd != -1 && sock->sd != INETD_SOCKET_DESCRIPTOR)
     {
 #ifdef WIN32
       overlapped_io_close (&sock->reads);
       overlapped_io_close (&sock->writes);
 #endif
-      msg (D_READ_WRITE, "Closing TCP/UDP socket");
+      msg (D_CLOSE, "Closing TCP/UDP socket");
       if (openvpn_close_socket (sock->sd))
 	msg (M_WARN | M_ERRNO_SOCK, "Warning: Close Socket failed");
       sock->sd = -1;
@@ -525,6 +636,49 @@ link_socket_close (struct link_socket *sock)
  * Stream buffer functions, used to packetize a TCP
  * stream connection.
  */
+
+static inline void
+stream_buf_set_next (struct stream_buf *sb)
+{
+  /* set up 'next' for next i/o read */
+  sb->next = sb->buf;
+  sb->next.offset = sb->buf.offset + sb->buf.len;
+  sb->next.len = (sb->len >= 0 ? sb->len : sb->maxlen) - sb->buf.len;
+  msg (D_STREAM_DEBUG, "STREAM: SET NEXT, buf=[%d,%d] next=[%d,%d] len=%d maxlen=%d",
+       sb->buf.offset, sb->buf.len,
+       sb->next.offset, sb->next.len,
+       sb->len, sb->maxlen);
+  ASSERT (sb->next.len > 0);
+  ASSERT (buf_safe (&sb->buf, sb->next.len));
+}
+
+static inline void
+stream_buf_reset (struct stream_buf *sb)
+{
+  msg (D_STREAM_DEBUG, "STREAM: RESET");
+  sb->residual_fully_formed = false;
+  sb->buf = sb->buf_init;
+  CLEAR (sb->next);
+  sb->len = -1;
+}
+
+static inline void
+stream_buf_get_final (struct stream_buf *sb, struct buffer *buf)
+{
+  msg (D_STREAM_DEBUG, "STREAM: GET FINAL len=%d",
+       buf_defined (&sb->buf) ? sb->buf.len : -1);
+  ASSERT (buf_defined (&sb->buf));
+  *buf = sb->buf;
+}
+
+static inline void
+stream_buf_get_next (struct stream_buf *sb, struct buffer *buf)
+{
+  msg (D_STREAM_DEBUG, "STREAM: GET NEXT len=%d",
+       buf_defined (&sb->next) ? sb->next.len : -1);
+  ASSERT (buf_defined (&sb->next));
+  *buf = sb->next;
+}
 
 void
 stream_buf_init (struct stream_buf *sb,
@@ -543,6 +697,28 @@ void
 stream_buf_close (struct stream_buf* sb)
 {
   free_buf (&sb->residual);
+}
+
+bool
+stream_buf_read_setup (struct link_socket* sock)
+{
+  if (link_socket_connection_oriented (sock))
+    {
+      if (sock->stream_buf.residual.len && !sock->stream_buf.residual_fully_formed)
+	{
+	  ASSERT (buf_copy (&sock->stream_buf.buf, &sock->stream_buf.residual));
+	  ASSERT (buf_init (&sock->stream_buf.residual, 0));
+	  sock->stream_buf.residual_fully_formed = stream_buf_added (&sock->stream_buf, 0);
+	    msg (D_STREAM_DEBUG, "STREAM: RESIDUAL FULLY FORMED [%s], len=%d",
+		 sock->stream_buf.residual_fully_formed ? "YES" : "NO",
+		 sock->stream_buf.residual.len);
+	}
+      if (!sock->stream_buf.residual_fully_formed)
+	stream_buf_set_next (&sock->stream_buf);
+      return !sock->stream_buf.residual_fully_formed;
+    }
+  else
+    return true;
 }
 
 bool
@@ -601,7 +777,7 @@ print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* sep
   const int port = ntohs (addr->sin_port);
 
   mutex_lock (L_INET_NTOA);
-  buf_printf (&out, "%s", (addr_defined (addr) ? inet_ntoa (addr->sin_addr) : "[local]"));
+  buf_printf (&out, "%s", (addr_defined (addr) ? inet_ntoa (addr->sin_addr) : "[undef]"));
   mutex_unlock (L_INET_NTOA);
 
   if (do_port && port)
@@ -664,6 +840,43 @@ proto2ascii_all ()
       buf_printf(&out, "[%s]", proto2ascii(i, false));
     }
   return BSTR (&out);
+}
+
+/*
+ * Socket Read Routines
+ */
+
+int
+link_socket_read_tcp (struct link_socket *sock,
+		      struct buffer *buf)
+{
+  int len = 0;
+
+  if (!sock->stream_buf.residual_fully_formed)
+    {
+#ifdef WIN32
+      len = socket_finalize (sock->sd, &sock->reads, buf, NULL);
+#else
+      struct buffer frag;
+      stream_buf_get_next (&sock->stream_buf, &frag);
+      len = recv (sock->sd, BPTR (&frag), BLEN (&frag), MSG_NOSIGNAL);
+#endif
+
+      if (!len)
+	sock->stream_reset = true;
+      if (len <= 0)
+	return buf->len = len;
+    }
+
+  if (sock->stream_buf.residual_fully_formed
+      || stream_buf_added (&sock->stream_buf, len)) /* packet complete? */
+    {
+      stream_buf_get_final (&sock->stream_buf, buf);
+      stream_buf_reset (&sock->stream_buf);
+      return buf->len;
+    }
+  else
+    return buf->len = 0; /* no error, but packet is still incomplete */
 }
 
 /*
@@ -916,6 +1129,7 @@ socket_finalize (
       break;
 
     case IOSTATE_IMMEDIATE_RETURN:
+      io->iostate = IOSTATE_INITIAL;
       ASSERT (ResetEvent (io->overlapped.hEvent));
       if (io->status)
 	{
@@ -930,7 +1144,6 @@ socket_finalize (
 	  if (buf)
 	    *buf = io->buf;
 	  ret = io->size;
-	  io->iostate = IOSTATE_INITIAL;
 	  msg (D_WIN32_IO, "WIN32 I/O: Socket Completion non-queued success [%d]", ret);
 	}
       break;

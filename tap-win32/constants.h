@@ -33,7 +33,7 @@
 #define TAP_SERVICE_NAME "TAP_Daemon"
 #define TAP_DRIVER_NAME "TAP"
 
-#define TAP_NDIS_MAJOR_VERSION 4
+#define TAP_NDIS_MAJOR_VERSION 5
 #define TAP_NDIS_MINOR_VERSION 0
 
 #ifndef TAP_DRIVER_MAJOR_VERSION
@@ -89,6 +89,7 @@
 #define TAP_IOCTL_GET_LASTMAC    TAP_CONTROL_CODE (0, METHOD_BUFFERED)
 #define TAP_IOCTL_GET_MAC        TAP_CONTROL_CODE (1, METHOD_BUFFERED)
 #define TAP_IOCTL_SET_STATISTICS TAP_CONTROL_CODE (2, METHOD_BUFFERED)
+#define TAP_IOCTL_SET_MTU        TAP_CONTROL_CODE (3, METHOD_BUFFERED)
 
 //========================================================================================
 //                                   Windows 2000 OID's
@@ -137,6 +138,7 @@
 #define DEFAULT_PACKET_LOOKAHEAD (ETHERNET_PACKET_SIZE - ETHERNET_HEADER_SIZE)
 #define ETHERNET_PACKET_SIZE 1514
 #define ETHERNET_HEADER_SIZE 14
+#define MINIMUM_MTU 576 // USE TCP Minimum MTU
 
 #define USERMODEDEVICEDIR "\\\\.\\"
 #define SYSDEVICEDIR  "\\Device\\"

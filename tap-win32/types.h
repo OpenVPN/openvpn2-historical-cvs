@@ -70,12 +70,12 @@ typedef union _TapAdapterQuery
    }
 TapAdapterQuery, *TapAdapterQueryPointer;
 
-typedef struct _TapTapExtension
+typedef struct _TapExtension
    {
     struct LROOTSTRUCT m_PacketQueue, m_IrpQueue;
     struct _TapAdapter *m_Adapter;
    }
-TapTapExtension, *TapTapExtensionPointer;
+TapExtension, *TapExtensionPointer;
 
 typedef struct _TapPacket
    {
@@ -96,6 +96,7 @@ typedef struct _TapAdapter
     NDIS_MEDIUM m_Medium;
     ULONG m_Lookahead;
     ULONG m_TapOpens;
+    ULONG m_MTU;
    }
 TapAdapter, *TapAdapterPointer;
 

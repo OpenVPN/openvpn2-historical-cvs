@@ -53,7 +53,9 @@ struct tuntap
   struct overlapped_io reads;
   struct overlapped_io writes;
 
+#if 0
   MACADDR mac, next_mac;
+#endif
 #else
   /* these macros are called in the context of the openvpn() function */
 # define TUNTAP_SET_READ(tt)   { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.reads);    }
@@ -74,10 +76,12 @@ struct tuntap
 void clear_tuntap (struct tuntap *tuntap);
 
 void open_tun (const char *dev, const char *dev_type, const char *dev_node,
-	  bool ipv6, struct tuntap *tt);
+	  bool ipv6, int mtu, struct tuntap *tt);
+
 void close_tun (struct tuntap *tt);
 
 int write_tun (struct tuntap* tt, uint8_t *buf, int len);
+
 int read_tun (struct tuntap* tt, uint8_t *buf, int len);
 
 void tuncfg (const char *dev, const char *dev_type, const char *dev_node,

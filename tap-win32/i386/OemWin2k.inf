@@ -17,7 +17,7 @@
    ClassGUID = {4d36e972-e325-11ce-bfc1-08002be10318}
    Provider = %l_Provider%
    Class = Net
-   DriverVer=07/21/2003,1.01.00.0012
+   DriverVer=07/30/2003,1.01.00.0017
 
 [Strings]
    l_DeviceDescription = "TAP VPN Adapter"
@@ -56,7 +56,7 @@
 
 [TAP.reg]
    HKR, Ndi,            Service,      0, "TAP"
-   HKR, Ndi\Interfaces, UpperRange,   0, "ndis4"
+   HKR, Ndi\Interfaces, UpperRange,   0, "ndis5"
    HKR, Ndi\Interfaces, LowerRange,   0, "ethernet"
    HKR, ,               Manufacturer, 0, "%l_Provider%"
    HKR, ,               ProductName,  0, "TAP"

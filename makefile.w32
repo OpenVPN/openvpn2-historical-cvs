@@ -20,7 +20,7 @@ OPENSSL = /c/src/openssl-0.9.7b
 
 LZO = /c/src/lzo-1.08
 
-CC = gcc -Wall -Wno-unused-function -O2 -mno-cygwin -g
+CC = gcc -g -O2 -Wall -Wno-unused-function -Wno-unused-variable -mno-cygwin
 
 # Stuff below this point usually doesn't need to be changed
 
@@ -35,7 +35,8 @@ HEADERS = basic.h buffer.h circ_list.h common.h \
 	fdmisc.h fragment.h gremlin.h interval.h lzo.h \
 	memdbg.h misc.h mtu.h win32.h openvpn.h \
 	options.h packet_id.h reliable.h session_id.h \
-	shaper.h socket.h ssl.h syshead.h thread.h tun.h
+	shaper.h socket.h ssl.h syshead.h thread.h tun.h \
+	tap-win32/constants.h
 
 OBJS =	buffer.o crypto.o error.o fdmisc.o fragment.o \
 	gremlin.o inet_aton.o io.o lzo.o misc.o mtu.o \

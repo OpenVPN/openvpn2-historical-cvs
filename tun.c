@@ -247,6 +247,7 @@ do_ifconfig (const char *dev, const char *dev_type,
 void
 clear_tuntap (struct tuntap *tuntap)
 {
+  CLEAR (*tuntap);
 #ifdef WIN32
   tuntap->hand = NULL;
 #else
@@ -256,13 +257,12 @@ clear_tuntap (struct tuntap *tuntap)
   tuntap->ip_fd = -1;
 #endif
   tuntap->ipv6 = false;
-  CLEAR (tuntap->actual);
 }
 
 static void
 open_null (struct tuntap *tt)
 {
-  clear_tuntap (tt);
+  //clear_tuntap (tt);
   strncpynt (tt->actual, "null", sizeof (tt->actual));
 }
 
@@ -277,7 +277,7 @@ open_tun_generic (const char *dev, const char *dev_node,
   char dynamic_name[256];
   bool dynamic_opened = false;
 
-  clear_tuntap (tt);
+  //clear_tuntap (tt);
 
   ipv6_support (ipv6, ipv6_explicitly_supported, tt);
 
@@ -371,11 +371,11 @@ close_tun_generic (struct tuntap *tt)
 #endif
 
 void
-open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
+open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, int mtu, struct tuntap *tt)
 {
   struct ifreq ifr;
 
-  clear_tuntap (tt);
+  //clear_tuntap (tt);
 
   /*
    * Set tt->ipv6 to true if
@@ -461,7 +461,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 #else
 
 void
-open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
+open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, int mtu, struct tuntap *tt)
 {
   open_tun_generic (dev, dev_node, ipv6, false, true, tt);
 }
@@ -475,7 +475,7 @@ tuncfg (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, 
 {
   struct tuntap tt;
 
-  open_tun (dev, dev_type, dev_node, ipv6, &tt);
+  open_tun (dev, dev_type, dev_node, ipv6, 0, &tt);
   if (ioctl (tt.fd, TUNSETPERSIST, persist_mode) < 0)
     msg (M_ERR, "Cannot ioctl TUNSETPERSIST(%d) %s", persist_mode, dev);
   close_tun (&tt);
@@ -553,7 +553,7 @@ read_tun (struct tuntap* tt, uint8_t *buf, int len)
 #endif
 
 void
-open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
+open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, int mtu, struct tuntap *tt)
 {
   int if_fd, muxid, ppa = -1;
   struct ifreq ifr;
@@ -563,7 +563,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   int link_type;
   bool is_tun;
 
-  clear_tuntap (tt);
+  //clear_tuntap (tt);
 
   ipv6_support (ipv6, false, tt);
 
@@ -706,7 +706,7 @@ read_tun (struct tuntap* tt, uint8_t *buf, int len)
 #endif
 
 void
-open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
+open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, int mtu, struct tuntap *tt)
 {
   open_tun_generic (dev, dev_node, ipv6, false, true, tt);
 }
@@ -757,7 +757,7 @@ read_tun (struct tuntap* tt, uint8_t *buf, int len)
 #elif defined(TARGET_FREEBSD)
 
 void
-open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
+open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, int mtu, struct tuntap *tt)
 {
   open_tun_generic (dev, dev_node, ipv6, false, true, tt);
 
@@ -948,7 +948,8 @@ tun_finalize (
 	  ret = -1;
 	  if (GetLastError() != ERROR_IO_INCOMPLETE)
 	    {
-	      /* if no error (i.e. just not finished yet), then DON'T execute this code */
+	      /* if no error (i.e. just not finished yet),
+		 then DON'T execute this code */
 	      io->iostate = IOSTATE_INITIAL;
 	      ASSERT (ResetEvent (io->overlapped.hEvent));
 	      msg (D_WIN32_IO | M_ERRNO, "WIN32 I/O: TAP Completion error");
@@ -957,6 +958,7 @@ tun_finalize (
       break;
 
     case IOSTATE_IMMEDIATE_RETURN:
+      io->iostate = IOSTATE_INITIAL;
       ASSERT (ResetEvent (io->overlapped.hEvent));
       if (io->status)
 	{
@@ -971,7 +973,6 @@ tun_finalize (
 	  if (buf)
 	    *buf = io->buf;
 	  ret = io->size;
-	  io->iostate = IOSTATE_INITIAL;
 	  msg (D_WIN32_IO, "WIN32 I/O: TAP Completion non-queued success [%d]", ret);
 	}
       break;
@@ -1211,13 +1212,14 @@ show_tap_win32_adapters (void)
 }
 
 void
-open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
+open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, int mtu, struct tuntap *tt)
 {
   char device_path[256];
   const char *device_guid = NULL;
   DWORD len;
+  ULONG mymtu = mtu;
 
-  clear_tuntap (tt);
+  //clear_tuntap (tt);
 
   ipv6_support (ipv6, false, tt);
 
@@ -1270,6 +1272,16 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   if (tt->hand == INVALID_HANDLE_VALUE)
     msg (M_ERR, "CreateFile failed on TAP device: %s", device_path);
 
+#if 0
+  /* it may be too late at this point to set the MTU */
+  if (!DeviceIoControl (tt->hand, TAP_IOCTL_SET_MTU,
+			&mymtu, sizeof (mymtu),
+			&mymtu, sizeof (mymtu), &len, 0))
+    msg (M_ERR, "DeviceIoControl TAP_IOCTL_SET_MTU failed");
+#endif
+
+#if 0
+  /* The CIPE service needs these, but we don't */
   if (!DeviceIoControl (tt->hand, TAP_IOCTL_GET_MAC,
 			tt->mac, sizeof (tt->mac),
 			tt->mac, sizeof (tt->mac), &len, 0))
@@ -1279,6 +1291,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 			tt->next_mac, sizeof (tt->next_mac),
 			tt->next_mac, sizeof (tt->next_mac), &len, 0))
     msg (M_ERR, "DeviceIoControl TAP_IOCTL_GET_LASTMAC failed");
+#endif
 
   msg (M_INFO, "TAP-WIN32 device [%s] opened: %s", dev_node, device_path);
 
@@ -1296,12 +1309,15 @@ tun_frame_init (struct frame *frame, struct tuntap *tt)
 void
 close_tun (struct tuntap *tt)
 {
-  overlapped_io_close (&tt->reads);
-  overlapped_io_close (&tt->writes);
   if (tt->hand != NULL)
     {
       if (!CancelIo (tt->hand))
 	msg (M_WARN | M_ERRNO, "Warning: CancelIO failed on TAP-Win32 device");
+    }
+  overlapped_io_close (&tt->reads);
+  overlapped_io_close (&tt->writes);
+  if (tt->hand != NULL)
+    {
       if (!CloseHandle (tt->hand))
 	msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on TAP-Win32 device");
     }
@@ -1311,7 +1327,7 @@ close_tun (struct tuntap *tt)
 #else /* generic */
 
 void
-open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
+open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, int mtu, struct tuntap *tt)
 {
   open_tun_generic (dev, dev_node, ipv6, false, true, tt);
 }

@@ -247,7 +247,7 @@ openvpn (const struct options *options,
   struct buffer nullbuf = clear_buf ();
 
   /* tells us to free to_link buffer after it has been written to TCP/UDP port */
-  bool free_to_link;
+  bool free_to_link = false;
 
   struct link_socket link_socket;  /* socket used for TCP/UDP connection to remote */
   struct sockaddr_in to_link_addr; /* IP address of remote */
@@ -321,6 +321,9 @@ openvpn (const struct options *options,
   /* object sent to us by TLS thread */
   struct tt_ret tt_ret;
 
+  /* did we open TLS thread? */
+  bool thread_opened = false;
+
 #else
 
   /* used to optimize calls to tls_multi_process
@@ -375,7 +378,7 @@ openvpn (const struct options *options,
   struct group_state group_state;
 
   /* temporary variable */
-  bool did_we_daemonize;
+  bool did_we_daemonize = false;
 
 #ifdef HAVE_SIGNAL_H
   /*
@@ -393,7 +396,8 @@ openvpn (const struct options *options,
   msg (M_INFO, "%s", title_string);
 
   wait_init (&event_wait);
-  CLEAR (link_socket);
+  link_socket_reset (&link_socket);
+
   CLEAR (frame);
 #ifdef FRAGMENT_ENABLE
   CLEAR (frame_fragment_omit);
@@ -418,15 +422,6 @@ openvpn (const struct options *options,
 
   if (!options->test_crypto)
 #endif
-    /* open the TCP/UDP socket */
-    link_socket_init (&link_socket, options->local, options->remote,
-		      options->proto,
-		      options->local_port, options->remote_port,
-		      options->bind_local, options->remote_float,
-		      options->inetd,
-		      link_socket_addr, options->ipchange,
-		      options->resolve_retry_seconds,
-		      options->mtu_discover_type);
 
 #ifdef USE_CRYPTO
 
@@ -621,12 +616,12 @@ openvpn (const struct options *options,
 
       /* If we are running over TCP, allow for
 	 length prefix */
-      socket_adjust_frame_parameters (&to.frame, &link_socket);
+      socket_adjust_frame_parameters (&to.frame, options->proto);
 
       /*
        * Initialize OpenVPN's master TLS-mode object.
        */
-      tls_multi = tls_multi_init (&to, &link_socket);
+      tls_multi = tls_multi_init (&to);
     }
 #endif
   else
@@ -673,7 +668,7 @@ openvpn (const struct options *options,
    * (Since TCP is a stream protocol, we need to insert
    * a packet length uint16_t in the buffer.)
    */
-  socket_adjust_frame_parameters (&frame, &link_socket);
+  socket_adjust_frame_parameters (&frame, options->proto);
 
   /*
    * Fill in the blanks in the frame parameters structure,
@@ -747,8 +742,7 @@ openvpn (const struct options *options,
     fragment_frame_init (fragment, &frame_fragment, (options->mtu_icmp && ipv4_tun));
 #endif
 
-  /* socket & tun code have buffers to initialize once frame parameters are known */
-  socket_frame_init (&frame, &link_socket);
+  /* tun code has buffers to initialize once frame parameters are known */
   tun_frame_init (&frame, tuntap);
 
   if (!tuntap_defined (tuntap))
@@ -760,7 +754,8 @@ openvpn (const struct options *options,
 		     TUN_MTU_SIZE (&frame));
 
       /* open the tun device */
-      open_tun (options->dev, options->dev_type, options->dev_node, options->tun_ipv6, tuntap);
+      open_tun (options->dev, options->dev_type, options->dev_node,
+		options->tun_ipv6, TUN_MTU_SIZE (&frame), tuntap);
 
       /* do ifconfig */  
       if (ifconfig_order() == IFCONFIG_AFTER_TUN_OPEN)
@@ -835,11 +830,29 @@ openvpn (const struct options *options,
       thread_init();
     }
 
+  /* open the TCP/UDP socket */
+  link_socket_init (&link_socket, options->local, options->remote,
+		    options->proto,
+		    options->local_port, options->remote_port,
+		    options->bind_local, options->remote_float,
+		    options->inetd,
+		    link_socket_addr, options->ipchange,
+		    options->resolve_retry_seconds,
+		    options->mtu_discover_type,
+		    &frame,
+		    &signal_received);
+
+  if (signal_received)
+    goto cleanup;
+  
   /* start the TLS thread */
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
   if (tls_multi)
-    tls_thread_create (&thread_parms, tls_multi, &link_socket,
-		       options->nice_work, options->mlock);
+    {
+      tls_thread_create (&thread_parms, tls_multi, &link_socket,
+			 options->nice_work, options->mlock);
+      thread_opened = true;
+    }
 #endif
 
   /* change scheduling priority if requested */
@@ -1112,6 +1125,12 @@ openvpn (const struct options *options,
       wait_reset (&event_wait);
 
       /*
+       * On some platforms, we will use the keyboard as a source
+       * of signals.
+       */
+      WAIT_KEYBOARD (&event_wait);
+
+      /*
        * If outgoing data (for TCP/UDP port) pending, wait for ready-to-send
        * status from TCP/UDP port. Otherwise, wait for incoming data on TUN/TAP device.
        */
@@ -1200,7 +1219,9 @@ openvpn (const struct options *options,
       /* current should always be a reasonably up-to-date timestamp */
       current = time (NULL);
 
-#ifdef HAVE_SIGNAL_H
+      /* set signal_received if a signal was received */
+      SELECT_SIGNAL_RECEIVED ();
+
       /*
        * Did we get a signal before or while we were waiting
        * in select() ?
@@ -1212,8 +1233,8 @@ openvpn (const struct options *options,
 	      msg (M_INFO, "Current OpenVPN Statistics:");
 	      msg (M_INFO, " TUN/TAP read bytes:   " counter_format, tun_read_bytes);
 	      msg (M_INFO, " TUN/TAP write bytes:  " counter_format, tun_write_bytes);
-	      msg (M_INFO, " LINK read bytes:       " counter_format, link_read_bytes);
-	      msg (M_INFO, " LINK write bytes:      " counter_format, link_write_bytes);
+	      msg (M_INFO, " TCP/UDP read bytes:   " counter_format, link_read_bytes);
+	      msg (M_INFO, " TCP/UDP write bytes:  " counter_format, link_write_bytes);
 #ifdef USE_LZO
 	      if (options->comp_lzo)
 		  lzo_print_stats (&lzo_compwork);		  
@@ -1243,7 +1264,6 @@ openvpn (const struct options *options,
 	    }
 	  break;
 	}
-#endif /* HAVE_SIGNAL_H */
 
       if (!stat) /* timeout? */
 	continue;
@@ -1694,11 +1714,13 @@ openvpn (const struct options *options,
    *  Do Cleanup
    */
 
+ cleanup:
+
   if (free_to_link)
     free_buf (&to_link);
     
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-  if (tls_multi)
+  if (thread_opened)
     tls_thread_close (&thread_parms);
 #endif
 
@@ -1756,22 +1778,23 @@ openvpn (const struct options *options,
       char* tuntap_actual = (char *) gc_malloc (sizeof (tuntap->actual));
       strcpy (tuntap_actual, tuntap->actual);
 
-      msg (M_INFO, "Closing TUN/TAP device");
+      msg (D_CLOSE, "Closing TUN/TAP device");
       close_tun (tuntap);
 
       /* Run the down script -- note that it will run at reduced
 	 privilege if, for example, "--user nobody" was used. */
       run_script (options->down_script, tuntap_actual, TUN_MTU_SIZE (&frame),
-		  max_rw_size_link, options->ifconfig_local, options->ifconfig_remote,
-		  "init");
+		  max_rw_size_link, options->ifconfig_local,
+		  options->ifconfig_remote, "init");
     }
   else
     {
       /* run the down script on this restart if --up-restart was specified */
       if (options->up_restart)
-	run_script (options->down_script, tuntap->actual, TUN_MTU_SIZE (&frame),
-		    max_rw_size_link, options->ifconfig_local, options->ifconfig_remote,
-		    "restart");
+	run_script (options->down_script, tuntap->actual,
+		    TUN_MTU_SIZE (&frame),
+		    max_rw_size_link, options->ifconfig_local,
+		    options->ifconfig_remote, "restart");
     }
   
 #ifdef USE_CRYPTO
@@ -1797,7 +1820,7 @@ openvpn (const struct options *options,
 
   /* return the signal that brought us here */
   {
-    int s = signal_received;
+    const int s = signal_received;
     signal_received = 0;
     return s;
   }
@@ -1963,26 +1986,29 @@ main (int argc, char *argv[])
       /*
        * Set MTU defaults
        */
-      if (!options.tun_mtu_defined && !options.link_mtu_defined)
-	{
-	  if (is_dev_type (options.dev, options.dev_type, "tap"))
-	    {
+      {
+	const bool is_tap = is_dev_type (options.dev, options.dev_type, "tap");
+	if (!options.tun_mtu_defined && !options.link_mtu_defined)
+	  {
+	    if (is_tap)
+	      {
 		options.tun_mtu_defined = true;
 		options.tun_mtu = TAP_MTU_DEFAULT;
-		if (!options.tun_mtu_extra_defined)
-		  {
-		    options.tun_mtu_extra_defined = true;
-		    options.tun_mtu_extra = TAP_MTU_EXTRA_DEFAULT;
-		  }
-	    }
-	  else
-	    {
-	      if (options.ifconfig_local || options.ifconfig_remote)
-		options.link_mtu_defined = true;
-	      else
-		options.tun_mtu_defined = true;
-	    }
-	}
+	      }
+	    else
+	      {
+		if (options.ifconfig_local || options.ifconfig_remote)
+		  options.link_mtu_defined = true;
+		else
+		  options.tun_mtu_defined = true;
+	      }
+	  }
+	if (is_tap && !options.tun_mtu_extra_defined)
+	  {
+	    options.tun_mtu_extra_defined = true;
+	    options.tun_mtu_extra = TAP_MTU_EXTRA_DEFAULT;
+	  }
+      }
 
       /*
        * Sanity check on --local, --remote, and ifconfig
@@ -2091,6 +2117,11 @@ main (int argc, char *argv[])
 
       /* show all option settings */
       show_settings (&options);
+
+#ifdef WIN32
+      /* put a title on the top window bar */
+      generate_window_title (options.dev_node ? options.dev_node : "[null]");
+#endif
 
       /* Do Work */
       {

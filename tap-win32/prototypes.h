@@ -134,12 +134,12 @@ NDIS_STATUS AdapterReceive
     IN UINT p_ToTransfer
    );
 
-NTSTATUS TapTapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP);
+NTSTATUS TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP);
 NDIS_STATUS CreateTapDevice (TapAdapterPointer p_Adapter);
 VOID DestroyTapDevice (TapAdapterPointer p_Adapter);
 VOID HookDispatchFunctions();
 
-NTSTATUS CompleteIRP (IN PIRP p_IRP, IN TapTapExtensionPointer p_Extension);
+NTSTATUS CompleteIRP (IN PIRP p_IRP, IN TapExtensionPointer p_Extension, IN CCHAR PriorityBoost);
 VOID CancelIRP (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP);
 
 VOID  MemFree  (PVOID p_Addr, ULONG p_Size);

@@ -347,8 +347,7 @@ SSL_CTX *init_ssl (bool server,
 		   const char *cert_file,
 		   const char *priv_key_file, const char *cipher_list);
 
-struct tls_multi *tls_multi_init (struct tls_options *tls_options,
-				  struct link_socket *link_socket);
+struct tls_multi *tls_multi_init (struct tls_options *tls_options);
 
 void tls_multi_init_finalize(struct tls_multi *multi,
 			     const struct frame *frame,

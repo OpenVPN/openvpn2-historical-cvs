@@ -50,7 +50,7 @@ EXTRA_DIST = $(man_MANS) \
 	     win32.h \
 	     win32.c \
 	     makefile.w32 \
-	     INSTALL.w32 \
+	     INSTALL-win32.txt \
 	     tap-win32
 
 dist-hook:

@@ -33,8 +33,10 @@
 #include "config-win32.h"
 
 #include "syshead.h"
-#include "win32.h"
+#include "buffer.h"
 #include "error.h"
+#include "io.h"
+#include "win32.h"
 
 #include "memdbg.h"
 
@@ -47,12 +49,15 @@ init_win32 (void)
     {
       msg (M_ERR, "WSAStartup failed");
     }
+  keyboard_init ();
+  save_window_title ();
 }
 
 void
 uninit_win32 (void)
 {
   WSACleanup ();
+  restore_window_title ();
 }
 
 #endif

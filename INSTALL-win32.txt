@@ -1,0 +1,710 @@
+****************************************************************************
+* COPYRIGHT (C) 2003 James Yonan                                           *
+*  This program is free software; you can redistribute it and/or modify    *
+*  it under the terms of the GNU General Public License as published by    *
+*  the Free Software Foundation; either version 2 of the License, or       *
+*  (at your option) any later version.                                     *
+*                                                                          *
+*  This program is distributed in the hope that it will be useful,         *
+*  but WITHOUT ANY WARRANTY; without even the implied warranty of          *   
+*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
+*  GNU General Public License for more details.                            *   
+*                                                                          *
+****************************************************************************
+
+OpenVPN on Windows notes
+------------------------
+
+This is a BETA release.
+
+As of 2003.07.30, OpenVPN builds/runs on Win 2000
+and XP.
+
+Install from Binaries
+---------------------
+
+Download and Unzip the most recent OpenVPN-Win32 beta
+which can be found in:
+
+http://prdownloads.sourceforge.net/openvpn/
+
+Choose the most recent distribution with a .zip extension.
+
+The .zip version is basically identical to the .tar.gz
+version except it also contains a .\win32-binaries directory.
+
+Within win32-binaries, the bin directory has the
+OpenVPN exe and the OpenSSL DLLs.  Either copy all
+files in bin to a directory on your PATH, or add
+the location of the bin directory to your PATH.
+
+If you are upgrading from 1.5-beta1 to 1.5-beta2 or
+higher, you should uninstall the driver (see below),
+reboot, and reinstall the driver.  This is necessary
+because the beta2 driver has been upgraded from NDIS4
+to NDIS5.
+
+Build from source
+-----------------
+
+You can skip this section if you installed
+from binaries as described above.
+
+You will need the following:
+
+(1) MinGW/MSYS environment
+    http://mingw.sourceforge.net/
+
+(2) OpenSSL library
+    http://www.openssl.org/
+
+(3) LZO library
+    http://www.oberhumer.com/opensource/lzo/
+
+(4) Windows DDK (available only from Microsoft)
+    http://www.microsoft.com/whdc/ddk/winddk.mspx
+
+It should be noted that Visual C++ is NOT required.
+The open-source MinGW compiler is used for the
+userspace component of OpenVPN and the DDK is used
+for the driver component.
+
+First build the usermode component of OpenVPN
+from the top-level directory of the OpenVPN
+source distribution:
+
+Edit makefile.32 with the location of
+your OpenSSL and LZO distributions.  Note that
+it is only necessary to build these distributions,
+not to install them.
+
+Note that the makefile accepts a 'dynamic'
+or 'static' target, depending on the way
+you want to link with the OpenSSL library.
+
+By default the makefile will attempt to
+dynamically link with OpenSSL.
+
+Type:
+  make -f makefile.w32
+
+This will build the user mode component of OpenVPN.
+
+Now build the TAP-Win32 kernel driver:
+
+Go to Start -> All Programs -> Development Kits -> Windows DDK
+  -> Build Environments -> Win Free Build Environment
+
+Use the Checked Build Environment if you want a debugging version.
+
+A command prompt window will open.  Go to the tap-win32 directory
+of the OpenVPN distribution.
+
+Type:
+  build -cef
+
+This will build the kernel driver in the i386 directory.
+
+At this point you will have built:
+
+.\openvpn.exe -- openvpn daemon
+.\tap-win32\i386\tapdrvr.sys -- TAP-Win32 kernel driver
+
+Copy openvpn.exe to a directory in your path.
+If you build dynamically with OpenSSL, copy the OpenSSL
+DLLs to a directory in your path.
+
+See instructions below for installing the kernel driver.
+
+Install the TAP-Win32 kernel driver
+-----------------------------------
+
+I have tested this on Win XP and 2000 so far.
+
+On XP:
+
+(1) Go to Start -> Control Panel -> Add Hardware
+
+(2) Click on Next
+
+(3) Check "Yes, I have already connected the hardware"
+
+(4) Select "Add a new hardware device" from the bottom of the list.
+
+(5) Check "Install the hardware that I manually select from a list"
+
+(6) Select Network Adapters from the list.
+
+(7) Click on Have Disk.
+
+On Win2K:
+
+(1) Go to Start -> Settings -> Control Panel -> Add/Remove
+    Hardware.
+
+(2) Click on Next
+
+(3) Select "Add/Troubleshoot Device"
+
+(4) Select "Add a new device"
+
+(5) Select "No, I want to select the hardware from a list"
+
+(6) Select Network Adapters.
+
+(7) Click on Have Disk.
+
+Select the OemWin2k.inf file.  If you built from source,
+it will be in .\tap-win32\i386 -- If you are installing
+from binaries, it will be in .\win32-binaries\driver
+
+Select "TAP VPN Adapter" and click on Next.  You may get
+a warning about Windows Logo compatibility.
+
+While it is true that a buggy driver has
+a greater ability to crash your system than a buggy
+application, I have personally built, installed, and
+uninstalled this driver multiple times on my WinXP
+laptop without serious problems, however BSODs have been
+reported that are linked to driver suspend/resume
+functions.  If you want more information
+on the kernel driver, you should check out the Cipe-Win32
+list on sourceforge, where its development and usage
+is discussed.
+
+As of 1.5-beta2, driver stability is
+much improved and I have not been able to get it
+to crash even when FTPing large files over the VPN
+and repeatedly suspending and resuming my XP laptop,
+while running the Microsoft driver verifier at the
+same time in full verification mode (including
+low-resource simulation).
+
+If you get a warning dialog about the logo certification
+status of the driver, and you are comfortable installing
+a non-Microsoft approved driver, click on Continue Anyway.
+
+This action should install the driver and display
+a success or failure dialog on completion -- don't worry
+if you get an error message about the device being
+disconnected -- this is normal (see Notes -- media
+status below).
+
+Configure the TAP VPN adapter
+-----------------------------
+
+On XP Go to Start -> Control Panel -> Network Connections.
+
+On Win2K, go to Start -> Settings -> Control Panel ->
+Network (and Dial-up) Connections.
+
+You should see a "TAP VPN Adapter" with a name like
+"Local Area Connection 3".  Right click and rename
+this to something shorter and without embedded spaces
+such as "my-tap".
+
+Now right click again and select properties.
+
+Select Internet Protocol (TCP/IP) from the list
+and click on Properties.
+
+Set the IP address and subnet mask of your
+new TAP device.  For the example below we
+will use an IP of 10.3.0.1 and a subnet mask
+of 255.255.255.0.  Other fields can be left
+as they are.
+
+Check that OpenVPN sees the adapter
+-----------------------------------
+
+Type:
+  openvpn --show-adapters
+
+You should see a list that looks like this:
+
+Fri Jul 18 14:17:09 2003 0: Available TAP-Win32 devices:
+Fri Jul 18 14:17:09 2003 1: [1] 'my-tap'
+
+You can list all network interfaces with the
+Windows "ipconfig" command, and all TAP-Win32
+interfaces should be included among them.
+
+Windows and TAP device naming
+-----------------------------
+
+One major change in usage between running on Windows vs.
+the Posix world is the lack of an "ifconfig" command on
+Windows.  Basically what happens when you install the
+TAP-Win32 driver is that you get a new network adapter
+that shows up in your network control panel.  You right
+click on the TAP adapter and set the TCP/IP properties,
+i.e. IP address and netmask.  Then you rename the TAP
+adapter icon to something like "my-tap" and reference
+it using the --dev-node option in OpenVPN.
+
+Example running a VPN between Windows and Linux
+-----------------------------------------------
+
+First generate a static key:
+
+  openvpn --genkey --secret key
+
+Copy this key to your linux system via a secure medium.
+
+Now generate config files for the windows
+and linux sides:
+
+on windows create a file openvpn-config :
+
+remote [my-linux-box]
+dev tap
+dev-node my-tap
+tun-mtu 1500
+tun-mtu-extra 64
+secret key
+verb 3
+mute 20
+
+on linux create a file openvpn-config :
+
+remote [my-windows-box]
+dev tap
+up ./tap.up
+tun-mtu 1500
+tun-mtu-extra 64
+secret key
+verb 3
+
+
+on linux also create a file tap.up and do a chmod +x on it:
+
+#!/bin/bash
+ifconfig $1 10.3.0.2 netmask 255.255.255.0 mtu $2
+
+Make sure that both boxes can talk to each other
+over UDP port 5000.  Also make sure that the linux
+side has a firewall rule like this to let IP traffic
+come in from the TAP adapter:
+
+iptables -A INPUT -i tap+ -j ACCEPT
+
+Now the moment of truth... Type:
+
+ openvpn --config openvpn-config
+
+On both windows and linux boxes.
+
+If everything worked correctly you will now have a
+point-to-point VPN connecting the two boxes.
+
+On Windows, you can ping the Linux box through
+the VPN with:
+
+  ping 10.3.0.2
+
+On Linux, you can ping the Windows box through
+the VPN with:
+
+  ping 10.3.0.1
+
+Uninstall the Tap-Win32 driver
+------------------------------
+
+On XP go to Start -> Control Panel -> System -> Hardware
+
+On Win2K go to Start -> Settings -> Control Panel
+-> System -> Hardware
+
+Click on Device Manager
+
+Go down the list to Network Adapters.
+
+You should see one or more "TAP VPN" adapters.
+
+Right click and select Uninstall.
+
+Upgrade the Tap-Win32 driver
+----------------------------
+
+The fastest way to upgrade the driver is to
+go to Start -> Control Panel -> Network Connections,
+right click on the TAP VPN adapter, and select
+"disable".
+
+Now copy the new tapdrvr.sys file
+to \windows\system32\drivers\tapdrvr.sys on
+XP or \winnt\system32\drivers\tapdrvr.sys
+on Win2K.
+
+Now right click again on the TAP VPN adapter icon
+and select "enable".  If everything worked correctly,
+the adapter will enable, but will show itself in the
+"unplugged state", possibly generating an error
+message.  This is okay.  The adapter normally
+appears "unplugged" unless OpenVPN or some other
+user space program has it open.
+
+It is also possible to do a fresh upgrade by
+uninstalling the driver (see above), rebooting,
+and reinstalling.  This has the benefit of also
+upgrading the INF file which contains information
+about how the driver fits into the system and
+how it binds to the network stack.
+
+Notes -- Driver Stability
+-------------------------
+
+The stability of the TAP-Win32 driver is obviously of
+great concern since any crash by a driver will also
+crash the entire system, producing the infamous blue screen
+of death (BSOD).
+
+Between 1.5-beta1 and 1.5-beta2, significant stability
+improvements have been made in the driver, and it now passes
+the Windows Driver Verifier when running in its most
+rigourous verification mode.  The 1.5-beta1 driver had
+problems crashing on sleep/resume and I believe these
+bugs have been fixed in 1.5-beta2.
+
+Notes -- Ethernet bridging
+--------------------------
+
+Ethernet bridging is a powerful networking capability
+that allows remote systems (such as "Road Warriors")
+to connect over a VPN to an ethernet LAN in such a way
+that their system appears to be directly connected to
+the LAN, i.e. they have an IP address taken right from
+the LAN's subnet and they are able to interact with other
+hosts on the LAN including sending and receiving broadcasts
+and being able to conveniently browse and access the
+Windows network neighborhood.
+
+I have tested ethernet bridging with Windows clients connecting
+to a Linux server.  On the linux side, basically follow the
+instructions in the Ethernet bridging Mini-Howto on the
+OpenVPN web site.
+
+On the Windows side, change the IP address and subnet mask
+of the TAP VPN adapter to a combination which would be valid
+if the Windows client were directly connected to the remote
+ethernet LAN which is being bridged.  Basically, just choose
+a free IP address on the remote ethernet subnet and use it, also
+copying exactly the subnet mask.
+
+On the Linux side you must first set up ethernet bridging.  Here
+is a configuration which I use:
+
+#!/bin/bash
+
+modprobe tun
+modprobe bridge
+
+openvpn --mktun --dev tap0
+openvpn --mktun --dev tap1
+
+brctl addbr br0
+brctl addif br0 eth1
+brctl addif br0 tap0
+brctl addif br0 tap1
+
+ifconfig tap0 0.0.0.0 promisc up
+ifconfig tap1 0.0.0.0 promisc up
+ifconfig eth1 0.0.0.0 promisc up
+
+ifconfig br0 10.5.0.1 netmask 255.255.255.0 broadcast 10.5.0.255
+
+# end of script
+
+This script will set up ethernet bridging between eth1,
+tap0, and tap1.  Change the br0 ifconfig to match the ifconfig
+that would be used for eth1 under normal, non-bridged
+configuration.  Use as many tapX virtual adapters as you will
+have remote clients connecting.
+
+In the firewall, add these entries to allow TAP devices
+and ethernet bridges to operate:
+
+iptables -A INPUT -i tap+ -j ACCEPT
+iptables -A INPUT -i br0 -j ACCEPT
+iptables -A FORWARD -i br0 -j ACCEPT
+
+Now make an OpenVPN configuration on the server side to receive
+incoming connections such as:
+
+###################################
+# OpenVPN bridge config, Linux side
+
+local [public IP address or hostname]
+
+# IP settings
+port 8888
+dev tap0
+
+# crypto config
+secret key.txt
+
+# restart control
+persist-key
+persist-tun
+ping-timer-rem
+ping-restart 60
+ping 10
+
+# compression
+comp-lzo
+
+# UID
+user nobody
+group nobody
+
+# verbosity
+verb 3
+
+# end of config
+###################################
+
+For additional clients, copy the configuration
+above, but use a different port number, tapX
+unit number, and secret key.
+
+Now on the windows client side:
+
+############################################
+# OpenVPN bridge config, windows client side
+
+remote [public IP address or hostname of server]
+port 8888
+dev tap
+dev-node my-tap
+secret key.txt
+ping 10
+comp-lzo
+verb 3
+
+# end of config
+###################################
+
+The windows client should have a TAP VPN adapter
+named "my-tap" (you can name it by going to the
+Network Control Panel), which should be set to an IP
+address on the Linux server's subnet, for example
+10.5.0.5 (if it is available) and an identical
+subnet mask of 255.255.255.0.  It may also be
+possible to have windows get an address automatically
+from a DHCP server running on the Linux box, but
+I have not tested this yet.
+
+Now run OpenVPN on both sides with the appropriate
+configuration file, using the --config option.
+
+On the Linux side, you probably want to run as a daemon,
+so include --daemon and --cd [dir], where dir is
+the directory that contains the key file.
+
+If everything worked correctly, the Linux server or
+any host on its subnet should be able to ping
+10.5.0.5 and see the remote VPN connected client.
+
+The Windows client should be able to ping any address
+on the 10.5.0.x subnet, including addresses of other
+remote, OpenVPN-bridged clients.
+
+If Windows machines or Samba servers exist on the LAN
+bridged by the Linux server (including Samba running on the
+Linux server itself), the Windows client
+should see them in its network neighborhood, and vice versa.
+
+Furthermore, ethernet bridging allows for the transport
+of all protocols which are compatible with Ethernet,
+including IPv6 and IPX.
+
+Ethernet bridging is a great way to work when on the
+road, and I personally use it for securely connecting
+to home or office from WiFi Internet cafes.
+
+Notes -- Firewall on the Windows client
+---------------------------------------
+
+In general, it's a good idea to always protect
+a VPN client or server with a firewall.
+
+The important points for setting up firewalling
+on a Windows system running OpenVPN are:
+
+(1) Leave open the UDP or TCP port that OpenVPN
+    is using to communicate with the remote OpenVPN
+    server.
+(2) Try to set up the firewall not to filter packets
+    coming in on the TAP VPN adapter.  Once an IP
+    packet appears to be "coming in" on the TAP VPN
+    adapter, it has already been decrypted and
+    authenticated by OpenVPN.
+
+Notes -- Media Status
+---------------------
+
+1.5-beta2 of the driver has the Media Status patch.
+This patch shows the TAP VPN adapter as being
+"unplugged" whenever OpenVPN is not running.
+
+Notes -- Error message from OpenVPN
+-----------------------------------
+
+OpenVPN can be on the chatty side when it comes
+to error messages, and sleep-resume activity often
+produces a flurry of non-fatal messages.  Most of
+these messages can be safely ignored and are provided
+for informational and debugging purposes only.
+
+To suppress repeating messages, the --mute option
+can be used.  For example --mute 10 will print
+no more than 10 consecutive messages in the same
+error class.  To suppress all error messages
+except those that are fatal, use --verb 0.
+
+Notes -- ARP/MAC Issues with the TAP-Win32 driver
+-------------------------------------------------
+
+Most TAP drivers allocate a random MAC to their virtual NIC.
+If OpenVPN running on Windows disconnects and reconnects to
+a remote peer, it is possible that that peer will reinitialize
+its TAP device and generate a new random MAC, causing Windows to
+temporarily lose access to the IP addresses exported by that
+remote peer.  This is because Windows doesn't know that a given
+IP address on the virtual TAP network now is associated with a
+new MAC, so it tries to send packets to the old MAC, causing
+them to be dropped.
+
+Luckily, there is an easy solution to this problem.
+Create a batch file with one or more of the following commands:
+
+  arp -d [ip-address]
+
+Where ip-address is a remote IP address at the other end of the
+virtual TAP network whose access was lost due to an OpenVPN
+restart.  The arp -d command will cause Windows
+to "forget" the MAC address which it previously associated with
+the given IP address.  Next time that IP address is used,
+Windows will actively query the remote peer
+(with an "arp who-has" message) to get the new MAC address.
+
+You can use the --up option in OpenVPN to automatically run a
+given batch file immediately after TAP device initialization --
+such a batch file can contain arp commands as described above.
+
+Notes -- Limitations
+-------------------
+
+The following features which are normally available in the
+Posix version of OpenVPN are either missing or implemented
+differently in the Windows version as of 1.5-beta2.
+
+(1) --daemon doesn't work yet, so each OpenVPN instance must
+    run in a command prompt window.  At some point in the
+    future I plan to implement a real windows installer
+    and implement OpenVPN as a system-tray applet.
+
+(2) Only TAP virtual devices are supported on Windows, not
+    TUN devices.
+
+(3) --shaper doesn't work yet due to the lack of a
+    gettimeofday library function.  This is not difficult
+    to fix and could be implemented by borrowing some code
+    from the cygwin library.
+
+(4) Windows doesn't support Posix signals directly, however
+    keyboard shortcuts have been set up for the current
+    windows beta to simulate signals using the following
+    mapping: F1:USR1 F2:USR2 F3:HUP F4:TERM -- this is an
+    interim measure that will need to suffice until the
+    system-tray applet is implemented.
+
+(5) The current TAP-Win32 driver .INF file installs a single
+    TAP VPN adapter by default, though it should be possible
+    to install multiple adapters, as OpenVPN can select
+    them through the --dev-node option.
+
+Notes -- Differences between TAP-Win32 driver and CIPE driver
+-------------------------------------------------------------
+
+The TAP-Win32 driver distributed with OpenVPN 1.5-beta2 and
+later is derived from Cipe-Win32 2.0-pre15 with some
+significant changes:
+
+(1) Stability is much improved, especially with sleep/resume,
+    using Michael Clarke's patch which upgrades the driver
+    to NDIS5, properly implements sleep/resume OIDs, and fixes
+    a race condition between AdapterTransmit and IRP_MJ_READ.
+
+(2) Added Christof Meerwald's "Media Status" patch which shows
+    a given TAP-Win32 adapter as being "unplugged" when it is
+    not currently open by an OpenVPN instance.
+
+(3) Modified the MAC generation code to follow the Linux
+    algorithm for generating MACs, using 0:FF:XX:XX:XX:XX
+    where XX:XX:XX:XX is random.
+
+(4) Added code to lock the TAP device so that only one
+    OpenVPN instance can have it open at a time.
+
+(5) Ran the driver through the windows driver verifier
+    with all testing modes enabled, including low-resource
+    simulation mode.  Based on the resulting bug checks,
+    I was able to fix a number
+    of problems including using MmGetSystemAddressForMdlSafe
+    instead of MmGetSystemAddressForMdl, fixing several places
+    in the code where the return status of
+    NdisAllocateMemory is not checked, and making the flags
+    match between NdisAllocateMemory and NdisFreeMemory calls.
+
+(6) Renamed the driver so that it shows up as a "TAP VPN" adapter
+    in the network control panel, and does not conflict with the
+    CIPE driver.
+
+(7) To a certain extent, backwards compatibility with NT 4 has
+    been sacrificed in the interest of better portability and
+    stability on Win2K/XP.
+
+Performance
+-----------
+
+Using the configuration above, I FTPed a
+33 MB file compressed file over the VPN
+in both directions.
+
+The speed is limited by the encryption
+efficiency of the Linux box
+which is a Pentium II 266Mhz.
+
+****************
+
+Microsoft Windows XP [Version 5.1.2600]
+(C) Copyright 1985-2001 Microsoft Corp.
+
+c:\>sh
+sh-2.04$ cd /tmp
+sh-2.04$ ftp
+ftp> open 10.3.0.2
+Connected to 10.3.0.2.
+220 ProFTPD 1.2.8 Server (boulder.yonan.net) [localhost]
+User (10.3.0.2:(none)): jim
+331 Password required for jim.
+Password:
+230 User jim logged in.
+ftp> cd /tmp
+250 CWD command successful.
+ftp> binary
+200 Type set to I
+ftp> get test.dat
+200 PORT command successful
+150 Opening BINARY mode data connection for test.dat (33259135 bytes)
+226 Transfer complete.
+ftp: 33259135 bytes received in 19.84Seconds 1676.54Kbytes/sec.
+ftp> send test.dat
+200 PORT command successful
+150 Opening BINARY mode data connection for test.dat
+226 Transfer complete.
+ftp: 33259135 bytes sent in 28.75Seconds 1156.80Kbytes/sec.
+ftp> quit
+221 Goodbye.
+sh-2.04$

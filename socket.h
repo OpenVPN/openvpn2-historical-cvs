@@ -152,49 +152,45 @@ int socket_finalize (
 
 #endif
 
-void
-link_socket_init (struct link_socket *sock,
-		  const char *local_host,
-		  const char *remote_host,
-		  int proto,
-		  int local_port,
-		  int remote_port,
-		  bool bind_local,
-		  bool remote_float,
-		  bool inetd,
-		  struct link_socket_addr *lsa,
-		  const char *ipchange_command,
-		  int resolve_retry_seconds,
-		  int mtu_discover_type);
+void link_socket_reset (struct link_socket *sock);
 
-void
-socket_adjust_frame_parameters (struct frame *frame, struct link_socket *sock);
+void link_socket_init (struct link_socket *sock,
+		       const char *local_host,
+		       const char *remote_host,
+		       int proto,
+		       int local_port,
+		       int remote_port,
+		       bool bind_local,
+		       bool remote_float,
+		       bool inetd,
+		       struct link_socket_addr *lsa,
+		       const char *ipchange_command,
+		       int resolve_retry_seconds,
+		       int mtu_discover_type,
+		       const struct frame *frame,
+		       volatile int *signal_received);
 
-void
-socket_frame_init (struct frame *frame, struct link_socket *sock);
+void socket_adjust_frame_parameters (struct frame *frame, int proto);
 
-void
-link_socket_set_outgoing_addr (const struct buffer *buf,
-			       struct link_socket *sock,
-			       const struct sockaddr_in *addr);
+void link_socket_set_outgoing_addr (const struct buffer *buf,
+				    struct link_socket *sock,
+				    const struct sockaddr_in *addr);
 
-void
-link_socket_incoming_addr (struct buffer *buf,
-			   const struct link_socket *sock,
-			   const struct sockaddr_in *from_addr);
+void link_socket_incoming_addr (struct buffer *buf,
+				const struct link_socket *sock,
+				const struct sockaddr_in *from_addr);
 
-void
-link_socket_get_outgoing_addr (struct buffer *buf,
-			       const struct link_socket *sock,
-			       struct sockaddr_in *addr);
+void link_socket_get_outgoing_addr (struct buffer *buf,
+				    const struct link_socket *sock,
+				    struct sockaddr_in *addr);
 
 void link_socket_close (struct link_socket *sock);
 
-const char *
-print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* separator);
+const char *print_sockaddr_ex (const struct sockaddr_in *addr,
+			       bool do_port,
+			       const char* separator);
 
-const char *
-print_sockaddr (const struct sockaddr_in *addr);
+const char *print_sockaddr (const struct sockaddr_in *addr);
 
 /*
  * Transport protocol naming and other details.
@@ -250,6 +246,18 @@ frame_adjust_path_mtu (struct frame *frame, int pmtu, int proto)
  */
 
 static inline bool
+link_socket_proto_connection_oriented (int proto)
+{
+  return proto == PROTO_TCPv4_SERVER || proto == PROTO_TCPv4_CLIENT;
+}
+
+static inline bool
+link_socket_connection_oriented (const struct link_socket *sock)
+{
+  return link_socket_proto_connection_oriented (sock->proto);
+}
+
+static inline bool
 addr_defined (const struct sockaddr_in *addr)
 {
   return addr->sin_addr.s_addr != 0;
@@ -264,13 +272,18 @@ addr_match (const struct sockaddr_in *a1, const struct sockaddr_in *a2)
 static inline bool
 addr_port_match (const struct sockaddr_in *a1, const struct sockaddr_in *a2)
 {
-  return a1->sin_addr.s_addr == a2->sin_addr.s_addr && a1->sin_port == a2->sin_port;
+  return a1->sin_addr.s_addr == a2->sin_addr.s_addr
+    && a1->sin_port == a2->sin_port;
 }
 
 static inline bool
-link_socket_connection_oriented (const struct link_socket *sock)
+addr_match_proto (const struct sockaddr_in *a1,
+		  const struct sockaddr_in *a2,
+		  int proto)
 {
-  return sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT;
+  return link_socket_proto_connection_oriented (proto)
+    ? addr_match (a1, a2)
+    : addr_port_match (a1, a2);
 }
 
 static inline bool
@@ -299,107 +312,15 @@ void stream_buf_init (struct stream_buf *sb, struct buffer *buf);
 void stream_buf_close (struct stream_buf* sb);
 bool stream_buf_added (struct stream_buf *sb, int length_added);
 
-static inline void
-stream_buf_set_next (struct stream_buf *sb)
-{
-  /* set up 'next' for next i/o read */
-  sb->next = sb->buf;
-  sb->next.offset = sb->buf.offset + sb->buf.len;
-  sb->next.len = (sb->len >= 0 ? sb->len : sb->maxlen) - sb->buf.len;
-  msg (D_STREAM_DEBUG, "STREAM: SET NEXT, buf=[%d,%d] next=[%d,%d] len=%d maxlen=%d",
-       sb->buf.offset, sb->buf.len,
-       sb->next.offset, sb->next.len,
-       sb->len, sb->maxlen);
-  ASSERT (sb->next.len > 0);
-  ASSERT (buf_safe (&sb->buf, sb->next.len));
-}
-
-static inline bool
-stream_buf_read_setup (struct link_socket* sock)
-{
-  if (link_socket_connection_oriented (sock))
-    {
-      if (sock->stream_buf.residual.len && !sock->stream_buf.residual_fully_formed)
-	{
-	  ASSERT (buf_copy (&sock->stream_buf.buf, &sock->stream_buf.residual));
-	  ASSERT (buf_init (&sock->stream_buf.residual, 0));
-	  sock->stream_buf.residual_fully_formed = stream_buf_added (&sock->stream_buf, 0);
-	    msg (D_STREAM_DEBUG, "STREAM: RESIDUAL FULLY FORMED [%s], len=%d",
-		 sock->stream_buf.residual_fully_formed ? "YES" : "NO",
-		 sock->stream_buf.residual.len);
-	}
-      if (!sock->stream_buf.residual_fully_formed)
-	stream_buf_set_next (&sock->stream_buf);
-      return !sock->stream_buf.residual_fully_formed;
-    }
-  else
-    return true;
-}
-
-static inline void
-stream_buf_reset (struct stream_buf *sb)
-{
-  msg (D_STREAM_DEBUG, "STREAM: RESET");
-  sb->residual_fully_formed = false;
-  sb->buf = sb->buf_init;
-  CLEAR (sb->next);
-  sb->len = -1;
-}
-
-static inline void
-stream_buf_get_final (struct stream_buf *sb, struct buffer *buf)
-{
-  msg (D_STREAM_DEBUG, "STREAM: GET FINAL len=%d",
-       buf_defined (&sb->buf) ? sb->buf.len : -1);
-  ASSERT (buf_defined (&sb->buf));
-  *buf = sb->buf;
-}
-
-static inline void
-stream_buf_get_next (struct stream_buf *sb, struct buffer *buf)
-{
-  msg (D_STREAM_DEBUG, "STREAM: GET NEXT len=%d",
-       buf_defined (&sb->next) ? sb->next.len : -1);
-  ASSERT (buf_defined (&sb->next));
-  *buf = sb->next;
-}
+bool stream_buf_read_setup (struct link_socket* sock);
 
 /*
  * Socket Read Routines
  */
 
-static inline int
+int
 link_socket_read_tcp (struct link_socket *sock,
-		      struct buffer *buf)
-{
-  int len = 0;
-
-  if (!sock->stream_buf.residual_fully_formed)
-    {
-#ifdef WIN32
-      len = socket_finalize (sock->sd, &sock->reads, buf, NULL);
-#else
-      struct buffer frag;
-      stream_buf_get_next (&sock->stream_buf, &frag);
-      len = recv (sock->sd, BPTR (&frag), BLEN (&frag), MSG_NOSIGNAL);
-#endif
-
-      if (!len)
-	sock->stream_reset = true;
-      if (len <= 0)
-	return buf->len = len;
-    }
-
-  if (sock->stream_buf.residual_fully_formed
-      || stream_buf_added (&sock->stream_buf, len)) /* packet complete? */
-    {
-      stream_buf_get_final (&sock->stream_buf, buf);
-      stream_buf_reset (&sock->stream_buf);
-      return buf->len;
-    }
-  else
-    return buf->len = 0; /* no error, but packet is still incomplete */
-}
+		      struct buffer *buf);
 
 #ifdef WIN32
 
@@ -461,6 +382,9 @@ link_socket_read (struct link_socket *sock,
 /*
  * Socket Write routines
  */
+
+int link_socket_read_tcp (struct link_socket *sock,
+			  struct buffer *buf);
 
 #ifdef WIN32
 

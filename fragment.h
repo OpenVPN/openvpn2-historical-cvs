@@ -41,17 +41,18 @@
 //#define TEST_CON_PCT        50     /* contraction test packet is this % smaller than current max */
 
 struct fragment_master {
-  struct event_timeout;
+  struct event_timeout wakeup;
 
   time_t last_wakeup;
   time_t last_mtu_change;
   int mtu;
+
   //int n_rec_big;
   //int n_rec_small;
   //int n_sent_big;
   //int n_sent_small;
 
-  /* this value is bounced back to peer then zeroed via fragment_net.max_size_recent */
+  /* this value is bounced back to peer via fragment_net.max_size_recent then zeroed */
   int max_packet_size_received;
 
   uint8_t outgoing_id;
@@ -129,7 +130,8 @@ fragment_housekeeping (struct fragment_master *f, time_t current, struct timeval
  * Public functions
  */
 
-struct fragment_master *fragment_init (int max_fragment_size, bool generate_icmp, struct frame *frame);
+struct fragment_master *fragment_init (bool generate_icmp, struct frame *frame);
+
 void fragment_frame_init (struct fragment_master *f, const struct frame *frame);
 void fragment_free (struct fragment_master *f);
 
@@ -140,6 +142,9 @@ void fragment_outgoing (struct fragment_master *f, struct buffer *buf,
 			const struct frame* frame, const time_t current);
 
 bool fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
-			const struct frame* frame, const time_t current);
+			     const struct frame* frame, const time_t current);
+
+bool fragment_icmp (struct fragment_master *f, struct buffer *buf,
+		    const struct frame* frame, const time_t current);
 
 #endif

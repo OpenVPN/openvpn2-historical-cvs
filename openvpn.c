@@ -83,10 +83,10 @@ signal_handler_exit (int signum)
 
 static void print_frame_parms(int level, const struct frame *frame, const char* prefix)
 {
-  msg (level, "%s: mtu=%d mtud=%d extra_frame=%d extra_buffer=%d extra_tun=%d",
+  msg (level, "%s: mtu=%d mtu_dynamic=[%d,%d,%d] extra_frame=%d extra_buffer=%d extra_tun=%d",
        prefix,
        frame->mtu,
-       frame->mtu_dynamic,
+       frame->mtu_dynamic_min, frame->mtu_dynamic, frame->mtu_dynamic_max,
        frame->extra_frame,
        frame->extra_buffer,
        frame->extra_tun);
@@ -117,7 +117,24 @@ frame_finalize(struct frame *frame, const struct options *options)
 
   frame->extra_buffer += frame->extra_frame + frame->extra_tun;
 
-  frame->mtu_dynamic = frame->mtu;
+  /*
+   * Set dynamic MTU min and max.
+   */
+  if (options->mtu_min_defined)
+    frame->mtu_dynamic_min = options->mtu_min - TUN_UDP_DELTA(frame);
+  if (frame->mtu_dynamic_min < MIN_TUN_MTU)
+    frame->mtu_dynamic_min = MIN_TUN_MTU;
+
+  if (options->mtu_max_defined)
+    frame->mtu_dynamic_max = options->mtu_max - TUN_UDP_DELTA(frame);
+  if (!frame->mtu_dynamic_max || frame->mtu_dynamic_max > frame->mtu)
+    frame->mtu_dynamic_max = frame->mtu;
+
+  if (frame->mtu_dynamic_min > frame->mtu_dynamic_max)
+    print_frame_parms (M_FATAL, frame, "Dynamic MTU min is larger than dynamic MTU max");
+
+  /* Set initial dynamic MTU to min. */
+  frame->mtu_dynamic = frame->mtu_dynamic_min;
 }
 
 #if defined(USE_PTHREAD) && defined(USE_CRYPTO)
@@ -327,6 +344,11 @@ openvpn (const struct options *options,
   struct buffer read_tun_buf = clear_buf ();
 
   /*
+   * IPv4 TUN device?
+   */
+  bool ipv4_tun = (!options->tun_ipv6 && is_dev_type (options->dev, options->dev_type, "tun"));
+
+  /*
    * Special handling if signal arrives before
    * we are properly initialized.
    */
@@ -361,8 +383,8 @@ openvpn (const struct options *options,
   /*
    * Initialize advanced MTU negotiation and datagram fragmentation
    */
-  if (options->fragment)
-    fragment = fragment_init (options->max_fragment_size, options->generate_icmp, &frame);
+  if (options->mtu_dynamic)
+    fragment = fragment_init ((options->mtu_icmp && ipv4_tun), &frame);
 
 #ifdef USE_CRYPTO
   /* load a persisted packet-id for cross-session replay-protection */
@@ -852,49 +874,55 @@ openvpn (const struct options *options,
        */
       if (fragment)
 	{
-	  fragment_housekeeping (fragment, current, &timeval);
-	  if (!to_udp.len)
+	  if (ipv4_tun && udp_socket.mtu_changed)
 	    {
-	      if (fragment_ready_to_send (fragment, &buf, &frame, current))
-		{
+	      frame_adjust_path_mtu (&frame, udp_socket.mtu);
+	      udp_socket.mtu_changed = false;
+	    }
+	  fragment_housekeeping (fragment, current, &timeval);
+	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame, current))
+	    {
+	      to_tun = buf;
+	    }
+	  else if (!to_udp.len && fragment_ready_to_send (fragment, &buf, &frame, current))
+	    {
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
-		  /*
-		   * If TLS mode, get the key we will use to encrypt
-		   * the packet.
-		   */
-		  mutex_lock (L_TLS);
-		  if (tls_multi)
-		    tls_pre_encrypt (tls_multi, &buf, &crypto_options);
+	      /*
+	       * If TLS mode, get the key we will use to encrypt
+	       * the packet.
+	       */
+	      mutex_lock (L_TLS);
+	      if (tls_multi)
+		tls_pre_encrypt (tls_multi, &buf, &crypto_options);
 #endif
-		  /*
-		   * Encrypt the packet and write an optional
-		   * HMAC authentication record.
-		   */
-		  openvpn_encrypt (&buf, encrypt_buf, &crypto_options, &frame, current);
+	      /*
+	       * Encrypt the packet and write an optional
+	       * HMAC authentication record.
+	       */
+	      openvpn_encrypt (&buf, encrypt_buf, &crypto_options, &frame, current);
 #endif
-		  /*
-		   * Get the address we will be sending the packet to.
-		   */
-		  udp_socket_get_outgoing_addr (&buf, &udp_socket,
-						&to_udp_addr);
+	      /*
+	       * Get the address we will be sending the packet to.
+	       */
+	      udp_socket_get_outgoing_addr (&buf, &udp_socket,
+					    &to_udp_addr);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
-		  /*
-		   * In TLS mode, prepend the appropriate one-byte opcode
-		   * to the packet which identifies it as a data channel
-		   * packet and gives the low-permutation version of
-		   * the key-id to the recipient so it knows which
-		   * decrypt key to use.
-		   */
-		  if (tls_multi)
-		    tls_post_encrypt (tls_multi, &buf);
-		  mutex_unlock (L_TLS);
+	      /*
+	       * In TLS mode, prepend the appropriate one-byte opcode
+	       * to the packet which identifies it as a data channel
+	       * packet and gives the low-permutation version of
+	       * the key-id to the recipient so it knows which
+	       * decrypt key to use.
+	       */
+	      if (tls_multi)
+		tls_post_encrypt (tls_multi, &buf);
+	      mutex_unlock (L_TLS);
 #endif
 #endif
-		  to_udp = buf;
-		  free_to_udp = false;
-		}
+	      to_udp = buf;
+	      free_to_udp = false;
 	    }
 	}
 

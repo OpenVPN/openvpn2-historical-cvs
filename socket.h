@@ -44,6 +44,7 @@ struct udp_socket
   struct udp_socket_addr *addr;
   const char *ipchange_command;
   int mtu;                      /* OS discovered MTU, or 0 if unknown */
+  int mtu_changed;              /* Set to true when mtu value is changed */
   int sd;			/* file descriptor for socket */
 };
 

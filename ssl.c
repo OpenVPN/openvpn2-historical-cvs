@@ -140,8 +140,15 @@ tls_init_control_channel_frame_parameters(const struct frame *data_channel_frame
 
   /* finalize parameters based on data_channel_frame */
   frame->mtu = EXPANDED_SIZE (data_channel_frame) - frame->extra_frame;
-  frame->mtu_dynamic = frame->mtu;
   frame->extra_buffer += frame->extra_frame;
+
+  /* finalize dynamic parameters */
+  {
+    const int mtu_delta = frame->mtu - data_channel_frame->mtu;
+    frame->mtu_dynamic = data_channel_frame->mtu_dynamic + mtu_delta;
+    frame->mtu_dynamic_min = data_channel_frame->mtu_dynamic_min + mtu_delta;
+    frame->mtu_dynamic_max = data_channel_frame->mtu_dynamic_max + mtu_delta;
+  }
 }
 
 void
@@ -1141,7 +1148,7 @@ static bool transmit_rate_limiter(struct tls_session* session, time_t* wakeup, t
   const int estimated_bytes = 20000;
 
   /* worst-case estimated finish at this rate */
-  time_t finish = current + ((freq * estimated_bytes) / PAYLOAD_SIZE_DYNAMIC (&session->opt->frame));
+  time_t finish = current + ((freq * estimated_bytes) / PAYLOAD_SIZE_MIN (&session->opt->frame));
 
   if (check_debug_level (D_TLS_DEBUG))
     {
@@ -1459,7 +1466,7 @@ tls_process (struct tls_multi *multi,
 	      int status;
 
 	      ASSERT (buf_init (buf, EXTRA_FRAME (&multi->opt.frame)));
-	      status = key_state_read_plaintext (ks, buf, PAYLOAD_SIZE_DYNAMIC (&multi->opt.frame));
+	      status = key_state_read_plaintext (ks, buf, PAYLOAD_SIZE_MIN (&multi->opt.frame));
 	      current = time (NULL);
 	      if (status == -1)
 		{
@@ -1568,7 +1575,7 @@ tls_process (struct tls_multi *multi,
 	      buf = reliable_get_buf (&ks->send_reliable);
 	      if (buf)
 		{
-		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE_DYNAMIC (&multi->opt.frame));
+		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE_MIN (&multi->opt.frame));
 		  if (status == -1)
 		    {
 		      msg (D_TLS_ERRORS,

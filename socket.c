@@ -57,6 +57,11 @@ set_check_status (unsigned int info_level, unsigned int verbose_level)
   x_cs_verbose_level = verbose_level;
 }
 
+/*
+ * Called after most socket operations, via the inline function check_status().
+ * Decide if we should print an error message, and see if we can extract any useful
+ * info from the error, such as a Path MTU value.
+ */
 void
 x_check_status (int status, const char *description, struct udp_socket *sock)
 {
@@ -69,8 +74,11 @@ x_check_status (int status, const char *description, struct udp_socket *sock)
 	{
 	  struct buffer out = alloc_buf_gc (512);
 	  const int mtu = format_extended_socket_error (sock->sd, &out);
-	  if (mtu > 0)
-	    sock->mtu = mtu;
+	  if (mtu > 0 && sock->mtu != mtu)
+	    {
+	      sock->mtu = mtu;
+	      sock->mtu_changed = true;
+	    }
 	  if (out.len)
 	      msg (lev, "%s [%s]", description, BPTR(&out));
 	    else

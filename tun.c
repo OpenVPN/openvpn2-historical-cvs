@@ -41,7 +41,7 @@
 
 #include "memdbg.h"
 
-static bool
+bool
 is_dev_type (const char *dev, const char *dev_type, const char *match_type)
 {
   ASSERT (dev);

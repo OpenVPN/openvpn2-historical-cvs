@@ -345,7 +345,7 @@ close_tun_generic (struct tuntap *tt)
 
 #if defined(TARGET_LINUX)
 
-#ifdef HAVE_LINUX_IF_TUN_H	/* New driver support */
+#if defined(HAVE_LINUX_IF_TUN_H) && !defined(TARGET_LINUX_2_2)	/* New Linux 2.4 driver support */
 
 #ifndef HAVE_LINUX_SOCKIOS_H
 #error header file linux/sockios.h required

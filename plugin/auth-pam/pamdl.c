@@ -1,6 +1,4 @@
 /*
- * $Id: pamdl.c,v 1.1 2004/11/28 19:22:09 jimyonan Exp $
- *
  * If you want to dynamically load libpam using dlopen() or something,
  * then dlopen( ' this shared object ' ); It takes care of exporting
  * the right symbols to any modules loaded by libpam.

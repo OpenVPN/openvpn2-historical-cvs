@@ -1,8 +1,18 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.125 2005/03/28 10:47:29 jimyonan Exp $
+$Id: ChangeLog,v 1.126 2005/03/30 06:34:28 jimyonan Exp $
 
+2005.03.29 -- Version 2.0-rc19
+
+* Omit additions of routes where the network and
+  gateway are equal and the netmask is 255.255.255.255.
+  This can come up if you are using both
+  server/ifconfig-pool and client-config-dir with
+  ifconfig-push static addresses for some subset of clients
+  which directly reference the server IP address as the
+  remote endpoint.
+	
 2005.03.28 -- Version 2.0-rc18
 
 * Packaged Windows installer with OpenSSL 0.9.7f.

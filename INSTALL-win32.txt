@@ -1,5 +1,5 @@
-OpenVPN on Windows notes
-------------------------
+OpenVPN on Windows notes, Copyright (C) James Yonan, 2003
+---------------------------------------------------------
 
 This is a BETA release.  Please report any bugs
 to openvpn-users AT lists DOT sourceforge DOT net
@@ -10,8 +10,29 @@ and XP.  OpenVPN also runs on Linux, Mac OS X,
 Solaris, FreeBSD, NetBSD, and OpenBSD, making it
 one of the most portable VPN packages today.
 
-What's new in 1.5-beta3
+What's new in 1.5-beta5
 -----------------------
+
+You can now run one or more OpenVPN tunnels as a
+Windows service if you select the "OpenVPN Service"
+option in the installer.
+
+See "Running as a Windows Service" below for more
+details.
+
+Also new in 1.5-beta5 are right-clickable
+options on .ovpn files (The windows file
+extension for OpenVPN config files), including the
+ability to instantiate an OpenVPN process
+on a given config file.
+
+Other changes include a new start menu
+shortcut to generate a static key, and a
+few other useful shortcuts.
+
+More work as well has gone into improving MTU
+configurability in the TAP-Win32 driver.
+See MTU notes below for more info.
 
 Ease of installation has been dramatically improved
 with the development a real windows
@@ -20,7 +41,8 @@ installer/uninstaller using the Nullsoft Install System.
 The OpenVPN Windows distribution is now packaged as a
 self-installing EXE which will automatically
 install/upgrade OpenVPN, OpenSSL components,
-and the TAP-Win32 driver.
+the TAP-Win32 driver, and install the OpenVPN
+service wrapper.
 
 You can now create multiple TAP-Win32 adapter instances,
 to allow several VPN tunnels to run concurrently
@@ -52,7 +74,7 @@ OpenVPN and the TAP-Win32 driver as automatic
 as possible.
 
 Configure the TAP-Win32 adapter
------------------------------
+-------------------------------
 
 On XP Go to Start -> Control Panel -> Network Connections.
 
@@ -78,11 +100,21 @@ as they are.
 Note also that the command line tool
 netsh can do many of these same functions.
 
+For example, the following command will set the IP
+and subnet for my-tap:
+
+  netsh interface ip set address my-tap static 10.3.0.1 255.255.255.0
+
+This setting is persistent across reboots.
+
 Check that OpenVPN sees the adapter
 -----------------------------------
 
 Type:
+
   openvpn --show-adapters
+
+at a command prompt.
 
 You should see a list that looks like this:
 
@@ -96,9 +128,7 @@ interfaces should be included among them.
 Windows and TAP device naming
 -----------------------------
 
-One change in usage between running on Windows vs.
-the Posix world is the lack of an "ifconfig" command on
-Windows.  Basically what happens when you install the
+Basically what happens when you install the
 TAP-Win32 driver is that you get a new network adapter
 that shows up in your network control panel.  You right
 click on the TAP adapter and set the TCP/IP properties,
@@ -106,23 +136,212 @@ i.e. IP address and netmask.  Then you rename the TAP
 adapter icon to something like "my-tap" and reference
 it using the --dev-node option in OpenVPN.
 
-To a certain extent, the devcon, netsh, and ipconfig
-command-line utilities on Windows replicate the
-functionality of the ifconfig command.
+Windows also has command line utilities to accomplish
+these same kinds of tasks such as devcon, netsh,
+and ipconfig.
 
-Example running a VPN between Windows and Linux
------------------------------------------------
+Running OpenVPN from a console window
+-------------------------------------
+
+First, create a config file.  A sample is provided
+in \Program Files\OpenVPN\config\sample.ovpn.txt
+
+Edit this file and save to a .ovpn extension.
+Now, run OpenVPN by right clicking on the
+.ovpn filename and selecting "Start OpenVPN
+on this config file".
+
+You can also run from a command prompt window:
+
+  openvpn --config sample.ovpn
+
+Running OpenVPN as a Windows Service
+------------------------------------
+
+When OpenVPN runs as a service it will start a
+separate OpenVPN process for each configuration
+file it finds in the
+\Program Files\OpenVPN\config directory and will
+output a logfile of the same name to the
+\Program Files\OpenVPN\log directory.
+
+When installed as a service, OpenVPN
+will default to manual start mode.  You
+can go to the Services control panel
+in Control Panel -> Administrative Tools
+to start the service or to set it to Automatic
+Start mode.
+
+A sample config file has been provided in
+\Program Files\OpenVPN\config\sample.ovpn.txt
+which can be adapted to your needs.
+
+Service Notes:
+
+* When you install OpenVPN as a service, you
+  are actually installing openvpnserv.exe which
+  is a service wrapper for OpenVPN, i.e. it
+  reads the config file directory and starts
+  up a separate OpenVPN process for each config
+  file.  openvpnserv.exe performs the same
+  function under windows as the
+  /etc/init.d/openvpn startup script does
+  under linux.
+
+* When you stop the OpenVPN service, it will
+  send a terminate signal to all OpenVPN
+  processes which were started by it.
+
+* If the OpenVPN service wrapper (openvpnserv.exe)
+  encounters fatal errors, it will write them
+  to the windows event log, which can be
+  viewed in Control Panel -> Administrative Tools
+  -> Event Viewer -> Application Log. 
+
+* If the OpenVPN processes themselves encounter
+  errors, they will write them to their respective
+  log files in the log file directory.
+
+* There is a one-to-one correspondence between an
+  OpenVPN process, an OpenVPN config file, an
+  OpenVPN log file, and a TAP-Win32 adapter which
+  represents an endpoint of a VPN tunnel.
+
+* OpenVPN tunnels are point-to-point in their
+  simplest form, but can be made point-to-multi-point
+  through the use of bridging or routing
+  (see below).
+
+* Multiple OpenVPN processes can run concurrently,
+  each on a different TAP-Win32 adapter.
+
+* openvpn.exe gets all configuration
+  information from its config file, not from
+  the registry.
+
+* The openvpnserv.exe program (the service wrapper)
+  gets several string parameters from the registry which
+  can be modified by the user.  If you change any of these
+  parameters, you should be able to upgrade OpenVPN to
+  a new version without the installer overwriting your changes.
+
+  HKLM\SOFTWARE\OpenVPN
+
+  config_dir -- configuration file directory to scan, defaults to
+                "\Program Files\OpenVPN\config"
+
+  config_ext -- file extension on configuration files, defaults
+                to "ovpn"
+
+  exe_path   -- path to openvpn.exe, defaults to
+                "\Program Files\OpenVPN\bin\openvpn.exe"
+
+  log_dir    -- log file directory, defaults to
+                "\Program Files\OpenVPN\log"
+
+  priority   -- the windows priority class for each
+                instantiated OpenVPN process, can be one of:
+
+                (1) "IDLE_PRIORITY_CLASS"
+                (2) "BELOW_NORMAL_PRIORITY_CLASS"
+                (3) "NORMAL_PRIORITY_CLASS" (default)
+                (4) "ABOVE_NORMAL_PRIORITY_CLASS"
+                (5) "HIGH_PRIORITY_CLASS"
+
+Bridging vs. Routing
+--------------------
+
+Bridging and routing are two methods of linking systems via
+a VPN.
+
+* Bridging advantages
+
+    Broadcasts traverse the VPN -- this allows software that depends
+    on LAN broadcasts such as Windows NetBIOS file sharing and
+    network neighborhood browsing to work.
+
+    No route statements to configure.
+
+    Works with any protocol that can function over
+    ethernet, including IPv4, IPv6, Netware IPX,
+    AppleTalk, etc.
+
+    Relatively easy-to-configure solution for road warriors.
+
+* Bridging disadvantages
+
+    Less efficient than routing, and does not scale well.
+
+* Routing advantages
+
+    Efficiency and scalability.
+
+    Allows better tuning of MTU (see notes below)
+    for efficiency.
+
+* Routing disadvantages
+
+    Clients must use a WINS server (such as samba) to allow
+    cross-VPN network browsing to work.
+
+    Routes must be set up linking each subnet.
+
+    Software that depends on broadcasts will not "see"
+    machines on the other side of the VPN.
+
+    Works only with IPv4 in general, and IPv6 in some
+    special cases.
+
+What is Bridging?
+
+  Bridging is a technique of creating a virtual, wide-area
+  ethernet LAN, running on a single subnet.
+
+What is the fundamental difference between bridging
+and routing in terms of configuration?
+
+  When a client connects via bridging to a remote network,
+  it is assigned an IP address that is part of the remote
+  subnet and is then able to interact with other machines
+  on the remote subnet as if it were connected locally.
+
+  When a client connects via routing, it uses
+  its own separate subnet, and routes are set up on both
+  the client machine and remote gateway so that data packets
+  will seamlessly traverse the VPN.  The "client" is not
+  necessarily a single machine.  It could be a subnet of
+  several machines.
+
+  Bridging and routing are functionally very similar, with
+  the major difference being that a routed VPN will not
+  pass IP broadcasts while a bridged VPN will. 
+
+Example running a routed VPN between Windows and Linux
+------------------------------------------------------
+
+You should already have a TAP-Win32 adapter on the Windows
+side called "my-tap".
+
+If you have not already done this, set the IP/subnet on my-tap:
+
+  netsh interface ip set address my-tap static 10.3.0.1 255.255.255.0
+
+We are assuming that 10.3.0.1 subnet 255.255.255.0 is a new and
+distinct subnet from any that you are currently using.  If it is
+not, choose a different subnet for my-tap.
 
 First generate a static key:
 
   openvpn --genkey --secret key
+
+(Or use the shortcut in the start menu)
 
 Copy this key to your linux system via a secure medium.
 
 Now generate config files for the windows
 and linux sides:
 
-on the windows create a file openvpn-config :
+on the windows side create a file config.ovpn :
 
   remote [my-linux-box]
   dev tap
@@ -131,7 +350,7 @@ on the windows create a file openvpn-config :
   verb 3
   mute 20
 
-on linux create a file openvpn-config :
+on linux create a file config.ovpn :
 
   remote [my-windows-box]
   dev tap
@@ -150,7 +369,7 @@ lines to the linux configuration:
   tun-mtu 1500
   tun-mtu-extra 64
 
-They are now the default on 1.5 when --dev tap is used.
+They are now the default on OpenVPN 1.5 when --dev tap is used.
 
 Make sure that both boxes can talk to each other
 over UDP port 5000.  Also make sure that the linux
@@ -161,7 +380,7 @@ iptables -A INPUT -i tap+ -j ACCEPT
 
 Now the moment of truth... Type:
 
- openvpn --config openvpn-config
+ openvpn --config config.ovpn
 
 On both windows and linux boxes.
 
@@ -178,23 +397,46 @@ the VPN with:
 
   ping 10.3.0.1
 
-Notes -- Driver Stability
--------------------------
+Setting up routing
+------------------
 
-The stability of the TAP-Win32 driver is obviously of
-great concern since any crash by a driver will also
-crash the entire system, producing the infamous blue screen
-of death (BSOD).
+If you set up a routed VPN, i.e. one where local and
+remote subnets differ, you need to set up routing
+between the subnets so that packets will transit the
+VPN.
 
-Between 1.5-beta1 and 1.5-beta2, significant stability
-improvements have been made in the driver, and it now passes
-the Windows Driver Verifier when running in its most
-rigourous verification mode.  The 1.5-beta1 driver had
-problems crashing on sleep/resume and I believe these
-bugs have been fixed in 1.5-beta2 and higher.
+Here is a possible road warrior network configuration:
 
-Notes -- Ethernet bridging
---------------------------
+Road Warrior (Windows)
+
+  TAP-Win32 Adapter
+  10.3.0.2 subnet 255.255.255.0
+
+Main Office, server (any OS)
+
+  tap adapter
+  10.3.0.1 subnet 255.255.255.0
+
+  private ethernet
+  10.0.0.1 subnet 255.255.255.0
+
+The road warrior needs this route in order to
+reach machines on the main office subnet:
+
+  route add 10.0.0.0 mask 255.255.255.0 10.3.0.1
+
+If the OpenVPN server in the main office is also
+the gateway for machines on the remote subnet, no
+special route is required on the main office side.
+
+On the other hand, if the main office OpenVPN server
+is NOT also the gateway, then whatever machine or
+router which IS the gateway must know to route
+10.3.0.0 subnet 255.255.255.0 to the machine which is
+running OpenVPN.
+
+Notes -- Ethernet bridging, Windows client, Linux Server
+--------------------------------------------------------
 
 Ethernet bridging is a powerful networking capability
 that allows remote systems (such as "Road Warriors")
@@ -349,6 +591,89 @@ Ethernet bridging is a great way to work when on the
 road, and I personally use it for securely connecting
 to home or office from WiFi Internet cafes.
 
+Notes -- Ethernet bridging, with the bridge occurring
+on the Windows side.
+-----------------------------------------------------
+
+* First make a TAP-Win32 adapter ("tap-bridge") without setting
+  any TCP/IP properties.
+
+* Select tap-bridge and your ethernet adapter in Network Connections,
+  then right click and select Bridge Connections.  I am assuming
+  that the bridged network address is 10.0.0.0 subnet 255.255.255.0.
+  The connecting client will use an address of 10.0.0.7.
+
+* Note that if your ethernet adapter is a DHCP client, the act of
+  bridging the connection may cause it to get a new IP address
+  lease.
+
+* Use this config on the Windows side (the side doing the bridging):
+
+   remote [myremote]
+   dev tap
+   dev-node tap-bridge
+   # the up script contains one line: arp -d *
+   up up.bat
+   ping 5
+   secret key
+
+* Use this config on the remote (which in this case is a linux
+  box but could also be a windows box).
+
+   remote [myremote]
+   dev tap
+   # up script has one line: ifconfig $1 10.0.0.7 netmask 255.255.255.0 mtu $2
+   up ./bridge.up
+   ping 5
+   secret key
+
+Notes -- Driver Stability
+-------------------------
+
+The stability of the TAP-Win32 driver is obviously of
+great concern since any crash by a driver will also
+crash the entire system, producing the infamous blue screen
+of death (BSOD).
+
+Between 1.5-beta1 and 1.5-beta2, significant stability
+improvements have been made in the driver, and it now passes
+the Windows Driver Verifier when running in its most
+rigourous verification mode.  The 1.5-beta1 driver had
+problems crashing on sleep/resume and I believe these
+bugs have been fixed in 1.5-beta2 and higher.
+
+Notes -- MTU
+------------
+
+Setting the MTU is an important but sometimes problematic
+aspect of VPN configuration.  The MTU (maximum transmission
+units) is the maximum packet size in bytes that can
+be sent or received by a real or virtual network adapter.
+
+* The TAP-Win32 adapter MTU defaults to 1500 which is
+  the required setting for ethernet bridging.
+
+* Using an MTU of 1500 can cause packet
+  fragmentation which is inefficient and can reduce
+  the performance of the VPN.
+
+* If you are running a routed rather than a bridged
+  tunnel, you may be able to increase performance by
+  reducing the MTU to 1400 or less.
+
+* The MTU on both sides of an OpenVPN connection must
+  exactly match.  On non-windows systems, the MTU
+  of a tap device is usually set by the ifconfig
+  command.
+
+* The MTU of a TAP-Win32 adapter can be changed by
+  going to Control Panel -> Network Connections ->
+  [TAP-Win32 adapter name] -> Configure -> Advanced.
+
+* After changing the adapter MTU setting, you must
+  add --tun-mtu n to both ends of your OpenVPN
+  configuration, where n is the adapter MTU setting.
+
 Notes -- Firewall on the Windows client
 ---------------------------------------
 
@@ -432,36 +757,26 @@ The following features which are normally available in the
 Posix version of OpenVPN are either missing or implemented
 differently in the Windows version as of 1.5-beta3.
 
-(1) --daemon doesn't work yet, so each OpenVPN instance must
-    run in a command prompt window.  At some point in the
-    future I plan to implement a real windows installer
-    and implement OpenVPN as a system-tray applet.
-
-(2) Only TAP virtual devices are supported on Windows, not
+(1) Only TAP virtual devices are supported on Windows, not
     TUN devices.
 
-(3) --shaper doesn't work yet due to the lack of a
+(2) --shaper doesn't work yet due to the lack of a
     gettimeofday library function.  This is not difficult
     to fix and could be implemented by borrowing some code
     from the cygwin library.
 
-(4) Windows doesn't support Posix signals directly, however
+(3) Windows doesn't support Posix signals directly, however
     keyboard shortcuts have been set up for the current
     windows beta to simulate signals using the following
-    mapping: F1:USR1 F2:USR2 F3:HUP F4:TERM -- this is an
-    interim measure that will need to suffice until the
-    system-tray applet is implemented.
-
-(5) The TAP-Win32 adapter MTU cannot be explicitly set
-    by OpenVPN.  Right now the MTU is hardcoded to
-    1500 to allow for seamless ethernet bridging.  In
-    1.5 and above, --tun-mtu is set to 1500 and
-    --tun-mtu-extra to 64 by default.
+    mapping: F1:USR1 F2:USR2 F3:HUP F4:TERM.  When running
+    as a service, the OpenVPN service wrapper will send
+    a terminate signal to all OpenVPN subprocesses when
+    it gets a stop signal.
 
 Notes -- Differences between TAP-Win32 driver and CIPE driver
 -------------------------------------------------------------
 
-The TAP-Win32 driver distributed with OpenVPN 1.5-beta2 and
+The TAP-Win32 driver distributed with OpenVPN 1.5-beta5 and
 later is derived from Cipe-Win32 2.0-pre15 with some
 significant changes:
 
@@ -481,7 +796,12 @@ significant changes:
 (4) Added code to lock the TAP device so that only one
     OpenVPN instance can have it open at a time.
 
-(5) Ran the driver through the windows driver verifier
+(5) Added an MTU parameter which acts like the ifconfig
+    mtu parameter under Linux.  The MTU defaults to
+    1500 and can be changed through the adapter advanced
+    properties dialog.
+
+(6) Ran the driver through the windows driver verifier
     with all testing modes enabled, including low-resource
     simulation mode.  Based on the resulting bug checks,
     I was able to fix a number
@@ -491,12 +811,12 @@ significant changes:
     NdisAllocateMemory is not checked, and making the flags
     match between NdisAllocateMemory and NdisFreeMemory calls.
 
-(6) Renamed the driver so that it shows up as a "TAP-Win32" adapter
+(7) Renamed the driver so that it shows up as a "TAP-Win32" adapter
     in the network control panel, and does not conflict with the
     CIPE driver.
 
-(7) To a certain extent, backwards compatibility with NT 4 has
-    been sacrificed in the interest of better portability and
+(8) To a certain extent, backwards compatibility with NT 4 has
+    been sacrificed in the interest of better usability and
     stability on Win2K/XP.
 
 Notes -- Building from source

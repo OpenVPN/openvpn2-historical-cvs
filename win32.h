@@ -35,5 +35,7 @@
 void init_win32 (void);
 void uninit_win32 (void);
 
+void set_pause_exit_win32 (void);
+
 #endif
 #endif

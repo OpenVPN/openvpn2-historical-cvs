@@ -103,46 +103,65 @@ overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix)
   return BSTR (&out);
 }
 
-/* keyboard functions */
+/*
+ * win32_signal is used to get input from the keyboard
+ * if we are running in a console, or get input from an
+ * event object if we are running as a service.
+ */
 
-struct keyboard keyboard;
+struct win32_signal win32_signal;
 
-void
-keyboard_init (void)
+static void
+win32_signal_open (struct win32_signal *ws)
 {
-  keyboard_open (&keyboard);
-}
+  ws->service = false;
 
-void
-keyboard_open (struct keyboard *kb)
-{
-  kb->in = GetStdHandle (STD_INPUT_HANDLE);
-  
-  if (kb->in != INVALID_HANDLE_VALUE)
+  /*
+   * Try to open console.
+   */
+  ws->in = GetStdHandle (STD_INPUT_HANDLE);
+  if (ws->in != INVALID_HANDLE_VALUE)
     {
       DWORD console_mode;
+      if (GetConsoleMode (ws->in, &console_mode))
+	{
+	  /* running on a console */
+	  console_mode &= ~(ENABLE_WINDOW_INPUT
+			    | ENABLE_PROCESSED_INPUT
+			    | ENABLE_LINE_INPUT
+			    | ENABLE_ECHO_INPUT 
+			    | ENABLE_MOUSE_INPUT);
 
-      if (!GetConsoleMode(kb->in, &console_mode))
-        msg (M_ERR, "GetConsoleMode failed");
+	  if (!SetConsoleMode(ws->in, console_mode))
+	    msg (M_ERR, "SetConsoleMode failed");
+	}
+      else
+	ws->in = INVALID_HANDLE_VALUE; /* probably running as a service */
+    }
 
-      console_mode &= ~(ENABLE_WINDOW_INPUT
-			| ENABLE_PROCESSED_INPUT
-			| ENABLE_LINE_INPUT
-			| ENABLE_ECHO_INPUT 
-			| ENABLE_MOUSE_INPUT);
-
-      if (!SetConsoleMode(kb->in, console_mode))
-        msg (M_ERR, "SetConsoleMode failed");
+  /*
+   * If console open failed, assume we are running
+   * as a service.
+   */
+  if (ws->in == INVALID_HANDLE_VALUE)
+    {
+      ws->service = true;
+      ws->in = CreateEvent (NULL, TRUE, TRUE, EXIT_EVENT_NAME);
+      if (ws->in == NULL)
+	msg (M_ERR, "I seem to be running as a service, but CreateEvent '%s' failed on my exit event object", EXIT_EVENT_NAME);
+      if (WaitForSingleObject (ws->in, 0) != WAIT_TIMEOUT)
+	msg (M_FATAL, "I seem to be running as a service, but my exit event object is telling me to exit immediately");
     }
 }
 
-bool
-keyboard_input_available (struct keyboard *kb)
+static bool
+keyboard_input_available (struct win32_signal *ws)
 {
-  if (kb->in != INVALID_HANDLE_VALUE)
+  ASSERT (!ws->service);
+  if (ws->in != INVALID_HANDLE_VALUE)
     {
       DWORD n;
-      if (GetNumberOfConsoleInputEvents (kb->in, &n))
+      if (GetNumberOfConsoleInputEvents (ws->in, &n))
 	return n > 0;
     }
   return false;
@@ -163,16 +182,17 @@ keyboard_ir_to_key (INPUT_RECORD *ir)
 }
 
 unsigned int
-keyboard_get (struct keyboard *kb)
+keyboard_get (struct win32_signal *ws)
 {
-  if (kb->in != INVALID_HANDLE_VALUE)
+  ASSERT (!ws->service);
+  if (ws->in != INVALID_HANDLE_VALUE)
     {
       INPUT_RECORD ir;
       do {
 	DWORD n;
-	if (!keyboard_input_available (kb))
+	if (!keyboard_input_available (ws))
 	  return 0;
-	if (!ReadConsoleInput (kb->in, &ir, 1, &n))
+	if (!ReadConsoleInput (ws->in, &ir, 1, &n))
 	  return 0;
       } while (ir.EventType != KEY_EVENT || ir.Event.KeyEvent.bKeyDown != TRUE);
 
@@ -182,21 +202,64 @@ keyboard_get (struct keyboard *kb)
     return 0;
 }
 
-int
-keyboard_input_to_signal (struct keyboard *kb)
+void
+win32_signal_init (void)
 {
-  switch (keyboard_get (kb)) {
-  case 0x3B: /* F1 -> USR1 */
-    return SIGUSR1;
-  case 0x3C: /* F2 -> USR2 */
-    return SIGUSR2;
-  case 0x3D: /* F3 -> HUP */
-    return SIGHUP;
-  case 0x3E: /* F4 -> TERM */
-    return SIGTERM;
-  default:
-    return 0;
-  }
+  win32_signal_open (&win32_signal);
+}
+
+void
+win32_signal_close (void)
+{
+  if (win32_signal.service
+      && win32_signal.in
+      && win32_signal.in != INVALID_HANDLE_VALUE)
+    {
+      CloseHandle (win32_signal.in);
+    }
+  CLEAR (win32_signal);
+}
+
+int
+win32_signal_get (struct win32_signal *ws)
+{
+  if (ws->service)
+    {
+      if (WaitForSingleObject (ws->in, 0) == WAIT_OBJECT_0)
+	return SIGTERM;
+      else
+	return 0;
+    }
+  else
+    {
+      switch (keyboard_get (ws)) {
+      case 0x3B: /* F1 -> USR1 */
+	return SIGUSR1;
+      case 0x3C: /* F2 -> USR2 */
+	return SIGUSR2;
+      case 0x3D: /* F3 -> HUP */
+	return SIGHUP;
+      case 0x3E: /* F4 -> TERM */
+	return SIGTERM;
+      default:
+	return 0;
+      }
+    }
+}
+
+void
+win32_pause (void)
+{
+  if (!win32_signal.service
+      && win32_signal.in
+      && win32_signal.in != INVALID_HANDLE_VALUE)
+    {
+      int status;
+      msg (M_INFO|M_NOPREFIX, "Press any key to continue...");
+      do {
+	status = WaitForSingleObject (win32_signal.in, INFINITE);
+      } while (!keyboard_get (&win32_signal));
+    }
 }
 
 /* window functions */
@@ -206,23 +269,32 @@ static char old_window_title [256] = { 0 };
 void
 save_window_title ()
 {
-  if (!GetConsoleTitle (old_window_title, sizeof (old_window_title)))
-    old_window_title[0] = 0;
+  if (!win32_signal.service)
+    {
+      if (!GetConsoleTitle (old_window_title, sizeof (old_window_title)))
+	old_window_title[0] = 0;
+    }
 }
 
 void
 restore_window_title ()
 {
-  if (strlen (old_window_title))
-    SetConsoleTitle (old_window_title);
+  if (!win32_signal.service)
+    {
+      if (strlen (old_window_title))
+	SetConsoleTitle (old_window_title);
+    }
 }
 
 void
 generate_window_title (const char *title)
 {
-  struct buffer out = alloc_buf_gc (256);
-  buf_printf (&out, "[%s] OpenVPN " VERSION " F1:USR1 F2:USR2 F3:HUP F4:EXIT", title);
-  SetConsoleTitle (BSTR (&out));
+  if (!win32_signal.service)
+    {
+      struct buffer out = alloc_buf_gc (256);
+      buf_printf (&out, "[%s] OpenVPN " VERSION " F4:EXIT F1:USR1 F2:USR2 F3:HUP", title);
+      SetConsoleTitle (BSTR (&out));
+    }
 }
 
 #endif

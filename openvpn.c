@@ -1121,18 +1121,18 @@ openvpn (const struct options *options,
        *
        * Decide what kind of events we want to wait for.
        */
-
       wait_reset (&event_wait);
 
       /*
-       * On some platforms, we will use the keyboard as a source
-       * of signals.
+       * On win32 we use the keyboard or an event object as a source
+       * of asynchronous signals.
        */
-      WAIT_KEYBOARD (&event_wait);
+      WAIT_SIGNAL (&event_wait);
 
       /*
        * If outgoing data (for TCP/UDP port) pending, wait for ready-to-send
-       * status from TCP/UDP port. Otherwise, wait for incoming data on TUN/TAP device.
+       * status from TCP/UDP port. Otherwise, wait for incoming data on
+       * TUN/TAP device.
        */
       if (to_link.len > 0)
 	{
@@ -1833,14 +1833,14 @@ main (int argc, char *argv[])
   bool first_time = true;
   int sig;
 
-#ifdef WIN32
-  init_win32 ();
-#endif
-
   init_random_seed();                  /* init random() function, only used as
 					  source for weak random numbers */
   error_reset ();                      /* initialize error.c */
   reset_check_status ();               /* initialize status check code in socket.c */
+
+#ifdef WIN32
+  init_win32 ();
+#endif
 
 #ifdef OPENVPN_DEBUG_COMMAND_LINE
   {
@@ -1855,6 +1855,10 @@ main (int argc, char *argv[])
   goto exit;
 #endif
 
+  /*
+   * This loop is initially executed on startup and then
+   * once per SIGHUP.
+   */
   do {
     struct options options;
     init_options (&options);
@@ -1864,6 +1868,11 @@ main (int argc, char *argv[])
      * and read configuration file.
      */
     parse_argv (&options, argc, argv);
+
+    /* set verbosity and mute levels */
+    set_check_status (D_LINK_ERRORS, D_READ_WRITE);
+    set_debug_level (options.verbosity);
+    set_mute_cutoff (options.mute);
 
     /*
      * OpenSSL info print mode?
@@ -1912,6 +1921,8 @@ main (int argc, char *argv[])
 	generate_key_random (&key, NULL);
 	write_key_file (&key, options.shared_secret_file);
 	CLEAR (key);
+	msg (D_GENKEY|M_NOPREFIX, "Randomly generated key written to %s",
+	     options.shared_secret_file);
 	goto exit;
       }
 #endif /* USE_CRYPTO */
@@ -2107,10 +2118,6 @@ main (int argc, char *argv[])
 #undef MUST_BE_UNDEF
 #endif /* USE_CRYPTO */
 #endif /* USE_SSL */
-
-      set_check_status (D_LINK_ERRORS, D_READ_WRITE);
-      set_debug_level (options.verbosity);
-      set_mute_cutoff (options.mute);
 
       /* Become a daemon if requested */
       possibly_become_daemon (0, &options, first_time);

@@ -58,7 +58,7 @@
  */
 
 /* #define OPENVPN_DEBUG_COMMAND_LINE */
-#define OPENVPN_DEBUG_FILE "/tmp/openvpn"
+#define OPENVPN_DEBUG_FILE "openvpn.log"
 
 /*
  * At exactly --verb 5 (not less or greater), print 'R' and 'W' chars

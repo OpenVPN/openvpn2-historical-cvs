@@ -82,8 +82,9 @@ DriverEntry (IN PDRIVER_OBJECT p_DriverObject,
 
   ListActivate (&g_TapAdapterList, 0);
 
-  NdisMInitializeWrapper (&g_NdisWrapperHandle, g_TapDriverObject =
-			  p_DriverObject, p_RegistryPath, NULL);
+  NdisMInitializeWrapper (&g_NdisWrapperHandle,
+			  g_TapDriverObject = p_DriverObject,
+			  p_RegistryPath, NULL);
 
   NdisZeroMemory (&g_Properties, sizeof (g_Properties));
 
@@ -223,7 +224,6 @@ NDIS_STATUS AdapterCreate
   l_Adapter->m_TapName = l_Adapter->m_Name = "";
   l_Adapter->m_Medium = l_PreferredMedium;
   l_Adapter->m_TapOpens = 0;
-  l_Adapter->m_MTU = DEFAULT_PACKET_LOOKAHEAD;
 
   //====================================
   // Allocate and construct adapter name
@@ -269,6 +269,45 @@ NDIS_STATUS AdapterCreate
 	    l_Adapter->m_MAC[0], l_Adapter->m_MAC[1], l_Adapter->m_MAC[2],
 	    l_Adapter->m_MAC[3], l_Adapter->m_MAC[4], l_Adapter->m_MAC[5]);
 
+  //====================================
+  // Get MTU from registry -- Can be set
+  // in the adapter advanced properties
+  // dialog.
+  //====================================
+  {
+    NDIS_STATUS status;
+    NDIS_HANDLE configHandle;
+    NDIS_CONFIGURATION_PARAMETER *parm;
+    NDIS_STRING mtuKey = NDIS_STRING_CONST("MTU");
+
+    // set default in case our registry query fails
+    l_Adapter->m_MTU = DEFAULT_PACKET_LOOKAHEAD;
+
+    NdisOpenConfiguration (&status, &configHandle, p_ConfigurationHandle);
+    if (status == NDIS_STATUS_SUCCESS)
+      {
+	NdisReadConfiguration (&status, &parm, configHandle,
+			       &mtuKey, NdisParameterInteger);
+	if (status == NDIS_STATUS_SUCCESS)
+	  {
+	    if (parm->ParameterType == NdisParameterInteger)
+	      {
+		int mtu = parm->ParameterData.IntegerData;
+		if (mtu < MINIMUM_MTU)
+		  mtu = MINIMUM_MTU;
+		if (mtu > MAXIMUM_MTU)
+		  mtu = MAXIMUM_MTU;
+		l_Adapter->m_MTU = mtu;
+	      }
+	  }
+	NdisCloseConfiguration (configHandle);
+      }
+    DbgPrint ("[%s] MTU=%d\n", l_Adapter->m_Name, l_Adapter->m_MTU);
+  }
+
+  //====================================
+  // Finalize initialization
+  //====================================
   ListAdd (&g_TapAdapterList, l_Adapter);
   HookDispatchFunctions ();
   CreateTapDevice (l_Adapter);

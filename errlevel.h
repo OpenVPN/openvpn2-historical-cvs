@@ -56,6 +56,7 @@
 #define D_TLS_DEBUG_LOW      LOGLEV(3, 20, 0)        /* low frequency info from tls_session routines */
 #define D_GREMLIN            LOGLEV(3, 30, 0)        /* show simulated outage info from gremlin module */
 #define D_COMP_LOW           LOGLEV(3, 31, 0)        /* show adaptive compression state changes */
+#define D_GENKEY             LOGLEV(3, 32, 0)        /* print message after key generation */
 
 #define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
 #define D_SHOW_DC_OPT        LOGLEV(4, 41, 0)        /* show data channel options string */

@@ -17,7 +17,7 @@
    ClassGUID = {4d36e972-e325-11ce-bfc1-08002be10318}
    Provider = %l_Provider%
    Class = Net
-   DriverVer=08/02/2003,2.00.00.0001
+   DriverVer=08/02/2003,2.00.00.0002
 
 [Strings]
    l_DeviceDescription = "TAP-Win32 Adapter"
@@ -48,7 +48,8 @@
 [TAP.ndi]
    CopyFiles       = TAP.driver, TAP.files
    AddReg          = TAP.reg
-   Characteristics = 0x1
+   AddReg          = TAP.params.reg
+   Characteristics = 0x81
 
 [TAP.ndi.Services]
    AddService = TAP,        2, TAP.service
@@ -59,6 +60,15 @@
    HKR, Ndi\Interfaces, LowerRange,   0, "ethernet"
    HKR, ,               Manufacturer, 0, "%l_Provider%"
    HKR, ,               ProductName,  0, "TAP"
+
+[TAP.params.reg]
+   HKR, Ndi\params\MTU,      ParamDesc, 0, "MTU"
+   HKR, Ndi\params\MTU,      Type,      0, "int"
+   HKR, Ndi\params\MTU,      Default,   0, "1500"
+   HKR, Ndi\params\MTU,      Optional,  0, "0"
+   HKR, Ndi\params\MTU,      Min,       0, "100"
+   HKR, Ndi\params\MTU,      Max,       0, "1500"
+   HKR, Ndi\params\MTU,      Step,      0, "1"
 
 ;----------------------------------------------------------------
 ;                             Service Section

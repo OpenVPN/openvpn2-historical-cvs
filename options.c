@@ -42,6 +42,7 @@
 #include "openvpn.h"
 #include "misc.h"
 #include "socket.h"
+#include "win32.h"
 
 #include "memdbg.h"
 
@@ -255,7 +256,8 @@ static const char usage_message[] =
 #ifdef WIN32
   "\n"
   "Windows Specific:\n"
-  "--show-adapters : Show all TAP-Win32 adapters\n"
+  "--show-adapters : Show all TAP-Win32 adapters.\n"
+  "--pause-exit    : When run from a console window, pause before exiting.\n"
 #endif
   "\n"
   "Generate a random key (only for non-TLS static key encryption mode):\n"
@@ -1058,6 +1060,10 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
     {
       show_tap_win32_adapters ();
       openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
+    }
+  else if (streq (p1, "pause-exit"))
+    {
+      set_pause_exit_win32 ();
     }
 #endif
 #if PASSTOS_CAPABILITY

@@ -2,7 +2,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.8 2003/08/06 06:05:38 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.9 2003/08/14 18:50:58 jimyonan Exp $
 	
 Upcoming version 1.5.0
 
@@ -16,9 +16,6 @@ Upcoming version 1.5.0
   using mingw and a TAP driver derived
   from the Cipe-Win32 project by Damion
   K. Wilson (beta1).
-  This port is still experimental and
-  will probably not work without further
-  hacking on NT 4 or the 9x/me series.
 * Added --show-adapters flag for
   windows version (beta1).
 * Reworked the SSL/TLS packet acknowledge
@@ -84,7 +81,18 @@ Upcoming version 1.5.0
   add and delete TAP-Win32 adapter
   instances (beta3).
 * Extra refinements and error checking
-  added to NSIS install script (beta4).
+  added to Windows NSIS install
+  script (beta4).
+* Added user-configurability of the
+  TAP-Win32 adapter MTU through the
+  adapter advanced properties page
+  (beta5).
+* Added Windows Service support
+  (beta5).
+* On Windows, added file association
+  and right-clickability for .ovpn
+  files (OpenVPN config files)
+  (beta5).
 * Protocol compatibility is maintained
   with the 1.4.x and 1.3.x series.
   If you are connecting to a 1.3.x peer,

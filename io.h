@@ -45,7 +45,8 @@ void alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tun
 #ifdef WIN32
 
 /*
- * Use keyboard input to simulate incoming signals
+ * Use keyboard input or events
+ * to simulate incoming signals
  */
 
 #define SIGUSR1   1
@@ -54,17 +55,30 @@ void alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tun
 #define SIGTERM   4
 #define SIGINT    5
 
-struct keyboard {
+/*
+ * If we are being run as a win32 service,
+ * use this event as our exit trigger.
+ */
+#define EXIT_EVENT_NAME "openvpn_exit"
+
+struct win32_signal {
+  /*
+   * service is true if we are being run as a win32 service.
+   * if service == true, in is an event handle which will be
+   *   signaled when we should exit.
+   * if service == false, in is a keyboard handle which we will
+   *   use as a source of asynchronous signals.
+   */
+  bool service;
   HANDLE in;
 };
 
-extern struct keyboard keyboard;
+extern struct win32_signal win32_signal;
 
-void keyboard_init (void); 
-void keyboard_open (struct keyboard *kb);
-bool keyboard_input_available (struct keyboard *kb);
-unsigned int keyboard_get (struct keyboard *kb);
-int keyboard_input_to_signal (struct keyboard *kb);
+void win32_signal_init (void); 
+void win32_signal_close (void);
+int win32_signal_get (struct win32_signal *ws);
+void win32_pause (void);
 
 /*
  * Set the text on the window title bar
@@ -125,13 +139,18 @@ struct event_wait {
 };
 
 #define SELECT() my_select (&event_wait, tv)
-#define WAIT_KEYBOARD(ew) { if (keyboard.in != INVALID_HANDLE_VALUE) \
-                                wait_add ((ew), keyboard.in); }
-#define GET_SIGNAL(sig) { (sig) = keyboard_input_to_signal (&keyboard); }
-#define SELECT_SIGNAL_RECEIVED() { if (keyboard.in != INVALID_HANDLE_VALUE \
-                                && wait_trigger (&event_wait, keyboard.in)) \
-                                GET_SIGNAL (signal_received); }
 
+#define WAIT_SIGNAL(ew) \
+  { if (win32_signal.in != INVALID_HANDLE_VALUE) \
+    wait_add ((ew), win32_signal.in); }
+
+#define GET_SIGNAL(sig) \
+  { (sig) = win32_signal_get (&win32_signal); }
+
+#define SELECT_SIGNAL_RECEIVED() \
+  { if (win32_signal.in != INVALID_HANDLE_VALUE \
+       && wait_trigger (&event_wait, win32_signal.in)) \
+         GET_SIGNAL (signal_received); }
 
 static inline int
 my_select (struct event_wait *ew, const struct timeval *tv)
@@ -201,7 +220,7 @@ struct event_wait {
 #define SELECT() select (event_wait.max_fd_plus_one, &event_wait.reads, &event_wait.writes, NULL, tv)
 #define SELECT_SIGNAL_RECEIVED()
 #define GET_SIGNAL(sig)
-#define WAIT_KEYBOARD(ew)
+#define WAIT_SIGNAL(ew)
 
 static inline void
 wait_init (struct event_wait *ew)

@@ -41,6 +41,7 @@
 #include "memdbg.h"
 
 static struct WSAData wsa_state;
+static bool pause_exit_enabled = false;
 
 void
 init_win32 (void)
@@ -49,15 +50,24 @@ init_win32 (void)
     {
       msg (M_ERR, "WSAStartup failed");
     }
-  keyboard_init ();
+  win32_signal_init ();
   save_window_title ();
 }
 
 void
 uninit_win32 (void)
 {
-  WSACleanup ();
+  if (pause_exit_enabled)
+    win32_pause ();
   restore_window_title ();
+  win32_signal_close ();
+  WSACleanup ();
+}
+
+void
+set_pause_exit_win32 (void)
+{
+  pause_exit_enabled = true;
 }
 
 #endif

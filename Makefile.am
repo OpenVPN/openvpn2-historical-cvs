@@ -46,13 +46,14 @@ EXTRA_DIST = $(man_MANS) \
 	     COPYRIGHT.GPL PORTS openvpn.spec \
 	     easy-rsa sample-config-files sample-keys \
 	     sample-scripts gentoo openvpn.spec.in \
-	     install-win32 \
 	     config-win32.h \
 	     win32.h \
 	     win32.c \
 	     makefile.w32 \
 	     INSTALL-win32.txt \
-	     tap-win32
+	     tap-win32 \
+	     install-win32 \
+	     service-win32
 
 dist-hook:
 	cd $(distdir) && for i in $(EXTRA_DIST) ; do find $$i -name CVS -type d -prune -exec rm -r '{}' ';' ; rm -f `find $$i -type f | grep -E '(^|\/)\.?\#|\~$$'` ; done

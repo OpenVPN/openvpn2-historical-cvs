@@ -130,6 +130,8 @@ buf_set_write (struct buffer *buf, uint8_t *data, int size)
   buf->offset = 0;
   buf->capacity = size;
   buf->data = data;
+  if (size > 0 && data)
+    *data = 0;
 }
 
 static inline void

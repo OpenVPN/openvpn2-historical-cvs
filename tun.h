@@ -287,21 +287,26 @@ ifconfig_order(void)
 
 #define TUN_PASS_BUFFER
 
+struct tap_reg
+{
+  const char *guid;
+  struct tap_reg *next;
+};
+
+struct panel_reg
+{
+  const char *name;
+  const char *guid;
+  struct panel_reg *next;
+};
+
 int ascii2ipset (const char* name);
 const char *ipset2ascii (int index);
 const char *ipset2ascii_all (struct gc_arena *gc);
 
-/* op for get_device_guid */
-
-#define GET_DEV_UID_NORMAL           0
-#define GET_DEV_UID_DEFAULT          1
-#define GET_DEV_UID_ENUMERATE        2
-#define GET_DEV_UID_MAX              3
-
 const char *get_device_guid (const char *name,
 			     char *actual_name,
 			     int actual_name_size,
-			     int op,
 			     struct gc_arena *gc);
 
 void verify_255_255_255_252 (in_addr_t local, in_addr_t remote);

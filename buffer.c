@@ -54,7 +54,7 @@ alloc_buf (size_t size)
   buf.data = (uint8_t *) malloc (size);
 #endif
   CHECK_MALLOC_RETURN (buf.data);
-  if (size)
+  if (size > 0)
     *buf.data = 0;
   return buf;
 }

@@ -120,12 +120,9 @@ guess_tuntap_dev (const char *dev,
 #ifdef WIN32
 
   struct buffer out = alloc_buf_gc (256, gc);
-  int op = GET_DEV_UID_NORMAL; 
 
-  if (!dev_node)
-    op = GET_DEV_UID_DEFAULT; 
+  get_device_guid (dev_node, BPTR (&out), buf_forward_capacity (&out), gc);
 
-  get_device_guid (dev_node, BPTR (&out), buf_forward_capacity (&out), op, gc);
   return BSTR (&out);
 
 #else
@@ -1636,23 +1633,25 @@ tun_finalize (
   return ret;
 }
 
-static bool
-is_tap_win32_dev (const char* guid)
+const struct tap_reg *
+get_tap_reg (struct gc_arena *gc)
 {
-  HKEY netcard_key;
+  HKEY adapter_key;
   LONG status;
   DWORD len;
+  struct tap_reg *first = NULL;
+  struct tap_reg *last = NULL;
   int i = 0;
 
   status = RegOpenKeyEx(
 			HKEY_LOCAL_MACHINE,
-			NETCARD_REG_KEY_2000,
+			ADAPTER_KEY,
 			0,
 			KEY_READ,
-			&netcard_key);
+			&adapter_key);
 
   if (status != ERROR_SUCCESS)
-    msg (M_FATAL, "Error opening registry key: %s", NETCARD_REG_KEY_2000);
+    msg (M_FATAL, "Error opening registry key: %s", ADAPTER_KEY);
 
   while (true)
     {
@@ -1667,7 +1666,7 @@ is_tap_win32_dev (const char* guid)
 
       len = sizeof (enum_name);
       status = RegEnumKeyEx(
-			    netcard_key,
+			    adapter_key,
 			    i,
 			    enum_name,
 			    &len,
@@ -1679,10 +1678,10 @@ is_tap_win32_dev (const char* guid)
 	break;
       else if (status != ERROR_SUCCESS)
 	msg (M_FATAL, "Error enumerating registry subkeys of key: %s",
-	     NETCARD_REG_KEY_2000);
+	     ADAPTER_KEY);
 
       openvpn_snprintf (unit_string, sizeof(unit_string), "%s\\%s",
-			NETCARD_REG_KEY_2000, enum_name);
+			ADAPTER_KEY, enum_name);
 
       status = RegOpenKeyEx(
 			    HKEY_LOCAL_MACHINE,
@@ -1720,14 +1719,18 @@ is_tap_win32_dev (const char* guid)
 
 	      if (status == ERROR_SUCCESS && data_type == REG_SZ)
 		{
-		  msg (D_REGISTRY, "cid=%s netcfg=%s guid=%s",
-		       component_id, net_cfg_instance_id, guid);
-		  if (!strcmp (component_id, "tap")
-		      && !strcmp (net_cfg_instance_id, guid))
+		  if (!strcmp (component_id, "tap"))
 		    {
-		      RegCloseKey (unit_key);
-		      RegCloseKey (netcard_key);
-		      return true;
+		      struct tap_reg *reg;
+		      ALLOC_OBJ_CLEAR_GC (reg, struct tap_reg, gc);
+		      reg->guid = string_alloc (net_cfg_instance_id, gc);
+		      
+		      /* link into return list */
+		      if (!first)
+			first = reg;
+		      if (last)
+			last->next = reg;
+		      last = reg;
 		    }
 		}
 	    }
@@ -1736,58 +1739,29 @@ is_tap_win32_dev (const char* guid)
       ++i;
     }
 
-  RegCloseKey (netcard_key);
-  return false;
+  RegCloseKey (adapter_key);
+  return first;
 }
 
-
-/*
- * The caller should set name to the name
- * of a TAP-Win32 adapter on this system.
- * The GUID that is associated with the
- * device node will be returned.
- *
- * The caller can set op == GET_DEV_UID_DEFAULT
- * to return the sole TAP device on this system.
- * If there is more than one TAP device, and
- * GET_DEV_UID_DEFAULT is
- * specified, throw an error.  If actual_name
- * non-NULL, then return a pointer to the
- * found name there.
- *
- * Set op == GET_DEV_UID_ENUMERATE
- * to print all TAP devices
- * via the msg function.
- */
-
-const char *
-get_device_guid (const char *name,
-		 char *actual_name,
-		 int actual_name_size,
-		 int op,
-		 struct gc_arena *gc)
+const struct panel_reg *
+get_panel_reg (struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (256, gc);
   LONG status;
-  HKEY control_net_key;
+  HKEY network_connections_key;
   DWORD len;
+  struct panel_reg *first = NULL;
+  struct panel_reg *last = NULL;
   int i = 0;
-  int dev_count = 0;
-
-  ASSERT (op >= 0 && op < GET_DEV_UID_MAX); 
-
-  if (op == GET_DEV_UID_ENUMERATE)
-    msg (M_INFO|M_NOPREFIX, "Available TAP-WIN32 devices:");
 
   status = RegOpenKeyEx(
 			HKEY_LOCAL_MACHINE,
-			REG_CONTROL_NET,
+			NETWORK_CONNECTIONS_KEY,
 			0,
 			KEY_READ,
-			&control_net_key);
+			&network_connections_key);
 
   if (status != ERROR_SUCCESS)
-    msg (M_FATAL, "Error opening registry key: %s", REG_CONTROL_NET);
+    msg (M_FATAL, "Error opening registry key: %s", NETWORK_CONNECTIONS_KEY);
 
   while (true)
     {
@@ -1800,7 +1774,7 @@ get_device_guid (const char *name,
 
       len = sizeof (enum_name);
       status = RegEnumKeyEx(
-			    control_net_key,
+			    network_connections_key,
 			    i,
 			    enum_name,
 			    &len,
@@ -1812,11 +1786,11 @@ get_device_guid (const char *name,
 	break;
       else if (status != ERROR_SUCCESS)
 	msg (M_FATAL, "Error enumerating registry subkeys of key: %s",
-	     REG_CONTROL_NET);
+	     NETWORK_CONNECTIONS_KEY);
 
       openvpn_snprintf (connection_string, sizeof(connection_string),
 			"%s\\%s\\Connection",
-			REG_CONTROL_NET, enum_name);
+			NETWORK_CONNECTIONS_KEY, enum_name);
 
       status = RegOpenKeyEx(
 			    HKEY_LOCAL_MACHINE,
@@ -1840,61 +1814,30 @@ get_device_guid (const char *name,
 
 	  if (status != ERROR_SUCCESS || name_type != REG_SZ)
 	    msg (D_REGISTRY, "Error opening registry key: %s\\%s\\%s",
-		 REG_CONTROL_NET, connection_string, name_string);
+		 NETWORK_CONNECTIONS_KEY, connection_string, name_string);
 	  else
 	    {
-	      if (is_tap_win32_dev (enum_name))
-		{
-		  ++dev_count;
-		  if (op == GET_DEV_UID_ENUMERATE)
-		    {
-		      msg (M_INFO|M_NOPREFIX, "[%d] '%s'", dev_count, name_data);
-		    }
-		  else if (op == GET_DEV_UID_DEFAULT)
-		    {
-		      if (dev_count > 1)
-			{
-			  msg (M_FATAL, "You have more than one TAP-Win32 adapter on this system.  You must use the --dev-node option to tell me which one to use.");
-			}
-		      else
-			{
-			  buf_printf (&out, "%s", enum_name);
-			  if (actual_name)
-			    openvpn_snprintf (actual_name, actual_name_size, "%s", name_data);
-			}
-		    }
-		  else if (!strcmp (name_data, name))
-		    {
-		      buf_printf (&out, "%s", enum_name);
-		      if (actual_name)
-			openvpn_snprintf (actual_name, actual_name_size, "%s", name_data);
-		      RegCloseKey (connection_key);
-		      RegCloseKey (control_net_key);
-		      return BSTR (&out); /* successful return of explicitly
-					     specified TAP-Win32 adapter */
-		    }
-		}
-	    }
+	      struct panel_reg *reg;
 
+	      ALLOC_OBJ_CLEAR_GC (reg, struct panel_reg, gc);
+	      reg->name = string_alloc (name_data, gc);
+	      reg->guid = string_alloc (enum_name, gc);
+		      
+	      /* link into return list */
+	      if (!first)
+		first = reg;
+	      if (last)
+		last->next = reg;
+	      last = reg;
+	    }
 	  RegCloseKey (connection_key);
 	}
       ++i;
     }
 
-  RegCloseKey (control_net_key);
+  RegCloseKey (network_connections_key);
 
-  if (op == GET_DEV_UID_ENUMERATE)
-    return NULL; /* successful return in enumerated list mode */
-
-  if (op == GET_DEV_UID_NORMAL) 
-    msg (M_FATAL|M_NOPREFIX, "TAP-Win32 adapter '%s' not found -- run with --show-adapters to show a list of TAP-WIN32 adapters on this system", name);
-
-  if (!dev_count)
-    msg (M_FATAL|M_NOPREFIX, "There are no TAP-Win32 adapters on this system.  You should be able to create a TAP-Win32 adapter by going to Start -> All Programs -> " PACKAGE_NAME " -> Add a new TAP-Win32 virtual ethernet adapter.");
-
-  ASSERT (dev_count == 1);
- 
-  return BSTR (&out); /* successful return of default TAP-Win32 adapter */
+  return first;
 }
 
 /*
@@ -1971,8 +1914,185 @@ void
 show_tap_win32_adapters (void)
 {
   struct gc_arena gc = gc_new ();
-  get_device_guid (NULL, NULL, 0, GET_DEV_UID_ENUMERATE, &gc);
+
+  bool warn_panel_null = false;
+  bool warn_panel_dup = false;
+  bool warn_tap_dup = false;
+
+  int links;
+
+  const struct tap_reg *tr;
+  const struct tap_reg *tr1;
+  const struct panel_reg *pr;
+
+  const struct tap_reg *tap_reg = get_tap_reg (&gc);
+  const struct panel_reg *panel_reg = get_panel_reg (&gc);
+
+  msg (M_INFO|M_NOPREFIX, "Available TAP-WIN32 adapters [name, GUID]:");
+
+  /* loop through each TAP-Win32 adapter registry entry */
+  for (tr = tap_reg; tr != NULL; tr = tr->next)
+    {
+      links = 0;
+
+      /* loop through each network connections entry in the control panel */
+      for (pr = panel_reg; pr != NULL; pr = pr->next)
+	{
+	  if (!strcmp (tr->guid, pr->guid))
+	    {
+	      msg (M_INFO|M_NOPREFIX, "'%s' %s", pr->name, tr->guid);
+	      ++links;
+	    }
+	}
+
+      if (links > 1)
+	{
+	  warn_panel_dup = true;
+	}
+      else if (links == 0)
+	{
+	  /* a TAP adapter exists without a link from the network
+	     connections control panel */
+	  warn_panel_null = true;
+	  msg (M_INFO|M_NOPREFIX, "[NULL] %s", tr->guid);
+	}
+    }
+
+  /* check for TAP-Win32 adapter duplicated GUIDs */
+  for (tr = tap_reg; tr != NULL; tr = tr->next)
+    {
+      for (tr1 = tap_reg; tr1 != NULL; tr1 = tr1->next)
+	{
+	  if (tr != tr1 && !strcmp (tr->guid, tr1->guid))
+	    warn_tap_dup = true;
+	}
+    }
+
+  /* warn on registry inconsistencies */
+  if (warn_tap_dup)
+    msg (M_WARN|M_NOPREFIX, "WARNING: Some TAP-Win32 adapters have duplicate GUIDs");
+
+  if (warn_panel_dup)
+    msg (M_WARN|M_NOPREFIX, "WARNING: Some TAP-Win32 adapters have duplicate links from the network connections control panel");
+
+  if (warn_panel_null)
+    msg (M_WARN|M_NOPREFIX, "WARNING: Some TAP-Win32 adapters have no link from the network connections control panel");
+
   gc_free (&gc);
+}
+
+/*
+ * Confirm that GUID is a TAP-Win32 adapter.
+ */
+static bool
+is_tap_win32 (const char *guid, const struct tap_reg *tap_reg)
+{
+  const struct tap_reg *tr;
+
+  for (tr = tap_reg; tr != NULL; tr = tr->next)
+    {
+      if (guid && !strcmp (tr->guid, guid))
+	return true;
+    }
+
+  return false;
+}
+
+static const char *
+guid_to_name (const char *guid, const struct panel_reg *panel_reg)
+{
+  const struct panel_reg *pr;
+
+  for (pr = panel_reg; pr != NULL; pr = pr->next)
+    {
+      if (guid && !strcmp (pr->guid, guid))
+	return pr->name;
+    }
+
+  return NULL;
+}
+
+static const char *
+name_to_guid (const char *name, const struct tap_reg *tap_reg, const struct panel_reg *panel_reg)
+{
+  const struct panel_reg *pr;
+
+  for (pr = panel_reg; pr != NULL; pr = pr->next)
+    {
+      if (name && !strcmp (pr->name, name) && is_tap_win32 (pr->guid, tap_reg))
+	return pr->guid;
+    }
+
+  return NULL;
+}
+
+/*
+ * Lookup a --dev-node adapter name in the registry
+ * returning the GUID and optional actual_name.
+ */
+const char *
+get_device_guid (const char *name,
+		 char *actual_name,
+		 int actual_name_size,
+		 struct gc_arena *gc)
+{
+  const struct tap_reg *tr;
+  const struct panel_reg *pr;
+
+  const struct tap_reg *tap_reg = get_tap_reg (gc);
+  const struct panel_reg *panel_reg = get_panel_reg (gc);
+
+  struct buffer ret = alloc_buf_gc (256, gc);
+  struct buffer actual;
+
+  buf_set_write (&actual, actual_name, actual_name_size);
+
+  /* Make sure we have at least one TAP adapter */
+  if (!tap_reg)
+    {
+      msg (M_FATAL, "There are no TAP-Win32 adapters on this system.  You should be able to create a TAP-Win32 adapter by going to Start -> All Programs -> " PACKAGE_NAME " -> Add a new TAP-Win32 virtual ethernet adapter.");
+    }
+
+  /* If --dev-node not specified, look for a default TAP adapter */
+  if (!name)
+    {
+      const char *act;
+      if (tap_reg->next)
+	msg (M_FATAL, "You have more than one TAP-Win32 adapter on this system.  You must use the --dev-node option to tell me which one to use.  Use openvpn --show-adapters to see a list.");
+      act = guid_to_name (tap_reg->guid, panel_reg);
+      buf_printf (&ret, "%s", tap_reg->guid);
+      if (act)
+	buf_printf (&actual, "%s", act);
+      else
+	buf_printf (&actual, "NULL");
+      return BSTR (&ret);
+    }
+
+  /* Check if GUID was explicitly specified as --dev-node parameter */
+  if (is_tap_win32 (name, tap_reg))
+    {
+      const char *act = guid_to_name (name, panel_reg);
+      buf_printf (&ret, "%s", name);
+      if (act)
+	buf_printf (&actual, "%s", act);
+      else
+	buf_printf (&actual, "NULL");
+      return BSTR (&ret);
+    }
+
+  /* Lookup TAP adapter in network connections list */
+  {
+    const char *guid = name_to_guid (name, tap_reg, panel_reg);
+    if (guid)
+      {
+	buf_printf (&actual, "%s", name);
+	buf_printf (&ret, "%s", guid);
+	return BSTR (&ret);
+      }
+  }
+
+  msg (M_FATAL, "TAP-Win32 adapter '%s' not found.  Use openvpn --show-adapters to show a list of TAP-WIN32 adapters on this system.  Remember that if you are specifying a TAP-Win32 adapter by GUID for the --dev-node option, enclose the GUID in braces, for example: {4E22992D-0780-4B8F-AC18-5F1DDBE13E09}", name);
+  return NULL;
 }
 
 /*
@@ -2204,14 +2324,10 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
    */
   {
     char guid_buffer[256];
-    int op = GET_DEV_UID_NORMAL;
-
-    if (!dev_node)
-      op = GET_DEV_UID_DEFAULT; 
 
     /* translate high-level device name into a device instance
        GUID using the registry */
-    device_guid = get_device_guid (dev_node, guid_buffer, sizeof (guid_buffer), op, &gc);
+    device_guid = get_device_guid (dev_node, guid_buffer, sizeof (guid_buffer), &gc);
     tt->actual_name = string_alloc (guid_buffer, NULL);
   }
 

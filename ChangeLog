@@ -1,7 +1,18 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.27 2004/05/07 22:26:31 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.28 2004/05/09 04:53:10 jimyonan Exp $
+
+2004.05.08 -- Version 2.0-test29
+
+* Modified --dev-node on Windows to accept a TAP-Win32
+  GUID name.  In addition, --show-adapters will now
+  display the high-level name and GUID of each adapter.
+  This is an attempt to work around an issue in Windows
+  where sometimes the TAP-Win32 adapter installs correctly
+  but has no icon in the network connections control
+  panel.  In such cases, being able to specify
+  --dev-node {TAP-GUID} can work around the missing icon.
 
 2004.05.07 -- Version 2.0-test28
 

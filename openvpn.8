@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "01 May 2004"
+.TH openvpn 8 "08 May 2004"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -605,11 +605,15 @@ or
 On Windows systems, select the TAP-Win32 adapter which
 is named
 .B node
-in the Network Control Panel.  The
+in the Network Connections Control Panel or the
+raw GUID of the adapter enclosed by braces.
+The
 .B --show-adapters
 option under Windows can also be used
 to enumerate all available TAP-Win32
-adapters.
+adapters and will show both the network
+connections control panel name and the GUID for
+each TAP-Win32 adapter.
 .TP
 .B --ifconfig l rn
 Set TUN/TAP adapter parameters. 

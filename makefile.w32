@@ -38,6 +38,7 @@ LIB_DIRS = -L${OPENSSL}/out -L${LZO}/src/.libs
 EXE = openvpn.exe
 
 HEADERS = basic.h buffer.h circ_list.h common.h \
+	  tap-win32/common.h \
           config-win32.h crypto.h errlevel.h error.h \
           fdmisc.h forward-inline.h forward.h fragment.h \
           gremlin.h init.h integer.h interval.h \

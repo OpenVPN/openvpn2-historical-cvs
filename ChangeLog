@@ -1,7 +1,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.84 2003/07/03 05:11:01 jimyonan Exp $
+$Id: ChangeLog,v 1.85 2003/07/06 21:20:23 jimyonan Exp $
 
 Upcoming Version 1.4.2
 
@@ -23,7 +23,9 @@ Upcoming Version 1.4.2
   (1.4.1.5).
 * Coded the beginnings of a WIN32 port (1.4.1.5).
 * Succeeded in porting to Win32 Mingw environment
-  and running loopback tests (1.4.1.6).
+  and running loopback tests (1.4.1.6).  Still
+  need a kernel driver for full Win32
+  functionality.
 * Fixed a bug in error.h where
   HAVE_CPP_VARARG_MACRO_GCC was misspelled.
   This would have caused a significant slowdown

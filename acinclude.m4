@@ -5,6 +5,44 @@ AC_DEFUN(OPENVPN_ADD_LIBS, [
   LIBS="$1 $LIBS"
 ])
 
+dnl
+dnl Test if the preprocessor understands gcc vararg macros
+dnl
+AC_DEFUN(VARARG_MACRO_SUPPORT_GCC, [
+	AC_MSG_CHECKING([for gcc vararg macro support])
+	AC_COMPILE_IFELSE(
+	[
+		#define macro(a, b...) func(a, b)
+		int func(int a, int b, int c);
+		int test() { return macro(1, 2, 3); }
+	],
+	[
+		AC_MSG_RESULT(yes)
+		AC_DEFINE(HAVE_VARARG_MACROS_GCC, , [Define if your cpp has gcc vararg macros])
+	],
+	[
+		AC_MSG_RESULT(no)
+	])
+])
+
+dnl
+dnl Test if the preprocessor understands ISO C 1999 vararg macros
+dnl
+AC_DEFUN(VARARG_MACRO_SUPPORT_ISO, [
+	AC_MSG_CHECKING([for ISO C 1999 vararg macro support])
+	AC_COMPILE_IFELSE(
+	[
+		#define macro(a, ...) func(a, __VA_ARGS__)
+		int func(int a, int b, int c);
+		int test() { return macro(1, 2, 3); }
+	],
+	[
+		AC_MSG_RESULT(yes)
+		AC_DEFINE(HAVE_VARARG_MACROS_ISO, , [Define if your cpp has ISO C 1999 vararg macros])
+	],
+	[AC_MSG_RESULT(no)])
+])
+
 dnl -- The following is taken from curl's acinclude.m4 --
 dnl Check for socklen_t: historically on BSD it is an int, and in
 dnl POSIX 1g it is a type of its own, but some platforms use different
@@ -83,7 +121,7 @@ dnl (with help from M. Frigo), as well as ac_pthread and hb_pthread
 dnl macros posted by AFC to the autoconf macro repository.  We are also
 dnl grateful for the helpful feedback of numerous users.
 dnl
-dnl @version $Id: acinclude.m4,v 1.1 2002/05/30 00:04:45 jimyonan Exp $
+dnl @version $Id: acinclude.m4,v 1.2 2003/02/20 05:02:36 jimyonan Exp $
 dnl @author Steven G. Johnson <stevenj@alum.mit.edu> and Alejandro Forero Cuervo <bachue@bachue.com>
 
 AC_DEFUN([ACX_PTHREAD], [

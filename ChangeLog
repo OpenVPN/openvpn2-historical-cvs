@@ -1,7 +1,12 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.79 2003/05/16 07:49:19 jimyonan Exp $
+$Id: ChangeLog,v 1.80 2003/05/27 19:05:47 jimyonan Exp $
+
+Upcoming Version 1.4.2
+
+* Output bandwidth when using --mtu-dynamic
+  fragmentation can be overriden by --shaper.
 
 2003.05.15 -- Version 1.4.1
 

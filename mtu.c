@@ -27,32 +27,12 @@
 
 #include "syshead.h"
 
+#include "common.h"
 #include "buffer.h"
 #include "mtu.h"
 #include "error.h"
 
 #include "memdbg.h"
-
-static inline int
-max_int (int x, int y)
-{
-  if (x > y)
-    return x;
-  else
-    return y;
-}
-
-static inline int
-constrain_int (int x, int min, int max)
-{
-  ASSERT (min <= max);
-  if (x < min)
-    return min;
-  else if (x > max)
-    return max;
-  else
-    return x;
-}
 
 void
 frame_finalize (struct frame *frame,

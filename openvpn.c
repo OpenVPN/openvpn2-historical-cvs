@@ -686,7 +686,7 @@ openvpn (const struct options *options,
 
   /* initialize traffic shaper (i.e. transmit bandwidth limiter) */
   if (options->shaper)
-    shaper_init (&shaper, options->shaper);
+    shaper_init (&shaper, options->shaper, true);
 
   /* drop privileges if requested */
   if (first_time)
@@ -862,8 +862,7 @@ openvpn (const struct options *options,
 	      frame_adjust_path_mtu (&frame_fragment, udp_socket.mtu);
 	      udp_socket.mtu_changed = false;
 	    }
-	  fragment_housekeeping (fragment, current, &timeval);
-	  tv = &timeval;
+	  /*fragment_housekeeping (fragment, current, &timeval); */
 	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame_fragment, current))
 	    {
 	      to_tun = buf;
@@ -973,30 +972,32 @@ openvpn (const struct options *options,
 
       if (to_udp.len > 0)
 	{
+	  /*
+	   * If sending this packet would put us over our traffic shaping
+	   * quota, don't send -- instead compute the delay we must wait
+	   * until it will be OK to send the packet.
+	   */
+	  int delay = 0;
+
+	  /* fragmenting code needs an adaptive bandwidth throttle */
+	  if (fragment)
+	    delay = shaper_delay (&fragment->shaper);
+
+	  /* set traffic shaping delay in microseconds */
 	  if (options->shaper)
+	    delay = max_int (delay, shaper_delay (&shaper));
+
+	  if (delay)
 	    {
-	      /*
-	       * If sending this packet would put us over our traffic shaping
-	       * quota, don't send -- instead compute the delay we must wait
-	       * until it will be OK to send the packet.
-	       */
-	      const int delay = shaper_delay (&shaper); /* traffic shaping delay in microseconds */
-	      if (delay)
-		{
-		  shaper_soonest_event (&timeval, delay);
-		  tv = &timeval;
-		}
-	      else
-		{
-		  FD_SET (udp_socket.sd, &writes);
-		}
+	      shaper_soonest_event (&timeval, delay);
+	      tv = &timeval;
 	    }
 	  else
 	    {
 	      FD_SET (udp_socket.sd, &writes);
 	    }
 	}
-      else
+      else if (!fragment || !fragment_outgoing_defined (fragment))
 	{
 	  if (tuntap->fd >= 0)
 	    FD_SET (tuntap->fd, &reads);
@@ -1117,8 +1118,8 @@ openvpn (const struct options *options,
 	      }
 
 	      /* log incoming packet */
-	      msg (D_PACKET_CONTENT, "UDP READ from %s: %s",
-		   print_sockaddr (&from), PROTO_DUMP (&buf));
+	      msg (D_PACKET_CONTENT, "UDP READ [%d] from %s: %s",
+		   BLEN (&buf), print_sockaddr (&from), PROTO_DUMP (&buf));
 
 	      /*
 	       * Good, non-zero length packet received.
@@ -1406,6 +1407,8 @@ openvpn (const struct options *options,
 		       */
 		      if (options->shaper)
 			shaper_wrote_bytes (&shaper, BLEN (&to_udp));
+		      if (fragment)
+			shaper_wrote_bytes (&fragment->shaper, BLEN (&to_udp));
 
 		      /*
 		       * Let the pinger know that we sent a packet.
@@ -1444,8 +1447,8 @@ openvpn (const struct options *options,
 		    }
 
 		  /* Log packet send */
-		  msg (D_PACKET_CONTENT, "UDP WRITE to %s: %s",
-		       print_sockaddr (&to_udp_addr), PROTO_DUMP (&to_udp));
+		  msg (D_PACKET_CONTENT, "UDP WRITE [%d] to %s: %s",
+		       BLEN (&to_udp), print_sockaddr (&to_udp_addr), PROTO_DUMP (&to_udp));
 		}
 	      else
 		{

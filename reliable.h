@@ -80,7 +80,7 @@ void reliable_ack_adjust_frame_parameters (struct frame* frame, int max);
 
 void reliable_ack_debug_print (const struct reliable_ack *ack, char *desc);
 
-#define RELIABLE_SIZE 8
+#define RELIABLE_SIZE 4
 
 struct reliable_entry
 {

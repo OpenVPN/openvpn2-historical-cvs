@@ -363,6 +363,7 @@ reliable_send (struct reliable *rel, int *opcode, time_t current)
   if (best)
     {
       best->next_try = current + rel->timeout;
+      rel->timeout *= 2; /* exponential backoff */
       *opcode = best->opcode;
       return &best->buf;
     }

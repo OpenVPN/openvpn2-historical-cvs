@@ -1131,7 +1131,7 @@ static bool transmit_rate_limiter(struct tls_session* session, time_t* wakeup, t
   const struct key_state *pri = &session->key[KS_PRIMARY];
 
   /* transmit one packet every freq seconds */
-  const int freq = 2;
+  const int freq = 1;
 
   /* rough estimate of how many bytes still to transmit */
   const int estimated_bytes = 20000;
@@ -1139,13 +1139,15 @@ static bool transmit_rate_limiter(struct tls_session* session, time_t* wakeup, t
   /* worst-case estimated finish at this rate */
   time_t finish = current + ((freq * estimated_bytes) / PAYLOAD_SIZE_DYNAMIC (&session->opt->frame));
 
-  if (check_debug_level (D_TLS_DEBUG))
+# define MY_LEVEL D_TLS_DEBUG
+
+  if (check_debug_level (MY_LEVEL))
     {
       if (lame->must_die)
-	msg (D_TLS_DEBUG, "TLS XMIT FINISH ESTIMATE = lame->must_die      %d seconds",
+	msg (MY_LEVEL, "TLS XMIT FINISH ESTIMATE = lame->must_die      %d seconds",
 	     lame->must_die - finish);
       if (pri->must_negotiate)
-	msg (D_TLS_DEBUG, "TLS XMIT FINISH ESTIMATE = pri->must_negotiate %d seconds",
+	msg (MY_LEVEL, "TLS XMIT FINISH ESTIMATE = pri->must_negotiate %d seconds",
 	     pri->must_negotiate - finish);
     }
 
@@ -1159,11 +1161,14 @@ static bool transmit_rate_limiter(struct tls_session* session, time_t* wakeup, t
       else
 	{
 	  compute_earliest_wakeup (wakeup, session->limit_next - current);
+	  msg (MY_LEVEL, "TLS XMIT pause");
 	  return false;
 	}
     }
   return true;
 }
+
+#undef MY_LEVEL
 
 /*
  * Write a control channel authentication record.

@@ -30,10 +30,10 @@
 #include "buffer.h"
 #include "interval.h"
 #include "mtu.h"
-#include "reliable.h"
+#include "shaper.h"
 
-#define N_FRAG_BUF            40   /* number of packet buffers, should be <= N_FRAG_ID */
-#define FRAG_TTL_SEC          10   /* number of seconds time-to-live for a fragment */
+#define N_FRAG_BUF                   40      /* number of packet buffers, should be <= N_FRAG_ID */
+#define FRAG_TTL_SEC                 10      /* number of seconds time-to-live for a fragment */
 
 struct fragment {
   bool defined;
@@ -65,14 +65,16 @@ struct fragment_master {
 
   struct event_timeout wakeup;     /* when should main openvpn event loop wake us up */
 
+  struct shaper shaper;            /* output bandwidth */
+
   /* this value is bounced back to peer in FRAG_SIZE with FRAG_WHOLE/FRAG_YES_NOTLAST set */
-  int max_packet_size_received;    /* value is zeroed after send to peer */
+  int n_packets_received;          /* value is zeroed after send to peer */
 
-  /* maximum packet size we've sent (without confirming receipt) */
-  int max_packet_size_sent;
+  /* number of packets we've sent (without confirming receipt) */
+  int n_packets_sent;
 
-  /* maximum packet size we've sent where receipt was confirmed */
-  int max_packet_size_sent_confirmed;
+  /* number of packets sent, which were received and confirmed by our peer */
+  int n_packets_sent_confirmed;
 
   /* a sequence ID describes a set of fragments that make up one datagram */
 # define N_SEQ_ID           1024   /* sequence number wraps to 0 at this value (should be a power of 2) */
@@ -108,8 +110,9 @@ typedef uint32_t fragment_header_type;
 #define FRAG_TYPE_MASK        0x00000007
 #define FRAG_TYPE_SHIFT       0
 
-#define FRAG_WHOLE            0    /* packet is whole, FRAG_SIZE = max_packet_size_received */
-#define FRAG_YES_NOTLAST      1    /* packet is a fragment, but is not the last fragment, FRAG_SIZE as above */
+#define FRAG_WHOLE            0    /* packet is whole, FRAG_N_PACKETS_RECEIVED echoed back to peer */
+#define FRAG_YES_NOTLAST      1    /* packet is a fragment, but is not the last fragment,
+				      FRAG_N_PACKETS_RECEIVED set as above */
 #define FRAG_YES_LAST         2    /* packet is the last fragment, FRAG_SIZE = size of non-last frags */
 #define FRAG_TEST             3    /* control packet for establishing MTU size */
 
@@ -122,17 +125,17 @@ typedef uint32_t fragment_header_type;
 #define FRAG_ID_SHIFT         13
 
 /*
- * FRAG_SIZE 14 bits
+ * FRAG_SIZE/FRAG_N_PACKETS_RECEIVED 14 bits
  *
- * IF FRAG_YES_LAST:
+ * IF FRAG_YES_LAST (FRAG_SIZE):
  *   The max size of a fragment.  If a fragment is not the last fragment in the packet,
  *   then the fragment size is guaranteed to be equal to the max fragment size.  Therefore,
  *   max_frag_size is only sent over the wire if FRAG_LAST is set.  Otherwise it is assumed
  *   to be the actual fragment size received.
  *
- * IF FRAG_WHOLE or FRAG_YES_NOTLAST
- *   Largest packet size received recently, or 0 if no packets received.  The remote peer
- *   will reset its stored version of this value after each send.
+ * IF FRAG_WHOLE or FRAG_YES_NOTLAST (FRAG_N_PACKETS_RECEIVED)
+ *   Number of packets received recently, or 0 if no packets received.  The remote peer
+ *   will reset its stored version of this value to 0 after each send.
  */
 
 #define FRAG_SIZE_MASK        0x00003fff
@@ -140,6 +143,10 @@ typedef uint32_t fragment_header_type;
 #define FRAG_SIZE_ROUND_SHIFT 2  /* fragment/datagram sizes represented as multiple of 4 */
 
 #define FRAG_SIZE_ROUND_MASK ((1 << FRAG_SIZE_ROUND_SHIFT) - 1)
+
+//#define FRAG_N_PACKETS_RECEIVED_MASK        0x00003fff
+#define FRAG_N_PACKETS_RECEIVED_MASK        0x0000000f
+#define FRAG_N_PACKETS_RECEIVED_SHIFT       18
 
 /*
  * Public functions
@@ -178,6 +185,12 @@ fragment_housekeeping (struct fragment_master *f, time_t current, struct timeval
   if (event_timeout_trigger (&f->wakeup, current))
     fragment_wakeup (f, current);
   event_timeout_wakeup (&f->wakeup, current, tv);
+}
+
+static inline bool
+fragment_outgoing_defined (struct fragment_master *f)
+{
+  return f->outgoing.len > 0;
 }
 
 #endif

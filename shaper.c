@@ -31,11 +31,12 @@
 #include "memdbg.h"
 
 void
-shaper_init (struct shaper *s, int bytes_per_second)
+shaper_init (struct shaper *s, int bytes_per_second, bool print_message)
 {
-  s->bytes_per_second = bytes_per_second;
+  s->bytes_per_second = constrain_int (bytes_per_second, SHAPER_MIN, SHAPER_MAX);
   CLEAR (s->wakeup);
-  msg (M_INFO, "Output Traffic Shaping initialized at %d bytes per second", bytes_per_second);
+  if (print_message)
+    msg (M_INFO, "Output Traffic Shaping initialized at %d bytes per second", bytes_per_second);
 }
 
 /*

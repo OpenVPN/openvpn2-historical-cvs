@@ -74,4 +74,26 @@ modulo_add(int x, int y, int mod)
   return sum;
 }
 
+static inline int
+max_int (int x, int y)
+{
+  if (x > y)
+    return x;
+  else
+    return y;
+}
+
+static inline int
+constrain_int (int x, int min, int max)
+{
+  if (min > max)
+    return min;
+  if (x < min)
+    return min;
+  else if (x > max)
+    return max;
+  else
+    return x;
+}
+
 #endif

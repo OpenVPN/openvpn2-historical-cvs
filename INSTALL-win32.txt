@@ -15,18 +15,19 @@ and XP.  OpenVPN also runs on Linux, Mac OS X,
 Solaris, FreeBSD, NetBSD, and OpenBSD, making it
 one of the most portable VPN packages today.
 
-What's new in 1.5-beta11
+What's new in 1.5-beta12
 -----------------------
 
 See Change Log:
 
 http://openvpn.sourceforge.net/changelog.html
 
-What's new in 1.5-beta9
------------------------
+What's new overall in the 1.5-beta series
+-----------------------------------------
 
 OpenSSL 0.9.7c DLLs are now shipped with 1.5-beta9
-in response to an OpenSSL security advisory.
+and higher in response to an OpenSSL security
+advisory.
 
 An option has been added to the TAP-Win32 driver
 advanced properties page that allows you to control
@@ -35,34 +36,13 @@ whether the adapter appears to Windows as
 is dynamically brought up and down by OpenVPN
 ("Application Controlled").
 
-Notes:
-
-* If you plan on using the --ifconfig option on
-  Win 2000, it is advisable to set the TAP-Win32
-  adapter "Media Status" parameter to
-  "Always Connected" in the advanced properties
-  page.  Go to Control Panel -> Network Connections,
-  right click on TAP-Win32 adapter and select
-  Properties, Configure, and Advanced.
-
-* If you are installing 1.5-beta9 as an upgrade to a
-  prior OpenVPN version, it is advisable to reboot
-  the system after the upgrade.
-  
-What's new in 1.5-beta8
------------------------
-
 OpenVPN now supports the '--dev tun' option.
-
 The TAP-Win32 driver has been extended to allow tun
 device emulation.  This means that OpenVPN on
 Windows can now connect with OpenVPN running
 on any other platform.  For more information
 see the "Notes -- TAP vs. TUN devices" section
 below.
-
-A number of usability improvements have been
-made in this release.
 
 The --dev-node option is now optional when exactly
 one TAP-Win32 adapter exists on a system -- such an
@@ -97,10 +77,11 @@ It doesn't matter whether Machine A or B is
 running Windows or Linux -- these config
 files are essentially portable.
 
-Also, by default, an "arp -d *" command is now issued
-after the TAP-Win32 virtual device open to refresh the
-MAC cache.  This behaviour can be disabled with
---no-arp-del.
+To tune the operation of the --ifconfig option
+on Windows, the --ip-win32 option has been
+added to control which Windows API/method is used
+by OpenVPN to set the TCP/IP properties
+on the TAP adapter.
 
 A new --route option has been added which is
 a convenience proxy for the functionally
@@ -120,7 +101,7 @@ keep TCP session packet size from
 exceeding an upper bound.  Both
 can be used together, i.e.:
 
-  fragment 1300
+  fragment 1400
   mssfix
 
 --mssfix will try to keep TCP from needing
@@ -146,9 +127,6 @@ As of beta8, the driver should be considered
 experimental on SMP systems.  Driver versions
 prior to beta8 SHOULD NOT be installed on
 SMP systems.
-
-What's new overall in the 1.5-beta series
------------------------------------------
 
 You can now run one or more OpenVPN tunnels as a
 Windows service if you select the "OpenVPN Service"
@@ -677,6 +655,7 @@ dev tap
 # "appear as" when it connects to the
 # bridged LAN.
 ifconfig 10.5.0.5 255.255.255.0
+ifconfig-nowarn
 
 secret key.txt
 ping 10
@@ -938,10 +917,10 @@ the config option:
 If you then need to lower the MTU because of fragmentation
 or router problems, use something like
 
-  fragment 1300
+  fragment 1400
   mssfix
 
-to lower OpenVPN's tunnel carrier UDP packet size to 1300.
+to lower OpenVPN's tunnel carrier UDP packet size to 1400.
 
 Notes -- MTU
 ------------
@@ -959,7 +938,7 @@ The easiest way to solve MTU problems is by using
 the --mssfix and/or --fragment options which were
 added in beta8.  Typical usage would be:
 
-  fragment 1300
+  fragment 1400
   mssfix
 
 Some notes:

@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "8 October 2003"
+.TH openvpn 8 "12 October 2003"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -118,6 +118,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
 [\ \fB\-\-ifconfig\fR\ \fIl\ r\fR\ ]
 [\ \fB\-\-ifconfig\-noexec\fR\ ]
+[\ \fB\-\-ifconfig\-nowarn\fR\ ]
 [\ \fB\-\-inactive\fR\ \fIn\fR\ ]
 [\ \fB\-\-inetd\fR\ ]
 [\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
@@ -374,7 +375,8 @@ option will disable the session-usurp feature in TLS mode.  The option
 does not apply in static-key mode, as it is a stateless protocol without
 any notion of a session.
 
-An OpenVPN peer operating in UDP mode will try to stay connected indefinitely, even under conditions of
+An OpenVPN peer operating in UDP mode will try to
+stay connected indefinitely, even under conditions of
 high network error frequency, until it receives a SIGINT or SIGTERM signal,
 or a time-out condition.
 A major design goal of OpenVPN is that it should be as responsive, in terms of both normal
@@ -676,6 +678,25 @@ Don't actually execute ifconfig/netsh commands, instead
 pass
 .B --ifconfig
 parameters to scripts using environmental variables.
+.TP
+.B --ifconfig-nowarn
+Don't output an options consistency check warning
+if the
+.B --ifconfig
+option on this side of the
+connection doesn't match the remote side.  This is useful
+when you want to retain the overall benefits of the
+options consistency check (also see
+.B --disable-occ
+option) while only disabling the ifconfig component of
+the check.
+
+For example,
+if you have a configuration where the local host uses
+.B --ifconfig
+but the remote host does not, use
+.B --ifconfig-nowarn
+on the local host.
 .TP
 .B --route network [netmask] [gateway] [metric]
 Add route to routing table after connection is established.
@@ -1316,6 +1337,17 @@ option documentation.
 Set a custom environmental variable
 .B name=value
 to pass to script.
+.TP
+.B --disable-occ
+Don't output a warning message if option inconsistencies are detected between
+peers.  An example of an option inconsistency would be where one peer uses
+.B --dev tun
+while the other peer uses
+.B --dev tap.
+
+Use of this option is discouraged, but is provided as
+a temporary fix in situations where a recent version of OpenVPN must
+connect to an old version.
 .TP
 .B --user user
 Change the user ID of the OpenVPN process to
@@ -2145,13 +2177,6 @@ revocation lists), a simple
 .B --tls-verify
 script could be implemented that rejects certificates
 based on the CN (Common Name).
-.TP
-.B --disable-occ
-Disable options compatibility check between peers.  This is designed
-to circumvent OpenVPN's normal options compatibility check in
-TLS mode.  Use of this option is discouraged, but is provided as
-a temporary fix in situations where a recent version of OpenVPN must
-connect to an old version.
 .SS SSL Library information:
 .TP
 .B --show-ciphers
@@ -2263,6 +2288,21 @@ automatically."
 .B dynamic --
 This option is not yet implemented, and is reserved for
 future use.
+.TP
+.B --tap-sleep n
+Cause OpenVPN to sleep for
+.B n
+seconds immediately after the TAP-Win32 adapter state
+is set to "connected".
+
+This option is intended to be used to troubleshoot problems
+with the
+.B --ifconfig
+and
+.B --ip-win32
+options, and is used to give
+the TAP-Win32 adapter time to come up before
+Windows IP Helper API operations are applied to it.
 .TP
 .B --show-adapters
 Show available TAP-Win32 adapters which can be selected using the

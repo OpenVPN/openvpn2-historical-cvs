@@ -102,6 +102,8 @@ static const char usage_message[] =
   "                  endpoint and rn as a subnet mask.\n"
   "--ifconfig-noexec : Don't actually execute ifconfig/netsh command, instead\n"
   "                    pass --ifconfig parms by environment to scripts.\n"
+  "--ifconfig-nowarn : Don't warn if the --ifconfig option on this side of the\n"
+  "                    connection doesn't match the remote side.\n"
   "--route network [netmask] [gateway] [metric] :\n"
   "                  Add route to routing table after connection\n"
   "                  is established.  Multiple routes can be specified.\n"
@@ -398,6 +400,8 @@ show_settings (const struct options *o)
   SHOW_STR (ifconfig_local);
   SHOW_STR (ifconfig_remote_netmask);
   SHOW_BOOL (ifconfig_noexec);
+  SHOW_BOOL (ifconfig_nowarn);
+
 #ifdef HAVE_GETTIMEOFDAY
   SHOW_INT (shaper);
 #endif
@@ -578,7 +582,9 @@ options_string (const struct options *o,
   if (o->tun_ipv6)
     buf_printf (&out, ",tun-ipv6");
   if (tt)
-    buf_printf (&out, ",ifconfig %s", ifconfig_options_string (tt, remote));
+    buf_printf (&out,
+		",ifconfig %s",
+		ifconfig_options_string (tt, remote, o->ifconfig_nowarn));
 
 #ifdef USE_LZO
   if (o->comp_lzo)
@@ -1020,6 +1026,10 @@ add_option (struct options *options, int i, char *p[],
   else if (streq (p[0], "ifconfig-noexec"))
     {
       options->ifconfig_noexec = true;
+    }
+  else if (streq (p[0], "ifconfig-nowarn"))
+    {
+      options->ifconfig_nowarn = true;
     }
   else if (streq (p[0], "local") && p[1])
     {

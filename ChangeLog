@@ -1,12 +1,20 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.18 2003/10/11 04:38:42 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.19 2003/10/13 06:18:54 jimyonan Exp $
 	
-2003.10.xx -- Version 1.5-beta12
+2003.10.12 -- Version 1.5-beta12
 
+* Fixed Linux-only bug in --mktun and --rmtun which was
+  introduced around beta8 or so, which would cause
+  an error such as "I don't recognize device tun0 as a
+  tun or tap device".
+* Added --ifconfig-nowarn option to disable options
+  consistency warnings about --ifconfig parameters.
 * Don't allow any kind of sequence number backtracking or
   message reordering when in TCP mode.
+* Changed beta naming convention to use '_' (underscore)
+  rather than '-' (dash) to pacify rpmbuild.
 	
 2003.10.08 -- Version 1.5-beta11
 

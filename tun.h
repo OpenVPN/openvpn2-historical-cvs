@@ -166,7 +166,8 @@ int dev_type_enum (const char *dev, const char *dev_type);
 const char *dev_type_string (const char *dev, const char *dev_type);
 
 const char *ifconfig_options_string (const struct tuntap* tt,
-				     bool remote);
+				     bool remote,
+				     bool disable);
 
 /*
  * Inline functions

@@ -73,6 +73,7 @@ struct options
   const char *ifconfig_local;
   const char *ifconfig_remote_netmask;
   bool ifconfig_noexec;
+  bool ifconfig_nowarn;
 #ifdef HAVE_GETTIMEOFDAY
   int shaper;
 #endif

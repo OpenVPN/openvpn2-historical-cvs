@@ -263,10 +263,10 @@ no_tap_ifconfig ()
  * between peers.
  */
 const char *
-ifconfig_options_string (const struct tuntap* tt, bool remote)
+ifconfig_options_string (const struct tuntap* tt, bool remote, bool disable)
 {
   struct buffer out = alloc_buf_gc (256);
-  if (tt->did_ifconfig_setup)
+  if (tt->did_ifconfig_setup && !disable)
     {
       if (tt->type == DEV_TYPE_TUN)
 	{
@@ -874,6 +874,8 @@ tuncfg (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, 
 {
   struct tuntap tt;
 
+  clear_tuntap (&tt);
+  tt.type = dev_type_enum (dev, dev_type);
   open_tun (dev, dev_type, dev_node, ipv6, &tt);
   if (ioctl (tt.fd, TUNSETPERSIST, persist_mode) < 0)
     msg (M_ERR, "Cannot ioctl TUNSETPERSIST(%d) %s", persist_mode, dev);

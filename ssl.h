@@ -473,11 +473,13 @@ bool tls_rec_payload (struct tls_multi *multi,
 static inline int
 tls_test_payload_len (const struct tls_multi *multi)
 {
-  const struct key_state *ks = &multi->session[TM_ACTIVE].key[KS_PRIMARY];
-  if (ks->state >= S_ACTIVE)
-    return BLEN (&ks->plaintext_read_buf);
-  else
-    return 0;
+  if (multi)
+    {
+      const struct key_state *ks = &multi->session[TM_ACTIVE].key[KS_PRIMARY];
+      if (ks->state >= S_ACTIVE)
+	return BLEN (&ks->plaintext_read_buf);
+    }
+  return 0;
 }
 
 /*

@@ -1,7 +1,11 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.6 2004/03/02 22:02:03 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.7 2004/03/03 22:19:47 jimyonan Exp $
+
+2004.03.03 -- Version 2.0-test7
+
+* Branch merge with 1.6-rc1.2.
 
 2004.03.02 -- Version 2.0-test6
 
@@ -43,6 +47,23 @@ $Id: ChangeLog,v 1.89.2.6 2004/03/02 22:02:03 jimyonan Exp $
 
 * Initial testbed for 2.0.
 
+2004.03.xx -- Version 1.6-rc2
+
+* Fixed bug in Windows version where the node-type
+  dhcp option might have been passed even if it
+  was not specified.
+* Added some new --dhcp-option types for Windows
+  version.
+
+2004.03.02 -- Version 1.6-rc1
+
+* For Windows, make "--ip-win32 dynamic" the default.
+* For Windows, make "--route-delay 10" the default
+  unless --ip-win32 dynamic is not used or --route-delay
+  is explicitly specified.
+* L_TLS mutex could have been left in a locked state
+  for certain kinds of TLS errors.
+	
 2004.02.22 -- Version 1.6-beta7
 	
 * Allow scheduling priority increase (--nice) together

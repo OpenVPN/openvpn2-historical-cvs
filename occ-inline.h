@@ -73,7 +73,8 @@ static inline void
 check_send_occ_msg (struct context *c)
 {
   void check_send_occ_msg_dowork (struct context *c);
-  if (c->c2.occ_op >= 0 && !c->c2.to_link.len)
+  if (c->c2.occ_op >= 0 && !c->c2.to_link.len
+      && (!c->c2.fragment || !fragment_outgoing_defined (c->c2.fragment)))
     check_send_occ_msg_dowork (c);
 }
 

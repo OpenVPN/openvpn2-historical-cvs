@@ -164,7 +164,7 @@ check_connection_established_dowork (struct context *c)
 
 #if 1 // JYFIXME -- send a test control channel config message
 #if defined(USE_CRYPTO) && defined(USE_SSL)
-	  {
+	  if (c->c2.tls_multi) {
 	    char bigstring[] = "This is a test";
 	    struct buffer buf;
 	    bool stat;

@@ -2723,6 +2723,8 @@ tls_send_payload (struct tls_multi *multi,
   struct key_state *ks;
   bool ret = false;
 
+  ASSERT (multi);
+
   mutex_lock (L_TLS);
 
   session = &multi->session[TM_ACTIVE];
@@ -2745,6 +2747,8 @@ tls_rec_payload (struct tls_multi *multi,
   struct tls_session *session;
   struct key_state *ks;
   bool ret = false;
+
+  ASSERT (multi);
 
   mutex_lock (L_TLS);
 

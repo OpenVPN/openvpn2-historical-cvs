@@ -1,7 +1,21 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.108 2004/12/12 10:28:46 jimyonan Exp $
+$Id: ChangeLog,v 1.109 2004/12/13 07:21:51 jimyonan Exp $
+
+2004.12.13 -- Version 2.0-rc3
+
+* On Windows, when --log or --log-append is used,
+  save the original stderr for username and password
+  prompts.
+* Fixed a bug introduced in the late 2.0 betas where
+  if a "verb" parameter >= 16 was used, it would be
+  ignored and the actual verb level would remain at 1.
+* Fixed a bug mostly seen on OS X where --management-hold
+  or --management-query-passwords would cause the management
+  interface to be unresponsive to incoming client connections.
+* Trigger an options error if one of the management-modifying
+  options is used without "management" itself.
 
 2004.12.12 -- Version 2.0-rc2
 

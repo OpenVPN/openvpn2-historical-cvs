@@ -33,15 +33,72 @@
 
 #include "options.h"
 #include "push.h"
+//#include "forward-inline.h"
 
 #include "memdbg.h"
 
 #if P2MP
 
+/*
+ * Auth username/password
+ *
+ * Client received an authentication failed message from server.
+ * Runs on client.
+ */
+void
+receive_auth_failed (struct context *c, const struct buffer *buffer)
+{
+  msg (M_VERB0, "AUTH: Received AUTH_FAILED control message");
+  if (c->options.pull)
+    {
+      c->sig->signal_received = SIGTERM; /* SOFT-SIGUSR1 -- Auth failure error */
+      c->sig->signal_text = "auth-failure";
+    }
+}
+
+/*
+ * Send auth failed message from server to client.
+ */
+bool
+send_auth_failed (struct context *c)
+{
+  return send_control_channel_string (c, "AUTH_FAILED", D_PUSH);
+}
+
+/*
+ * Push/Pull
+ */
+
+void
+incoming_push_message (struct context *c, const struct buffer *buffer)
+{
+  struct gc_arena gc = gc_new ();
+  unsigned int option_types_found = 0;
+  int status;
+
+  msg (D_PUSH, "PUSH: Received control message: '%s'", BSTR (buffer));
+
+  status = process_incoming_push_msg (c,
+				      buffer,
+				      c->options.pull,
+				      pull_permission_mask (),
+				      &option_types_found);
+
+  if (status == PUSH_MSG_ERROR)
+    msg (D_PUSH_ERRORS, "WARNING: Received bad push/pull message: %s", BSTR (buffer));
+  else if (status == PUSH_MSG_REPLY)
+    {
+      do_up (c, true, option_types_found); /* delay bringing tun/tap up until --push parms received from remote */
+      event_timeout_clear (&c->c2.push_request_interval);
+    }
+
+  gc_free (&gc);
+}
+
 bool
 send_push_request (struct context *c)
 {
-  return send_control_channel_string (c, "PUSH_REQUEST");
+  return send_control_channel_string (c, "PUSH_REQUEST", D_PUSH);
 }
 
 bool
@@ -58,13 +115,13 @@ send_push_reply (struct context *c)
 
   if (c->c2.push_ifconfig_defined && c->c2.push_ifconfig_local && c->c2.push_ifconfig_remote_netmask)
     buf_printf (&buf, ",ifconfig %s %s",
-		print_in_addr_t (c->c2.push_ifconfig_local, IA_EMPTY_IF_UNDEF, &gc),
-		print_in_addr_t (c->c2.push_ifconfig_remote_netmask, IA_EMPTY_IF_UNDEF, &gc));
+		print_in_addr_t (c->c2.push_ifconfig_local, 0, &gc),
+		print_in_addr_t (c->c2.push_ifconfig_remote_netmask, 0, &gc));
 
   if (strlen (BSTR (&buf)) >= MAX_PUSH_LIST_LEN)
     msg (M_FATAL, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
 
-  ret = send_control_channel_string (c, BSTR (&buf));
+  ret = send_control_channel_string (c, BSTR (&buf), D_PUSH);
 
   gc_free (&gc);
   return ret;
@@ -75,18 +132,24 @@ push_option (struct options *o, const char *opt, int msglevel)
 {
   int len;
   bool first = false;
-  if (!o->push_list)
-    {
-      ALLOC_OBJ_CLEAR_GC (o->push_list, struct push_list, &o->gc);
-      first = true;
-    }
 
-  len = strlen (o->push_list->options);
-  if (len + strlen (opt) + 2 >= MAX_PUSH_LIST_LEN)
-    msg (msglevel, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
-  if (!first)
-    strcat (o->push_list->options, ",");
-  strcat (o->push_list->options, opt);
+  if (!string_class (opt, CC_ANY, CC_COMMA))
+    msg (msglevel, "PUSH OPTION FAILED (illegal comma (',') in string): '%s'", opt);
+  else
+    {
+      if (!o->push_list)
+	{
+	  ALLOC_OBJ_CLEAR_GC (o->push_list, struct push_list, &o->gc);
+	  first = true;
+	}
+
+      len = strlen (o->push_list->options);
+      if (len + strlen (opt) + 2 >= MAX_PUSH_LIST_LEN)
+	msg (msglevel, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
+      if (!first)
+	strcat (o->push_list->options, ",");
+      strcat (o->push_list->options, opt);
+    }
 }
 
 void
@@ -107,7 +170,12 @@ process_incoming_push_msg (struct context *c,
 
   if (buf_string_compare_advance (&buf, "PUSH_REQUEST"))
     {
-      if (!c->c2.push_reply_deferred)
+      if (!tls_authenticated (c->c2.tls_multi))
+	{
+	  send_auth_failed (c);
+	  ret = PUSH_MSG_AUTH_FAILURE;
+	}
+      else if (!c->c2.push_reply_deferred)
 	{
 	  if (send_push_reply (c))
 	    ret = PUSH_MSG_REQUEST;
@@ -123,10 +191,12 @@ process_incoming_push_msg (struct context *c,
       if (ch == ',')
 	{
 	  pre_pull_restore (&c->options);
+	  c->c2.pulled_options_string = string_alloc (BSTR (&buf), &c->c2.gc);
 	  if (apply_push_options (&c->options,
 				  &buf,
 				  permission_mask,
-				  option_types_found))
+				  option_types_found,
+				  c->c2.es))
 	    ret = PUSH_MSG_REPLY;
 	}
       else if (ch == '\0')
@@ -136,6 +206,87 @@ process_incoming_push_msg (struct context *c,
       /* show_settings (&c->options); */
     }
   return ret;
+}
+
+/*
+ * Remove iroutes from the push_list.
+ */
+void
+remove_iroutes_from_push_route_list (struct options *o)
+{
+  if (o && o->push_list && o->iroutes)
+    {
+      struct gc_arena gc = gc_new ();
+      struct push_list *pl;
+      struct buffer in, out;
+      char *line;
+      bool first = true;
+
+      /* prepare input and output buffers */
+      ALLOC_OBJ_CLEAR_GC (pl, struct push_list, &gc);
+      ALLOC_ARRAY_CLEAR_GC (line, char, MAX_PUSH_LIST_LEN, &gc);
+
+      buf_set_read (&in, o->push_list->options, strlen (o->push_list->options));
+      buf_set_write (&out, pl->options, sizeof (pl->options));
+
+      /* cycle through the push list */
+      while (buf_parse (&in, ',', line, MAX_PUSH_LIST_LEN))
+	{
+	  char *p[MAX_PARMS];
+	  bool copy = true;
+
+	  /* parse the push item */
+	  CLEAR (p);
+	  if (parse_line (line, p, SIZE (p), "[PUSH_ROUTE_REMOVE]", 1, D_ROUTE_DEBUG, &gc))
+	    {
+	      /* is the push item a route directive? */
+	      if (p[0] && p[1] && p[2] && !strcmp (p[0], "route"))
+		{
+		  /* get route parameters */
+		  bool status1, status2;
+		  const in_addr_t network = getaddr (GETADDR_HOST_ORDER, p[1], 0, &status1, NULL);
+		  const in_addr_t netmask = getaddr (GETADDR_HOST_ORDER, p[2], 0, &status2, NULL);
+
+		  /* did route parameters parse correctly? */
+		  if (status1 && status2)
+		    {
+		      const struct iroute *ir;
+
+		      /* does route match an iroute? */
+		      for (ir = o->iroutes; ir != NULL; ir = ir->next)
+			{
+			  if (network == ir->network && netmask == netbits_to_netmask (ir->netbits))
+			    {
+			      copy = false;
+			      break;
+			    }
+			}
+		    }
+		}
+	    }
+
+	  /* should we copy the push item? */
+	  if (copy)
+	    {
+	      if (!first)
+		buf_printf (&out, ",");
+	      buf_printf (&out, "%s", line);
+	      first = false;
+	    }
+	  else
+	    msg (D_PUSH, "REMOVE PUSH ROUTE: '%s'", line);
+	}
+
+#if 0
+      msg (M_INFO, "BEFORE: '%s'", o->push_list->options);
+      msg (M_INFO, "AFTER:  '%s'", pl->options);
+#endif
+
+      /* copy new push list back to options */
+      *o->push_list = *pl;
+
+      gc_free (&gc);
+    }
 }
 
 #endif

@@ -31,6 +31,7 @@
 /*#define IFCONFIG_POOL_TEST*/
 
 #include "basic.h"
+#include "status.h"
 #include "thread.h"
 
 #define IFCONFIG_POOL_MAX         65536
@@ -54,6 +55,11 @@ struct ifconfig_pool
   struct ifconfig_pool_entry *list;
 };
 
+struct ifconfig_pool_persist
+{
+  struct status_output *file;
+};
+
 typedef int ifconfig_pool_handle;
 
 struct ifconfig_pool *ifconfig_pool_init (int type, in_addr_t start, in_addr_t end);
@@ -63,6 +69,13 @@ void ifconfig_pool_free (struct ifconfig_pool *pool);
 ifconfig_pool_handle ifconfig_pool_acquire (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *remote, const char *common_name);
 
 bool ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand);
+
+struct ifconfig_pool_persist *ifconfig_pool_persist_init (const char *filename, int refresh_freq);
+void ifconfig_pool_persist_close (struct ifconfig_pool_persist *persist);
+bool ifconfig_pool_write_trigger (struct ifconfig_pool_persist *persist);
+
+void ifconfig_pool_read (struct ifconfig_pool_persist *persist, struct ifconfig_pool *pool);
+void ifconfig_pool_write (struct ifconfig_pool_persist *persist, const struct ifconfig_pool *pool);
 
 #ifdef IFCONFIG_POOL_TEST
 void ifconfig_pool_test (in_addr_t start, in_addr_t end);

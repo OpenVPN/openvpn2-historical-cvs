@@ -119,7 +119,7 @@ guess_tuntap_dev (const char *dev,
 {
 #ifdef WIN32
   const int dt = dev_type_enum (dev, dev_type);
-  if (dt == DEV_TYPE_TUN || dt == DEV_TYPE_TAP)
+  if (dev_node && (dt == DEV_TYPE_TUN || dt == DEV_TYPE_TAP))
     {
       struct buffer out = alloc_buf_gc (256, gc);
       get_device_guid (dev_node, BPTR (&out), buf_forward_capacity (&out), gc);
@@ -356,7 +356,8 @@ init_tun (const char *dev,       /* --dev option */
 	  const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
 	  in_addr_t local_public,
 	  in_addr_t remote_public,
-	  const bool strict_warn)
+	  const bool strict_warn,
+	  struct env_set *es)
 {
   struct gc_arena gc = gc_new ();
   struct tuntap *tt;
@@ -450,15 +451,18 @@ init_tun (const char *dev,       /* --dev option */
       /*
        * Set environmental variables with ifconfig parameters.
        */
-      setenv_str ("ifconfig_local", ifconfig_local);
-      if (tun)
+      if (es)
 	{
-	  setenv_str ("ifconfig_remote", ifconfig_remote_netmask);
-	}
-      else
-	{
-	  setenv_str ("ifconfig_netmask", ifconfig_remote_netmask);
-	  setenv_str ("ifconfig_broadcast", ifconfig_broadcast);
+	  setenv_str (es, "ifconfig_local", ifconfig_local);
+	  if (tun)
+	    {
+	      setenv_str (es, "ifconfig_remote", ifconfig_remote_netmask);
+	    }
+	  else
+	    {
+	      setenv_str (es, "ifconfig_netmask", ifconfig_remote_netmask);
+	      setenv_str (es, "ifconfig_broadcast", ifconfig_broadcast);
+	    }
 	}
 
       tt->did_ifconfig_setup = true;
@@ -489,7 +493,8 @@ init_tun_post (struct tuntap *tt,
 void
 do_ifconfig (struct tuntap *tt,
 	     const char *actual,    /* actual device name */
-	     int tun_mtu)
+	     int tun_mtu,
+	     const struct env_set *es)
 {
   struct gc_arena gc = gc_new ();
 
@@ -534,8 +539,7 @@ do_ifconfig (struct tuntap *tt,
 			  tun_mtu
 			  );
 	  msg (M_INFO, "%s", command_line);
-	  system_check (command_line, "Linux ip link set failed", true);
-
+	  system_check (command_line, es, S_FATAL, "Linux ip link set failed");
 
 	if (tun) {
 
@@ -549,7 +553,7 @@ do_ifconfig (struct tuntap *tt,
 				  ifconfig_remote_netmask
 				  );
 		  msg (M_INFO, "%s", command_line);
-		  system_check (command_line, "Linux ip addr add failed", true);
+		  system_check (command_line, es, S_FATAL, "Linux ip addr add failed");
 	} else {
 		openvpn_snprintf (command_line, sizeof (command_line),
 				  IPROUTE_PATH " addr add dev %s %s/%d broadcast %s",
@@ -559,8 +563,7 @@ do_ifconfig (struct tuntap *tt,
 				  ifconfig_broadcast
 				  );
 		  msg (M_INFO, "%s", command_line);
-		  system_check (command_line, "Linux ip addr add failed", true);
-
+		  system_check (command_line, es, S_FATAL, "Linux ip addr add failed");
 	}
 	tt->did_ifconfig = true;
 #else
@@ -582,7 +585,7 @@ do_ifconfig (struct tuntap *tt,
 			  ifconfig_broadcast
 			  );
       msg (M_INFO, "%s", command_line);
-      system_check (command_line, "Linux ifconfig failed", true);
+      system_check (command_line, es, S_FATAL, "Linux ifconfig failed");
       tt->did_ifconfig = true;
 
 #endif /*CONFIG_FEATURE_IPROUTE*/
@@ -600,14 +603,14 @@ do_ifconfig (struct tuntap *tt,
       else
 	no_tap_ifconfig ();
       msg (M_INFO, "%s", command_line);
-      if (!system_check (command_line, "Solaris ifconfig failed", false))
+      if (!system_check (command_line, es, 0, "Solaris ifconfig failed"))
 	{
 	  openvpn_snprintf (command_line, sizeof (command_line),
 			    IFCONFIG_PATH " %s unplumb",
 			    actual
 			    );
 	  msg (M_INFO, "%s", command_line);
-	  system_check (command_line, "Solaris ifconfig unplumb failed", false);
+	  system_check (command_line, es, 0, "Solaris ifconfig unplumb failed");
 	  msg (M_FATAL, "ifconfig failed");
 	}
       tt->did_ifconfig = true;
@@ -621,10 +624,15 @@ do_ifconfig (struct tuntap *tt,
        */
 
       openvpn_snprintf (command_line, sizeof (command_line),
-			IFCONFIG_PATH " %s delete",
+			IFCONFIG_PATH " %s destroy",
 			actual);
       msg (M_INFO, "%s", command_line);
-      system_check (command_line, NULL, false);
+      system_check (command_line, es, 0, NULL);
+      openvpn_snprintf (command_line, sizeof (command_line),
+			IFCONFIG_PATH " %s create",
+			actual);
+      msg (M_INFO, "%s", command_line);
+      system_check (command_line, es, 0, NULL);
       msg (M_INFO, "NOTE: Tried to delete pre-existing tun/tap instance -- No Problem if failure");
 
       /* example: ifconfig tun2 10.2.0.2 10.2.0.1 mtu 1450 netmask 255.255.255.255 up */
@@ -637,9 +645,16 @@ do_ifconfig (struct tuntap *tt,
 			  tun_mtu
 			  );
       else
-	no_tap_ifconfig ();
+	openvpn_snprintf (command_line, sizeof (command_line),
+			  IFCONFIG_PATH " %s %s netmask %s mtu %d broadcast %s link0",
+			  actual,
+			  ifconfig_local,
+			  ifconfig_remote_netmask,
+			  tun_mtu,
+			  ifconfig_broadcast
+			  );
       msg (M_INFO, "%s", command_line);
-      system_check (command_line, "OpenBSD ifconfig failed", true);
+      system_check (command_line, es, S_FATAL, "OpenBSD ifconfig failed");
       tt->did_ifconfig = true;
 
 #elif defined(TARGET_NETBSD)
@@ -655,7 +670,7 @@ do_ifconfig (struct tuntap *tt,
       else
 	no_tap_ifconfig ();
       msg (M_INFO, "%s", command_line);
-      system_check (command_line, "NetBSD ifconfig failed", true);
+      system_check (command_line, es, S_FATAL, "NetBSD ifconfig failed");
       tt->did_ifconfig = true;
 
 #elif defined(TARGET_DARWIN)
@@ -668,7 +683,7 @@ do_ifconfig (struct tuntap *tt,
 			IFCONFIG_PATH " %s delete",
 			actual);
       msg (M_INFO, "%s", command_line);
-      system_check (command_line, NULL, false);
+      system_check (command_line, es, 0, NULL);
       msg (M_INFO, "NOTE: Tried to delete pre-existing tun/tap instance -- No Problem if failure");
 
 
@@ -684,7 +699,7 @@ do_ifconfig (struct tuntap *tt,
       else
 	no_tap_ifconfig ();
       msg (M_INFO, "%s", command_line);
-      system_check (command_line, "Mac OS X ifconfig failed", true);
+      system_check (command_line, es, S_FATAL, "Mac OS X ifconfig failed");
       tt->did_ifconfig = true;
 
 #elif defined(TARGET_FREEBSD)
@@ -708,7 +723,7 @@ do_ifconfig (struct tuntap *tt,
 			  );
 	
       msg (M_INFO, "%s", command_line);
-      system_check (command_line, "FreeBSD ifconfig failed", true);
+      system_check (command_line, es, S_FATAL, "FreeBSD ifconfig failed");
       tt->did_ifconfig = true;
 
 #elif defined (WIN32)
@@ -749,7 +764,7 @@ do_ifconfig (struct tuntap *tt,
 	  case IPW32_SET_NETSH:
 	    netcmd_semaphore_lock ();
 	    msg (M_INFO, "%s", command_line);
-	    system_check (command_line, "ERROR: netsh command failed", true);
+	    system_check (command_line, es, S_FATAL, "ERROR: netsh command failed");
 	    netcmd_semaphore_release ();
 	    break;
 	  }
@@ -2055,10 +2070,10 @@ show_tap_win32_adapters (int msglev, int warnlev)
     msg (warnlev, "WARNING: Some TAP-Win32 adapters have duplicate GUIDs");
 
   if (warn_panel_dup)
-    msg (warnlev, "WARNING: Some TAP-Win32 adapters have duplicate links from the network connections control panel");
+    msg (warnlev, "WARNING: Some TAP-Win32 adapters have duplicate links from the Network Connections control panel");
 
   if (warn_panel_null)
-    msg (warnlev, "WARNING: Some TAP-Win32 adapters have no link from the network connections control panel");
+    msg (warnlev, "WARNING: Some TAP-Win32 adapters have no link from the Network Connections control panel");
 
   gc_free (&gc);
 }
@@ -2108,6 +2123,59 @@ name_to_guid (const char *name, const struct tap_reg *tap_reg, const struct pane
   return NULL;
 }
 
+static void
+no_tap_win32 (void)
+{
+  msg (M_FATAL, "There are no TAP-Win32 adapters on this system.  You should be able to create a TAP-Win32 adapter by going to Start -> All Programs -> " PACKAGE_NAME " -> Add a new TAP-Win32 virtual ethernet adapter.");
+}
+
+/*
+ * Get a adapted GUID and optional actual_name from the 
+ * registry for the TAP device # = device_number.
+ */
+const char *
+get_unspecified_device_guid (const int device_number,
+		             char *actual_name,
+		             int actual_name_size,
+			     const struct tap_reg *tap_reg_src,
+			     const struct panel_reg *panel_reg_src,
+		             struct gc_arena *gc)
+{
+  struct buffer ret = alloc_buf_gc (256, gc);
+  const struct tap_reg *tap_reg = tap_reg_src;
+  struct buffer actual;
+  const char *act;
+  int i;
+
+  ASSERT (actual_name && actual_name_size > 0);
+  ASSERT (device_number >= 0);
+
+  buf_set_write (&actual, actual_name, actual_name_size);
+
+  /* Make sure we have at least one TAP adapter */
+  if (!tap_reg)
+    no_tap_win32 ();
+
+  /* Move on to specified device number */
+  for (i = 0; i < device_number; i++)
+    {
+      tap_reg = tap_reg->next;
+      if (!tap_reg)
+        msg (M_FATAL, "All TAP-Win32 adapters on this system are currently in use.");
+    }
+
+  /* Save GUID for return value */
+  buf_printf (&ret, "%s", tap_reg->guid);
+
+  /* Save Network Panel name (if exists) in actual_name */
+  act = guid_to_name (tap_reg->guid, panel_reg_src);
+  if (act)
+    buf_printf (&actual, "%s", act);
+  else
+    buf_printf (&actual, "NULL");
+  return BSTR (&ret);
+}
+
 /*
  * Lookup a --dev-node adapter name in the registry
  * returning the GUID and optional actual_name.
@@ -2127,28 +2195,13 @@ get_device_guid (const char *name,
   struct buffer ret = alloc_buf_gc (256, gc);
   struct buffer actual;
 
+  ASSERT (actual_name && actual_name_size > 0);
+
   buf_set_write (&actual, actual_name, actual_name_size);
 
   /* Make sure we have at least one TAP adapter */
   if (!tap_reg)
-    {
-      msg (M_FATAL, "There are no TAP-Win32 adapters on this system.  You should be able to create a TAP-Win32 adapter by going to Start -> All Programs -> " PACKAGE_NAME " -> Add a new TAP-Win32 virtual ethernet adapter.");
-    }
-
-  /* If --dev-node not specified, look for a default TAP adapter */
-  if (!name)
-    {
-      const char *act;
-      if (tap_reg->next)
-	msg (M_FATAL, "You have more than one TAP-Win32 adapter on this system.  You must use the --dev-node option to tell me which one to use.  Use openvpn --show-adapters to see a list.");
-      act = guid_to_name (tap_reg->guid, panel_reg);
-      buf_printf (&ret, "%s", tap_reg->guid);
-      if (act)
-	buf_printf (&actual, "%s", act);
-      else
-	buf_printf (&actual, "NULL");
-      return BSTR (&ret);
-    }
+    no_tap_win32 ();
 
   /* Check if GUID was explicitly specified as --dev-node parameter */
   if (is_tap_win32 (name, tap_reg))
@@ -2303,9 +2356,9 @@ get_adapter_n_ip_netmask (const IP_ADAPTER_INFO *ai)
 static bool
 get_adapter_ip_netmask (const IP_ADAPTER_INFO *ai, const int n, in_addr_t *ip, in_addr_t *netmask)
 {
+  bool ret = false;
   *ip = 0;
   *netmask = 0;
-  bool ret = false;
 
   if (ai)
     {
@@ -2773,33 +2826,76 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   {
     char guid_buffer[256];
 
+    if (dev_node)
+      {
+        /* Get the device GUID for the device specified with --dev-node. */
+        device_guid = get_device_guid (dev_node, guid_buffer, sizeof (guid_buffer), &gc);
+
+        /* Open Windows TAP-Win32 adapter */
+        openvpn_snprintf (device_path, sizeof(device_path), "%s%s%s",
+   		          USERMODEDEVICEDIR,
+		          device_guid,
+		          TAPSUFFIX);
+
+        tt->hand = CreateFile (
+			       device_path,
+			       GENERIC_READ | GENERIC_WRITE,
+			       0, /* was: FILE_SHARE_READ */
+			       0,
+			       OPEN_EXISTING,
+			       FILE_ATTRIBUTE_SYSTEM | FILE_FLAG_OVERLAPPED,
+			       0
+			       );
+
+        if (tt->hand == INVALID_HANDLE_VALUE)
+          msg (M_ERR, "CreateFile failed on TAP device: %s", device_path);
+      }
+    else 
+      {
+	const struct tap_reg *tap_reg = get_tap_reg (&gc);
+	const struct panel_reg *panel_reg = get_panel_reg (&gc);
+
+        int device_number = 0;
+
+        /* Try opening all TAP devices until we find one available */
+        while (true)
+          {
+            device_guid = get_unspecified_device_guid (device_number, 
+						       guid_buffer, 
+						       sizeof (guid_buffer),
+						       tap_reg,
+						       panel_reg,
+						       &gc);
+
+            /* Open Windows TAP-Win32 adapter */
+            openvpn_snprintf (device_path, sizeof(device_path), "%s%s%s",
+       		  	      USERMODEDEVICEDIR,
+			      device_guid,
+			      TAPSUFFIX);
+
+            tt->hand = CreateFile (
+			 	   device_path,
+				   GENERIC_READ | GENERIC_WRITE,
+				   0, /* was: FILE_SHARE_READ */
+				   0,
+				   OPEN_EXISTING,
+				   FILE_ATTRIBUTE_SYSTEM | FILE_FLAG_OVERLAPPED,
+				   0
+				   );
+
+            if (tt->hand == INVALID_HANDLE_VALUE)
+              msg (D_TUNTAP_INFO, "CreateFile failed on TAP device: %s", device_path);
+            else
+              break;
+        
+            device_number++;
+          }
+      }
+
     /* translate high-level device name into a device instance
        GUID using the registry */
-    device_guid = get_device_guid (dev_node, guid_buffer, sizeof (guid_buffer), &gc);
     tt->actual_name = string_alloc (guid_buffer, NULL);
   }
-
-  /*
-   * Open Windows TAP-Win32 adapter
-   */
-
-  openvpn_snprintf (device_path, sizeof(device_path), "%s%s%s",
-		    USERMODEDEVICEDIR,
-		    device_guid,
-		    TAPSUFFIX);
-
-  tt->hand = CreateFile (
-			 device_path,
-			 GENERIC_READ | GENERIC_WRITE,
-			 0, /* was: FILE_SHARE_READ */
-			 0,
-			 OPEN_EXISTING,
-			 FILE_ATTRIBUTE_SYSTEM | FILE_FLAG_OVERLAPPED,
-			 0
-			 );
-
-  if (tt->hand == INVALID_HANDLE_VALUE)
-    msg (M_ERR, "CreateFile failed on TAP device: %s", device_path);
 
   msg (M_INFO, "TAP-WIN32 device [%s] opened: %s", tt->actual_name, device_path);
 
@@ -2975,6 +3071,8 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	  msg (M_WARN, "WARNING: You have selected '--ip-win32 dynamic', which will not work unless the TAP-Win32 TCP/IP properties are set to 'Obtain an IP address automatically'");
 
 	/* force an explicit DHCP lease renewal on TAP adapter? */
+	if (tt->options.dhcp_pre_release)
+	  dhcp_release (tt);
 	if (tt->options.dhcp_renew)
 	  dhcp_renew (tt);
       }

@@ -29,18 +29,29 @@
 #include "interval.h"
 
 /*
- * printf-style interface for outputting status info
+ * printf-style interface for inputting/outputting status info
  */
 
 struct status_output
 {
+# define STATUS_OUTPUT_READ  (1<<0)
+# define STATUS_OUTPUT_WRITE (1<<1)
+  unsigned int flags;
+
   char *filename;
   int fd;
   int msglevel;
+
+  struct buffer read_buf;
+
   struct event_timeout et;
 };
 
-struct status_output *status_open (const char *filename, int refresh_freq, int msglevel);
+struct status_output *status_open (const char *filename,
+				   const int refresh_freq,
+				   const int msglevel,
+				   const unsigned int flags);
+
 bool status_trigger_tv (struct status_output *so, struct timeval *tv);
 bool status_trigger (struct status_output *so);
 void status_reset (struct status_output *so);
@@ -51,5 +62,16 @@ void status_printf (struct status_output *so, const char *format, ...)
     __attribute__ ((format (printf, 2, 3)))
 #endif
     ;
+
+bool status_read (struct status_output *so, struct buffer *buf);
+
+static inline unsigned int
+status_rw_flags (const struct status_output *so)
+{
+  if (so)
+    return so->flags;
+  else
+    return 0;
+}
 
 #endif

@@ -112,13 +112,21 @@ check_tls_errors_dowork (struct context *c)
   msg (D_STREAM_ERRORS, "Fatal decryption error (check_tls_errors_dowork), restarting");
   c->sig->signal_text = "tls-error";
 }
+
+void
+check_tls_exit_dowork (struct context *c)
+{
+  c->sig->signal_received = SIGTERM;
+  c->sig->signal_text = "tls-exit";
+}
 #endif
+
+#if P2MP
 
 /*
  * Handle incoming configuration
  * messages on the control channel.
  */
-#if P2MP
 void
 check_incoming_control_channel_dowork (struct context *c)
 {
@@ -129,40 +137,24 @@ check_incoming_control_channel_dowork (struct context *c)
       struct buffer buf = alloc_buf_gc (len, &gc);
       if (tls_rec_payload (c->c2.tls_multi, &buf))
 	{
-	  msg (D_PUSH, "PUSH: Received control message: '%s'", BSTR (&buf));
-	  if (buf_string_match_head_str (&buf, "PUSH_"))
-	    {
-	      unsigned int option_types_found = 0;
-	      const int status = process_incoming_push_msg (c,
-							    &buf,
-							    c->options.pull,
-							    pull_permission_mask (),
-							    &option_types_found);
-	      if (status == PUSH_MSG_ERROR)
-		msg (D_PUSH_ERRORS, "WARNING: Received bad push/pull message: %s", BSTR (&buf));
-	      else if (status == PUSH_MSG_REPLY)
-		{
-		  do_up (c, true, option_types_found); /* delay bringing tun/tap up until --push parms received from remote */
-		  event_timeout_clear (&c->c2.push_request_interval);
-		}
-	      else if (status == PUSH_MSG_REQUEST)
-		{
-		  //msg (D_PUSH, "PUSH: PUSH_MSG_REQUEST Replied");
-		}
-	      else if (status == PUSH_MSG_REQUEST_DEFERRED)
-		{
-		  //msg (D_PUSH, "PUSH: PUSH_MSG_REQUEST Deferred");
-		}
-	    }
+	  /* force null termination of message */
+	  buf_null_terminate (&buf);
+
+	  /* enforce character class restrictions */
+	  string_mod (BSTR (&buf), CC_PRINT, CC_CRLF, 0);
+
+	  if (buf_string_match_head_str (&buf, "AUTH_FAILED"))
+	    receive_auth_failed (c, &buf);
+	  else if (buf_string_match_head_str (&buf, "PUSH_"))
+	    incoming_push_message (c, &buf);
 	  else
-	    {
-	      msg (D_PUSH_ERRORS, "WARNING: Received unknown control message: %s", BSTR (&buf));
-	    }
+	    msg (D_PUSH_ERRORS, "WARNING: Received unknown control message: %s", BSTR (&buf));
 	}
       else
 	{
 	  msg (D_PUSH_ERRORS, "WARNING: Receive control message failed");
 	}
+
       gc_free (&gc);
     }
 }
@@ -209,8 +201,13 @@ check_connection_established_dowork (struct context *c)
     }
 }
 
+/*
+ * Send a string to remote over the TLS control channel.
+ * Used for push/pull messages, passing username/password,
+ * etc.
+ */
 bool
-send_control_channel_string (struct context *c, char *str)
+send_control_channel_string (struct context *c, char *str, int msglevel)
 {
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   if (c->c2.tls_multi) {
@@ -220,7 +217,7 @@ send_control_channel_string (struct context *c, char *str)
     stat = tls_send_payload (c->c2.tls_multi, &buf);
     interval_action (&c->c2.tmp_int);
     context_immediate_reschedule (c);
-    msg (D_PUSH, "SENT CONTROL [%s]: '%s' (status=%d)",
+    msg (msglevel, "SENT CONTROL [%s]: '%s' (status=%d)",
 	 tls_common_name (c->c2.tls_multi, false),
 	 str,
 	 (int) stat);
@@ -239,7 +236,7 @@ check_add_routes_dowork (struct context *c)
   if (test_routes (c->c1.route_list, c->c1.tuntap)
       || event_timeout_trigger (&c->c2.route_wakeup_expire, &c->c2.timeval, ETT_DEFAULT))
     {
-      do_route (&c->options, c->c1.route_list, c->c1.tuntap);
+      do_route (&c->options, c->c1.route_list, c->c1.tuntap, c->c2.es);
       update_time ();
       event_timeout_clear (&c->c2.route_wakeup);
       event_timeout_clear (&c->c2.route_wakeup_expire);
@@ -312,6 +309,7 @@ void
 encrypt_sign (struct context *c, bool comp_frag)
 {
   struct context_buffers *b = c->c2.buffers;
+
   if (comp_frag)
     {
 #ifdef USE_LZO
@@ -500,6 +498,10 @@ link_socket_write_post_size_adjust (int *size,
     }
 }
 
+/*
+ * Output: c->c2.buf
+ */
+
 void
 read_incoming_link (struct context *c)
 {
@@ -543,6 +545,11 @@ read_incoming_link (struct context *c)
 
   perf_pop ();
 }
+
+/*
+ * Input:  c->c2.buf
+ * Output: c->c2.to_tun
+ */
 
 void
 process_incoming_link (struct context *c)
@@ -656,7 +663,7 @@ process_incoming_link (struct context *c)
        * Also, update the persisted version of our packet-id.
        */
       if (!TLS_MODE)
-	link_socket_set_outgoing_addr (&c->c2.buf, lsi, &c->c2.from, NULL);
+	link_socket_set_outgoing_addr (&c->c2.buf, lsi, &c->c2.from, NULL, c->c2.es);
 
       /* reset packet received timer */
       if (c->options.ping_rec_timeout && c->c2.buf.len > 0)
@@ -695,6 +702,10 @@ process_incoming_link (struct context *c)
   gc_free (&gc);
 }
 
+/*
+ * Output: c->c2.buf
+ */
+
 void
 read_incoming_tun (struct context *c)
 {
@@ -729,6 +740,11 @@ read_incoming_tun (struct context *c)
 
   perf_pop ();
 }
+
+/*
+ * Input:  c->c2.buf
+ * Output: c->c2.to_link
+ */
 
 void
 process_incoming_tun (struct context *c)
@@ -806,6 +822,10 @@ process_ipv4_header (struct context *c, unsigned int flags, struct buffer *buf)
 	}
     }
 }
+
+/*
+ * Input: c->c2.to_link
+ */
 
 void
 process_outgoing_link (struct context *c)
@@ -909,6 +929,10 @@ process_outgoing_link (struct context *c)
   perf_pop ();
   gc_free (&gc);
 }
+
+/*
+ * Input: c->c2.to_tun
+ */
 
 void
 process_outgoing_tun (struct context *c)
@@ -1046,8 +1070,7 @@ pre_select (struct context *c)
  */
 
 void
-io_wait (struct context *c,
-	 const unsigned int flags)
+io_wait_dowork (struct context *c, const unsigned int flags)
 {
   unsigned int socket = 0;
   unsigned int tuntap = 0;

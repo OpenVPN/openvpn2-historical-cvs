@@ -101,6 +101,7 @@ context_init_1 (struct context *c)
 {
   CLEAR (c->c1.link_socket_addr);
   CLEAR (c->c1.ks);
+
   packet_id_persist_init (&c->c1.pid_persist);
   c->c1.tuntap = NULL;
   c->c1.tuntap_owned = false;
@@ -109,9 +110,25 @@ context_init_1 (struct context *c)
   c->c1.socks_proxy = NULL;
 
   init_remote_list (c);
+
+#if defined(USE_CRYPTO) && defined(USE_SSL)
+  /* Certificate password input */
+  if (c->options.key_pass_file)
+    pem_password_setup (c->options.key_pass_file);
+#endif
   
+#if P2MP
+  /* Auth user/pass input */
+  if (c->options.auth_user_pass_file)
+    {
+      ALLOC_OBJ_CLEAR_GC (c->c1.auth_user_pass, struct user_pass, &c->gc);
+      *c->c1.auth_user_pass = *get_auth_user_pass (c->options.auth_user_pass_file);
+    }
+#endif
+
   if (c->options.http_proxy_server)
     {
+      /* Possible HTTP proxy user/pass input */
       c->c1.http_proxy = new_http_proxy (c->options.http_proxy_server,
 					 c->options.http_proxy_port,
 					 c->options.http_proxy_retry,
@@ -159,8 +176,6 @@ init_static (void)
 
   update_time ();
 
-  del_env_nonparm (0);
-
 #ifdef USE_CRYPTO
   init_ssl_lib ();
 
@@ -187,6 +202,11 @@ init_static (void)
 
 #ifdef IFCONFIG_POOL_TEST
   ifconfig_pool_test (0x0A010004, 0x0A0100FF);
+  return false;
+#endif
+
+#ifdef CHARACTER_CLASS_DEBUG
+  character_class_debug ();
   return false;
 #endif
 
@@ -242,7 +262,7 @@ print_openssl_info (const struct options *options)
    * OpenSSL info print mode?
    */
 #ifdef USE_CRYPTO
-  if (options->show_ciphers || options->show_digests
+  if (options->show_ciphers || options->show_digests || options->show_engines
 #ifdef USE_SSL
       || options->show_tls_ciphers
 #endif
@@ -252,6 +272,8 @@ print_openssl_info (const struct options *options)
 	show_available_ciphers ();
       if (options->show_digests)
 	show_available_digests ();
+      if (options->show_engines)
+	show_available_engines ();
 #ifdef USE_SSL
       if (options->show_tls_ciphers)
 	show_available_tls_ciphers ();
@@ -339,6 +361,39 @@ possibly_become_daemon (const struct options *options, const bool first_time)
 }
 
 /*
+ * Actually do UID/GID downgrade, and chroot, if requested.
+ */
+static void
+do_uid_gid_chroot (struct context *c, bool no_delay)
+{
+  static const char why_not[] = "will be delayed because of --client, --pull, or --up-delay";
+
+  if (c->first_time && !c->c2.uid_gid_set)
+    {
+      /* chroot if requested */
+      if (c->options.chroot_dir)
+	{
+	  if (no_delay)
+	    do_chroot (c->options.chroot_dir);
+	  else
+	    msg (M_INFO, "NOTE: chroot %s", why_not);
+	}
+
+      /* set user and/or group that we want to setuid/setgid to */
+      if (no_delay)
+	{
+	  set_group (&c->c2.group_state);
+	  set_user (&c->c2.user_state);
+	  c->c2.uid_gid_set = true;
+	}
+      else if (c->c2.uid_gid_specified)
+	{
+	  msg (M_INFO, "NOTE: UID/GID downgrade %s", why_not);
+	}
+    }
+}
+
+/*
  * Return common name in a way that is formatted for
  * prepending to msg() output.
  */
@@ -360,9 +415,6 @@ pre_setup (const struct options *options)
 {
   /* show all option settings */
   show_settings (options);
-
-  /* set certain options as environmental variables */
-  setenv_settings (options);
 
   /* print version number */
   msg (M_INFO, "%s", title_string);
@@ -422,7 +474,7 @@ do_init_timers (struct context *c, bool deferred)
   if (!deferred)
     {
       /* initialize connection establishment timer */
-      event_timeout_init (&c->c2.wait_for_connect, 2, now);
+      event_timeout_init (&c->c2.wait_for_connect, 1, now);
 
       /* initialize occ timers */
 
@@ -471,7 +523,7 @@ do_init_traffic_shaper (struct context *c)
 static void
 do_alloc_route_list (struct context *c)
 {
-  if (c->options.routes)
+  if (c->options.routes && !c->c1.route_list)
     c->c1.route_list = new_route_list (&c->gc);
 }
 
@@ -484,7 +536,8 @@ static void
 do_init_route_list (const struct options *options,
 		    struct route_list *route_list,
 		    const struct link_socket_info *link_socket_info,
-		    bool fatal)
+		    bool fatal,
+		    struct env_set *es)
 {
   const char *gw = NULL;
   int dev = dev_type_enum (options->dev, options->dev_type);
@@ -496,7 +549,9 @@ do_init_route_list (const struct options *options,
 
   if (!init_route_list (route_list,
 			options->routes,
-			gw, link_socket_current_remote (link_socket_info)))
+			gw,
+			link_socket_current_remote (link_socket_info),
+			es))
     {
       if (fatal)
 	openvpn_exit (OPENVPN_EXIT_STATUS_ERROR);	/* exit point */
@@ -504,7 +559,7 @@ do_init_route_list (const struct options *options,
   else
     {
       /* copy routes to environment */
-      setenv_routes (route_list);
+      setenv_routes (es, route_list);
     }
 }
 
@@ -514,6 +569,9 @@ do_init_route_list (const struct options *options,
 void
 initialization_sequence_completed (struct context *c)
 {
+  /* If we delayed UID/GID downgrade or chroot, do it now */
+  do_uid_gid_chroot (c, true);
+
   msg (M_INFO, "Initialization Sequence Completed");
 }
 
@@ -522,15 +580,18 @@ initialization_sequence_completed (struct context *c)
  * based on options.
  */
 void
-do_route (const struct options *options, struct route_list *route_list, const struct tuntap *tt)
+do_route (const struct options *options,
+	  struct route_list *route_list,
+	  const struct tuntap *tt,
+	  struct env_set *es)
 {
   if (!options->route_noexec && route_list)
-    add_routes (route_list, tt, ROUTE_OPTION_FLAGS (options));
+    add_routes (route_list, tt, ROUTE_OPTION_FLAGS (options), es);
 
   if (options->route_script)
     {
-      setenv_str ("script_type", "route-up");
-      system_check (options->route_script, "Route script failed", false);
+      setenv_str (es, "script_type", "route-up");
+      system_check (options->route_script, es, S_SCRIPT, "Route script failed");
     }
 
 #ifdef WIN32
@@ -548,6 +609,23 @@ do_route (const struct options *options, struct route_list *route_list, const st
 }
 
 /*
+ * Save current pulled options string in the c1 context store, so we can
+ * compare against it after possible future restarts.
+ */
+#if P2MP
+static void
+save_pulled_options_string (struct context *c, const char *newstring)
+{
+  if (c->c1.pulled_options_string_save)
+    free (c->c1.pulled_options_string_save);
+  if (newstring)
+    c->c1.pulled_options_string_save = string_alloc (newstring, NULL);
+  else
+    c->c1.pulled_options_string_save = NULL;
+}
+#endif
+
+/*
  * initialize tun/tap device object
  */
 static void
@@ -559,7 +637,8 @@ do_init_tun (struct context *c)
 			   c->options.ifconfig_remote_netmask,
 			   addr_host (&c->c1.link_socket_addr.local),
 			   addr_host (&c->c1.link_socket_addr.remote),
-			   !c->options.ifconfig_nowarn);
+			   !c->options.ifconfig_nowarn,
+			   c->c2.es);
 
   init_tun_post (c->c1.tuntap,
 		 &c->c2.frame,
@@ -591,7 +670,7 @@ do_open_tun (struct context *c)
 
       /* parse and resolve the route option list */
       if (c->c1.route_list && c->c2.link_socket)
-	do_init_route_list (&c->options, c->c1.route_list, &c->c2.link_socket->info, true);
+	do_init_route_list (&c->options, c->c1.route_list, &c->c2.link_socket->info, false, c->c2.es);
 
       /* do ifconfig */
       if (!c->options.ifconfig_noexec
@@ -603,7 +682,7 @@ do_open_tun (struct context *c)
 						c->options.dev_type,
 						c->options.dev_node,
 						&gc);
-	  do_ifconfig (c->c1.tuntap, guess, TUN_MTU_SIZE (&c->c2.frame));
+	  do_ifconfig (c->c1.tuntap, guess, TUN_MTU_SIZE (&c->c2.frame), c->c2.es);
 	}
 
       /* open the tun device */
@@ -614,7 +693,7 @@ do_open_tun (struct context *c)
       if (!c->options.ifconfig_noexec
 	  && ifconfig_order () == IFCONFIG_AFTER_TUN_OPEN)
 	{
-	  do_ifconfig (c->c1.tuntap, c->c1.tuntap->actual_name, TUN_MTU_SIZE (&c->c2.frame));
+	  do_ifconfig (c->c1.tuntap, c->c1.tuntap->actual_name, TUN_MTU_SIZE (&c->c2.frame), c->c2.es);
 	}
 
       /* run the up script */
@@ -624,11 +703,14 @@ do_open_tun (struct context *c)
 		  EXPANDED_SIZE (&c->c2.frame),
 		  print_in_addr_t (c->c1.tuntap->local, IA_EMPTY_IF_UNDEF, &gc),
 		  print_in_addr_t (c->c1.tuntap->remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
-		  "init", NULL, "up");
+		  "init",
+		  NULL,
+		  "up",
+		  c->c2.es);
 
       /* possibly add routes */
       if (!c->options.route_delay_defined)
-	do_route (&c->options, c->c1.route_list, c->c1.tuntap);
+	do_route (&c->options, c->c1.route_list, c->c1.tuntap, c->c2.es);
 
       /*
        * Did tun/tap driver give us an MTU?
@@ -653,16 +735,153 @@ do_open_tun (struct context *c)
 		    EXPANDED_SIZE (&c->c2.frame),
 		    print_in_addr_t (c->c1.tuntap->local, IA_EMPTY_IF_UNDEF, &gc),
 		    print_in_addr_t (c->c1.tuntap->remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
-		    "restart", NULL, "up");
+		    "restart",
+		    NULL,
+		    "up",
+		    c->c2.es);
     }
   gc_free (&gc);
   return ret;
 }
 
 /*
+ * Close TUN/TAP device
+ */
+
+static void
+do_close_tun_simple (struct context *c)
+{
+  msg (D_CLOSE, "Closing TUN/TAP interface");
+  close_tun (c->c1.tuntap);
+  c->c1.tuntap = NULL;
+  c->c1.tuntap_owned = false;
+#if P2MP
+  save_pulled_options_string (c, NULL);
+#endif
+}
+
+static void
+do_close_tun (struct context *c, bool force)
+{
+  struct gc_arena gc = gc_new ();
+  if (c->c1.tuntap && c->c1.tuntap_owned)
+    {
+      const char *tuntap_actual = string_alloc (c->c1.tuntap->actual_name, &gc);
+      const in_addr_t local = c->c1.tuntap->local;
+      const in_addr_t remote_netmask = c->c1.tuntap->remote_netmask;
+
+      if (force || !(c->sig->signal_received == SIGUSR1 && c->options.persist_tun))
+	{
+	  /* delete any routes we added */
+	  if (c->c1.route_list)
+	    delete_routes (c->c1.route_list, c->c1.tuntap, ROUTE_OPTION_FLAGS (&c->options), c->c2.es);
+
+	  /* actually close tun/tap device based on --down-pre flag */
+	  if (!c->options.down_pre)
+	    do_close_tun_simple (c);
+
+	  /* Run the down script -- note that it will run at reduced
+	     privilege if, for example, "--user nobody" was used. */
+	  run_script (c->options.down_script,
+		      tuntap_actual,
+		      TUN_MTU_SIZE (&c->c2.frame),
+		      EXPANDED_SIZE (&c->c2.frame),
+		      print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
+		      print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
+		      "init",
+		      signal_description (c->sig->signal_received,
+					  c->sig->signal_text),
+		      "down",
+		      c->c2.es);
+
+	  /* actually close tun/tap device based on --down-pre flag */
+	  if (c->options.down_pre)
+	    do_close_tun_simple (c);
+	}
+      else
+	{
+	  /* run the down script on this restart if --up-restart was specified */
+	  if (c->options.up_restart)
+	    run_script (c->options.down_script,
+			tuntap_actual,
+			TUN_MTU_SIZE (&c->c2.frame),
+			EXPANDED_SIZE (&c->c2.frame),
+			print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
+			print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
+			"restart",
+			signal_description (c->sig->signal_received,
+					    c->sig->signal_text),
+			"down",
+			c->c2.es);
+	}
+    }
+  gc_free (&gc);
+}
+
+/*
  * Handle delayed tun/tap interface bringup due to --up-delay or --pull
  */
 
+void
+do_up (struct context *c, bool pulled_options, unsigned int option_types_found)
+{
+  if (!c->c2.do_up_ran)
+    {
+      reset_coarse_timers (c);
+
+      if (pulled_options && option_types_found)
+	do_deferred_options (c, option_types_found);
+
+      /* if --up-delay specified, open tun, do ifconfig, and run up script now */
+      if (c->options.up_delay || PULL_DEFINED (&c->options))
+	{
+	  c->c2.did_open_tun = do_open_tun (c);
+	  update_time ();
+
+#if P2MP
+	  /*
+	   * Was tun interface object persisted from previous restart iteration,
+	   * and if so did pulled options string change from previous iteration?
+	   */
+	  if (!c->c2.did_open_tun
+	      && PULL_DEFINED (&c->options)
+	      && c->c1.tuntap
+	      && (!c->c1.pulled_options_string_save || !c->c2.pulled_options_string
+		  || strcmp (c->c1.pulled_options_string_save, c->c2.pulled_options_string)))
+	    {
+	      /* if so, close tun, delete routes, then reinitialize tun and add routes */
+	      msg (M_INFO, "NOTE: Pulled options changed on restart, will need to close and reopen TUN/TAP device.");
+	      do_close_tun (c, true);
+	      sleep (1);
+	      c->c2.did_open_tun = do_open_tun (c);
+	      update_time ();
+	    }
+#endif
+	}
+
+      if (c->c2.did_open_tun)
+	{
+#if P2MP
+	  save_pulled_options_string (c, c->c2.pulled_options_string);
+#endif
+
+	  /* if --route-delay was specified, start timer */
+	  if (c->options.route_delay_defined)
+	    {
+	      event_timeout_init (&c->c2.route_wakeup, c->options.route_delay, now);
+	      event_timeout_init (&c->c2.route_wakeup_expire, c->options.route_delay + c->options.route_delay_window, now);
+	    }
+	  else
+	    initialization_sequence_completed (c);
+	}
+
+      c->c2.do_up_ran = true;
+    }
+}
+
+/*
+ * These are the option categories which will be accepted by pull.
+ */
 unsigned int
 pull_permission_mask (void)
 {
@@ -677,6 +896,9 @@ pull_permission_mask (void)
 	  | OPT_P_EXPLICIT_NOTIFY);
 }
 
+/*
+ * Handle non-tun-related pulled options.
+ */
 void
 do_deferred_options (struct context *c, const unsigned int found)
 {
@@ -711,42 +933,6 @@ do_deferred_options (struct context *c, const unsigned int found)
     msg (D_PUSH, "OPTIONS IMPORT: environment modified");
 }
 
-void
-do_up (struct context *c, bool pulled_options, unsigned int option_types_found)
-{
-  if (!c->c2.do_up_ran)
-    {
-      reset_coarse_timers (c);
-
-      if (pulled_options && option_types_found)
-	do_deferred_options (c, option_types_found);
-
-      /* if --up-delay specified, open tun, do ifconfig, and run up script now */
-      if (c->options.up_delay || PULL_DEFINED (&c->options))
-	{
-	  c->c2.did_open_tun = do_open_tun (c);
-	  update_time ();
-	}
-
-      if (c->c2.did_open_tun)
-	{
-	  /* if --route-delay was specified, start timer */
-	  if (c->options.route_delay_defined)
-	    {
-	      event_timeout_init (&c->c2.route_wakeup, c->options.route_delay, now);
-	      event_timeout_init (&c->c2.route_wakeup_expire, c->options.route_delay + c->options.route_delay_window, now);
-	    }
-	  else
-	    initialization_sequence_completed (c);
-	}
-      else if (pulled_options && (option_types_found & (OPT_P_UP|OPT_P_ROUTE|OPT_P_IPWIN32)))
-	{
-	  msg (D_PUSH_ERRORS, "WARNING: Options pulled from the server relating to tun/tap interface configuration and routes were not applied");
-	}
-      c->c2.do_up_ran = true;
-    }
-}
-
 /*
  * Depending on protocol, sleep before restart to prevent
  * TCP race.
@@ -757,7 +943,7 @@ socket_restart_pause (const struct context *c)
   const bool proxy = (c->options.http_proxy_server != NULL || c->options.socks_proxy_server != NULL);
   const int retry = c->options.connect_retry_seconds;
 
-  int sec = 0;
+  int sec = 1;
 
   switch (c->options.proto)
     {
@@ -818,7 +1004,7 @@ static void
 init_crypto_pre (struct context *c, const unsigned int flags)
 {
   if (c->options.engine)
-    init_crypto_lib_engine ();
+    init_crypto_lib_engine (c->options.engine);
 
   if (flags & CF_LOAD_PERSISTED_PACKET_ID)
     {
@@ -931,7 +1117,13 @@ do_init_crypto_tls_c1 (struct context *c)
 				   options->cert_file,
 				   options->priv_key_file,
 				   options->pkcs12_file,
-				   options->cipher_list);
+				   options->cipher_list,
+#if P2MP
+				   !options->client_cert_not_required
+#else
+				   true
+#endif
+				   );
 
       /* Get cipher & hash algorithms */
       init_key_type (&c->c1.ks.key_type, options->ciphername,
@@ -1009,6 +1201,15 @@ do_init_crypto_tls (struct context *c, const unsigned int flags)
   to.verify_command = options->tls_verify;
   to.verify_x509name = options->tls_remote;
   to.crl_file = options->crl_file;
+  to.es = c->c2.es;
+
+#if P2MP
+  to.auth_user_pass_verify_script = options->auth_user_pass_verify_script;
+  to.auth_user_pass = c->c1.auth_user_pass;
+  to.username_as_common_name = options->username_as_common_name;
+  if (options->ccd_exclusive)
+    to.client_config_dir_exclusive = options->client_config_dir;
+#endif
 
   /* TLS handshake authentication (--tls-auth) */
   if (options->tls_auth_file)
@@ -1156,12 +1357,12 @@ do_option_warnings (struct context *c)
 {
   const struct options *o = &c->options;
 
-#if P2MP
-  if (o->pull && o->ifconfig_local)
-    msg (M_WARN, "WARNING: using --pull and --ifconfig together is probably not what you want");
+  if (o->ping_send_timeout && !o->ping_rec_timeout)
+    msg (M_WARN, "WARNING: --ping should normally be used with --ping-restart or --ping-exit");
 
-  if (o->pull && is_persist_option (o))
-    msg (M_WARN, "WARNING: using a --persist option may conflict with --pull");
+#if P2MP
+  if (o->pull && o->ifconfig_local && c->first_time)
+    msg (M_WARN, "WARNING: using --pull/--client and --ifconfig together is probably not what you want");
 
   if (o->mode == MODE_SERVER)
     {
@@ -1365,51 +1566,34 @@ do_compute_occ_strings (struct context *c)
 
 /*
  * These things can only be executed once per program instantiation.
+ * Set up for possible UID/GID downgrade, but don't do it yet.
+ * Daemonize if requested.
  */
 static void
-do_init_first_time_1 (struct context *c)
+do_init_first_time (struct context *c)
 {
   if (c->first_time)
     {
       /* get user and/or group that we want to setuid/setgid to */
-      get_group (c->options.groupname, &c->c2.group_state);
-      get_user (c->options.username, &c->c2.user_state);
+      c->c2.uid_gid_specified =
+	get_group (c->options.groupname, &c->c2.group_state) |
+	get_user (c->options.username, &c->c2.user_state);
 
       /* get --writepid file descriptor */
       get_pid_file (c->options.writepid, &c->c2.pid_state);
 
-      /* chroot if requested */
-      if (c->options.chroot_dir)
-	do_chroot (c->options.chroot_dir);
-    }
+      /* become a daemon if --daemon */
+      c->c2.did_we_daemonize = possibly_become_daemon (&c->options, c->first_time);
 
-  /* become a daemon if --daemon */
-  c->c2.did_we_daemonize =
-    possibly_become_daemon (&c->options, c->first_time);
-}
-
-/*
- * Do first-time initialization AFTER possible daemonization,
- * UID/GID downgrade, and chroot.
- */
-static void
-do_init_first_time_2 (struct context *c)
-{
-  if (c->first_time)
-    {
       /* should we disable paging? */
       if (c->options.mlock && c->c2.did_we_daemonize)
 	do_mlockall (true);	/* call again in case we daemonized */
 
-      /* should we change scheduling priority? */
-      set_nice (c->options.nice);
-
-      /* set user and/or group that we want to setuid/setgid to */
-      set_group (&c->c2.group_state);
-      set_user (&c->c2.user_state);
-
       /* save process ID in a file */
       write_pid (&c->c2.pid_state);
+
+      /* should we change scheduling priority? */
+      set_nice (c->options.nice);
     }
 }
 
@@ -1495,76 +1679,6 @@ do_close_link_socket (struct context *c)
 }
 
 /*
- * Close TUN/TAP device
- */
-static void
-do_close_tuntap (struct context *c)
-{
-  struct gc_arena gc = gc_new ();
-  if (c->c1.tuntap && c->c1.tuntap_owned)
-    {
-      const char *tuntap_actual = string_alloc (c->c1.tuntap->actual_name, &gc);
-      const in_addr_t local = c->c1.tuntap->local;
-      const in_addr_t remote_netmask = c->c1.tuntap->remote_netmask;
-
-      if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_tun))
-	{
-	  /* delete any routes we added */
-	  if (c->c1.route_list)
-	    delete_routes (c->c1.route_list, c->c1.tuntap, ROUTE_OPTION_FLAGS (&c->options));
-
-	  msg (D_CLOSE, "Closing TUN/TAP interface");
-	  close_tun (c->c1.tuntap);
-	  c->c1.tuntap = NULL;
-
-	  /* Run the down script -- note that it will run at reduced
-	     privilege if, for example, "--user nobody" was used. */
-	  run_script (c->options.down_script,
-		      tuntap_actual,
-		      TUN_MTU_SIZE (&c->c2.frame),
-		      EXPANDED_SIZE (&c->c2.frame),
-		      print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
-		      print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
-		      "init",
-		      signal_description (c->sig->signal_received,
-					  c->sig->signal_text),
-		      "down");
-	}
-      else
-	{
-	  /* run the down script on this restart if --up-restart was specified */
-	  if (c->options.up_restart)
-	    run_script (c->options.down_script,
-			tuntap_actual,
-			TUN_MTU_SIZE (&c->c2.frame),
-			EXPANDED_SIZE (&c->c2.frame),
-			print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
-			print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
-			"restart",
-			signal_description (c->sig->signal_received,
-					    c->sig->signal_text),
-			"down");
-	}
-    }
-  gc_free (&gc);
-}
-
-/*
- * Remove non-parameter environmental vars except for signal
- */
-static void
-do_close_remove_env (struct context *c)
-{
-  del_env_nonparm (
-#if defined(USE_CRYPTO) && defined(USE_SSL)
-		    get_max_tls_verify_id (c->c2.tls_multi)
-#else
-		    0
-#endif
-    );
-}
-
-/*
  * Close packet-id persistance file
  */
 static void
@@ -1636,7 +1750,8 @@ do_open_status_output (struct context *c)
     {
       c->c1.status_output = status_open (c->options.status_file,
 					 c->options.status_file_update_freq,
-					 -1);
+					 -1,
+					 STATUS_OUTPUT_WRITE);
       c->c1.status_output_owned = true;
     }
 }
@@ -1656,6 +1771,102 @@ do_close_status_output (struct context *c)
 }
 
 /*
+ * Handle ifconfig-pool persistance object.
+ */
+static void
+do_open_ifconfig_pool_persist (struct context *c)
+{
+#if P2MP
+  if (!c->c1.ifconfig_pool_persist && c->options.ifconfig_pool_persist_filename)
+    {
+      c->c1.ifconfig_pool_persist = ifconfig_pool_persist_init (c->options.ifconfig_pool_persist_filename,
+								c->options.ifconfig_pool_persist_refresh_freq);
+      c->c1.ifconfig_pool_persist_owned = true;
+    }
+#endif
+}
+
+static void
+do_close_ifconfig_pool_persist (struct context *c)
+{
+#if P2MP
+  if (!(c->sig->signal_received == SIGUSR1))
+    {
+      if (c->c1.ifconfig_pool_persist && c->c1.ifconfig_pool_persist_owned)
+	{
+	  ifconfig_pool_persist_close (c->c1.ifconfig_pool_persist);
+	  c->c1.ifconfig_pool_persist = NULL;
+	  c->c1.ifconfig_pool_persist_owned = false;
+	}
+    }
+#endif
+}
+
+/*
+ * Inherit environmental variables
+ */
+
+static void
+do_inherit_env (struct context *c, const struct env_set *src)
+{
+  c->c2.es = env_set_create (&c->c2.gc);
+  env_set_inherit (c->c2.es, src);
+}
+
+/*
+ * Initialize/Uninitialize work thread
+ */
+
+static void
+do_init_pthread (struct context *c)
+{
+#ifdef USE_PTHREAD
+  if (!c->c1.work_thread && c->options.n_threads >= 2)
+    c->c1.work_thread = work_thread_init (c->options.n_threads, c->options.nice_work);
+#endif
+}
+
+static void
+do_close_pthread (struct context *c)
+{
+#ifdef USE_PTHREAD
+  if (c->sig->signal_received != SIGUSR1 && c->c1.work_thread)
+    work_thread_close (c->c1.work_thread);
+#endif
+}
+
+/*
+ * Fast I/O setup.  Fast I/O is an optimization which only works
+ * if all of the following are true:
+ *
+ * (1) The platform is not Windows
+ * (2) --proto udp is enabled
+ * (3) --shaper is disabled
+ */
+static void
+do_setup_fast_io (struct context *c)
+{
+  if (c->options.fast_io)
+    {
+#ifdef WIN32
+      msg (M_INFO, "NOTE: --fast-io is disabled since we are running on Windows");
+#else
+      if (c->options.proto != PROTO_UDPv4)
+	msg (M_INFO, "NOTE: --fast-io is disabled since we are not using UDP");
+      else
+	{
+	  if (c->options.shaper)
+	    msg (M_INFO, "NOTE: --fast-io is disabled since we are using --shaper");
+	  else
+	    {
+	      c->c2.fast_io = true;
+	    }
+	}
+#endif
+    }
+}
+
+/*
  * Initialize a tunnel instance.
  */
 void
@@ -1664,6 +1875,9 @@ init_instance (struct context *c, unsigned int flags)
   const struct options *options = &c->options;
   const bool child = (c->mode == CM_CHILD_TCP || c->mode == CM_CHILD_UDP);
   int link_socket_mode = LS_MODE_DEFAULT;
+
+  /* init garbage collection level */
+  gc_init (&c->c2.gc);
 
   /* link_socket_mode allows CM_CHILD_TCP
      instances to inherit acceptable fds
@@ -1676,9 +1890,6 @@ init_instance (struct context *c, unsigned int flags)
 	link_socket_mode = LS_MODE_TCP_ACCEPT_FROM;
     }
 
-  /* init garbage collection level */
-  gc_init (&c->c2.gc);
-
   /* signals caught here will abort */
   c->sig->signal_received = 0;
   c->sig->signal_text = NULL;
@@ -1687,6 +1898,14 @@ init_instance (struct context *c, unsigned int flags)
   /* before full initialization, received signals will trigger exit */
   if (c->first_time)
     pre_init_signal_catch ();
+
+  /* should we disable paging? */
+  if (c->first_time && options->mlock)
+    do_mlockall (true);
+
+  /* possible sleep if restart */
+  if ((c->mode == CM_P2P || c->mode == CM_TOP) && !c->first_time)
+    socket_restart_pause (c);
 
   /* initialize context level 2 --verb/--mute parms */
   init_verb_mute (c, IVM_LEVEL_2);
@@ -1699,17 +1918,21 @@ init_instance (struct context *c, unsigned int flags)
   if (c->mode == CM_P2P || c->mode == CM_TOP)
     do_option_warnings (c);
 
-  /* should we disable paging? */
-  if (c->first_time && options->mlock)
-    do_mlockall (true);
+  /* init c2's environmental variables to c1 state */
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_inherit_env (c, c->es);
 
-  /* possible sleep if restart */
-  if ((c->mode == CM_P2P || c->mode == CM_TOP) && !c->first_time)
-    socket_restart_pause (c);
+  /* should we enable fast I/O? */
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_setup_fast_io (c);
 
   /* open --status file */
   if (c->mode == CM_P2P || c->mode == CM_TOP)
     do_open_status_output (c);
+
+  /* open --ifconfig-pool-persist file */
+  if (c->mode == CM_TOP)
+    do_open_ifconfig_pool_persist (c);
 
   /* reset OCC state */
   if (c->mode == CM_P2P || child)
@@ -1785,17 +2008,21 @@ init_instance (struct context *c, unsigned int flags)
     do_init_traffic_shaper (c);
 
   /* do one-time inits, and possibily become a daemon here */
-  do_init_first_time_1 (c);
+  do_init_first_time (c);
 
   /* catch signals */
   if (c->first_time)
     post_init_signal_catch ();
 
+  /* start work thread here */
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_init_pthread (c);
+
   /*
-   * Do first-time initialization AFTER possible daemonization,
-   * UID/GID downgrade, and chroot.
+   * Actually do UID/GID downgrade, and chroot, if requested.
+   * May be delayed by --client, --pull, or --up-delay.
    */
-  do_init_first_time_2 (c);
+  do_uid_gid_chroot (c, c->c2.did_open_tun);
 
   /* finalize the TCP/UDP socket */
   if (c->mode == CM_P2P || c->mode == CM_TOP || c->mode == CM_CHILD_TCP)
@@ -1835,10 +2062,6 @@ close_instance (struct context *c)
 	  lzo_compress_uninit (&c->c2.lzo_compwork);
 #endif
 
-	/* remove non-parameter environmental vars except for signal */
-	if (c->mode == CM_P2P || c->mode == CM_TOP)
-	  do_close_remove_env (c);
-
 	/* free buffers */
 	do_close_free_buf (c);
 
@@ -1852,7 +2075,10 @@ close_instance (struct context *c)
 	do_close_link_socket (c);
 
 	/* close TUN/TAP device */
-	do_close_tuntap (c);
+	do_close_tun (c, false);
+
+	/* close work thread */
+	do_close_pthread (c);
 
 	/* close packet-id persistance file */
 	do_close_packet_id (c);
@@ -1862,6 +2088,9 @@ close_instance (struct context *c)
 
 	/* close fragmentation handler */
 	do_close_fragment (c);
+
+	/* close --ifconfig-pool-persist obj */
+	do_close_ifconfig_pool_persist (c);
 
 	/* close syslog */
 	if (c->mode == CM_P2P || c->mode == CM_TOP)
@@ -1911,6 +2140,9 @@ inherit_context_child (struct context *dest,
   /* options */
   dest->options = src->options;
   options_detach (&dest->options);
+
+  /* environment */
+  do_inherit_env (dest, src->c2.es);
 
   if (dest->mode == CM_CHILD_TCP)
     {
@@ -1966,9 +2198,12 @@ inherit_context_top (struct context *dest,
 
   dest->c1.tuntap_owned = false;
   dest->c1.status_output_owned = false;
+#if P2MP
+  dest->c1.ifconfig_pool_persist_owned = false;
+#endif
+  dest->c2.event_set_owned = false;
   dest->c2.link_socket_owned = false;
   dest->c2.buffers_owned = false;
-  dest->c2.event_set_owned = false;
 
   dest->c2.event_set = NULL;
   if (src->options.proto == PROTO_UDPv4)

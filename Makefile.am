@@ -32,6 +32,7 @@ sbin_PROGRAMS = openvpn
 nodist_openvpn_SOURCES = config.h
 
 openvpn_SOURCES = \
+        base64.c base64.h \
 	basic.h \
 	buffer.c buffer.h \
 	circ_list.h \
@@ -59,6 +60,7 @@ openvpn_SOURCES = \
 	mtu.c mtu.h \
 	mudp.c mudp.h \
 	multi.c multi.h \
+        ntlm.c ntlm.h \
 	occ.c occ.h occ-inline.h \
 	openvpn.c openvpn.h \
 	options.c options.h \
@@ -82,7 +84,8 @@ openvpn_SOURCES = \
 	status.c status.h \
 	syshead.h \
 	thread.c thread.h \
-	tun.c tun.h
+	tun.c tun.h \
+	work.c work.h
 
 LDADD = @LIBOBJS@
 

@@ -34,6 +34,7 @@
 #if P2MP
 
 #include "multi.h"
+#include "forward-inline.h"
 
 #include "memdbg.h"
 
@@ -131,7 +132,9 @@ static void
 multi_process_io_udp (struct multi_context *m)
 {
   const unsigned int status = m->top.c2.event_set_status;
-  const unsigned int mpp_flags = (MPP_PRE_SELECT | MPP_CLOSE_ON_SIGNAL);
+  const unsigned int mpp_flags = m->top.c2.fast_io
+    ? (MPP_CONDITIONAL_PRE_SELECT | MPP_CLOSE_ON_SIGNAL)
+    : (MPP_PRE_SELECT | MPP_CLOSE_ON_SIGNAL);
 
 #ifdef MULTI_DEBUG_EVENT_LOOP
   char buf[16];
@@ -219,6 +222,9 @@ tunnel_server_udp (struct context *top)
   /* initialize our cloned top object */
   multi_top_init (&multi, top);
 
+  /* finished with initialization */
+  initialization_sequence_completed (top);
+
   /* per-packet event loop */
   while (true)
     {
@@ -246,6 +252,9 @@ tunnel_server_udp (struct context *top)
       
       perf_pop ();
     }
+
+  /* save ifconfig-pool */
+  multi_ifconfig_pool_persist (&multi, true);
 
   /* tear down tunnel instance (unless --persist-tun) */
   multi_top_free (&multi);

@@ -798,9 +798,9 @@ struct se_set
   bool fast;
   fd_set readfds;
   fd_set writefds;
-  void **args;
-  int maxfd;
-  int capacity;
+  void **args;  /* allocated to capacity size */
+  int maxfd;    /* largest fd seen so far, always < capacity */
+  int capacity; /* fixed largest fd + 1 */
 };
 
 static void
@@ -875,7 +875,9 @@ se_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
     }
   else
     {
-      msg (D_EVENT_ERRORS, "Error: select: too many I/O wait events");
+      msg (D_EVENT_ERRORS, "Error: select: too many I/O wait events, fd=%d cap=%d",
+	   (int) event,
+	   ses->capacity);
     }
 }
 
@@ -943,7 +945,6 @@ se_wait_scalable (struct event_set *es, const struct timeval *tv, struct event_s
 static struct event_set *
 se_init (int *maxevents, unsigned int flags)
 {
-  const int maximum_fds = SELECT_MAX_FDS;
   struct se_set *ses;
 
   msg (D_EVENT_WAIT, "SE_INIT maxevents=%d flags=0x%08x", *maxevents, flags);
@@ -966,10 +967,10 @@ se_init (int *maxevents, unsigned int flags)
   /* Select needs to be passed this value + 1 */
   ses->maxfd = -1;
 
-  /* Figure our event capacity */
+  /* Set our event capacity */
   ASSERT (*maxevents > 0);
-  *maxevents = min_int (*maxevents, maximum_fds);
-  ses->capacity = *maxevents + 10;
+  *maxevents = min_int (*maxevents, SELECT_MAX_FDS);
+  ses->capacity = SELECT_MAX_FDS;
 
   /* Allocate space for event_set_return void * args */
   ALLOC_ARRAY_CLEAR (ses->args, void *, ses->capacity);

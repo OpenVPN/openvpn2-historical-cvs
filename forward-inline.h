@@ -44,16 +44,22 @@ check_tls (struct context *c)
 }
 
 /*
- * TLS errors are fatal in TCP mode
+ * TLS errors are fatal in TCP mode.
+ * Also check for --tls-exit trigger.
  */
 static inline void
 check_tls_errors (struct context *c)
 {
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   void check_tls_errors_dowork (struct context *c);
-  if (c->c2.tls_multi && link_socket_connection_oriented (c->c2.link_socket)
-      && c->c2.tls_multi->n_errors)
-    check_tls_errors_dowork (c);
+  void check_tls_exit_dowork (struct context *c);
+  if (c->c2.tls_multi && c->c2.tls_multi->n_errors) 
+    {
+      if (link_socket_connection_oriented (c->c2.link_socket))
+	check_tls_errors_dowork (c);
+      else if (c->options.tls_exit)
+	check_tls_exit_dowork (c);
+    }
 #endif
 }
 
@@ -213,6 +219,32 @@ p2p_iow_flags (const struct context *c)
   if (c->c2.to_tun.len > 0)
     flags |= IOW_TO_TUN;
   return flags;
+}
+
+/*
+ * This is the core I/O wait function, used for all I/O waits except
+ * for TCP in server mode.
+ */
+static inline void
+io_wait (struct context *c, const unsigned int flags)
+{
+  void io_wait_dowork (struct context *c, const unsigned int flags);
+
+  if (c->c2.fast_io && (flags & (IOW_TO_TUN|IOW_TO_LINK|IOW_MBUF)))
+    {
+      /* fast path -- only for TUN/TAP/UDP writes */
+      unsigned int ret = 0;
+      if (flags & IOW_TO_TUN)
+	ret |= TUN_WRITE;
+      if (flags & (IOW_TO_LINK|IOW_MBUF))
+	ret |= SOCKET_WRITE;
+      c->c2.event_set_status = ret;
+    }
+  else
+    {
+      /* slow path */
+      io_wait_dowork (c, flags);
+    }
 }
 
 #define CONNECTION_ESTABLISHED(c) (get_link_socket_info(c)->connection_established)

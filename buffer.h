@@ -177,11 +177,13 @@ int openvpn_snprintf(char *str, size_t size, const char *format, ...)
     ;
 
 /*
- * remove trailing characters
+ * remove/add trailing characters
  */
 
 void buf_rmtail (struct buffer *buf, uint8_t remove);
 void chomp (char *str);
+void string_null_terminate (char *str, int len, int capacity);
+void buf_null_terminate (struct buffer *buf);
 
 /*
  * Write string in buf to file descriptor fd.
@@ -229,13 +231,20 @@ struct buffer buf_sub (struct buffer *buf, int size, bool prepend);
  */
 
 static inline bool
-buf_safe (struct buffer *buf, int len)
+buf_safe (const struct buffer *buf, int len)
 {
   return len >= 0 && buf->offset + buf->len + len <= buf->capacity;
 }
 
+static inline bool
+buf_safe_bidir (const struct buffer *buf, int len)
+{
+  const int newlen = buf->len + len;
+  return newlen >= 0 && buf->offset + buf->len + newlen <= buf->capacity;
+}
+
 static inline int
-buf_forward_capacity (struct buffer *buf)
+buf_forward_capacity (const struct buffer *buf)
 {
   int ret = buf->capacity - (buf->offset + buf->len);
   if (ret < 0)
@@ -244,7 +253,7 @@ buf_forward_capacity (struct buffer *buf)
 }
 
 static inline int
-buf_forward_capacity_total (struct buffer *buf)
+buf_forward_capacity_total (const struct buffer *buf)
 {
   int ret = buf->capacity - buf->offset;
   if (ret < 0)
@@ -253,9 +262,18 @@ buf_forward_capacity_total (struct buffer *buf)
 }
 
 static inline int
-buf_reverse_capacity (struct buffer *buf)
+buf_reverse_capacity (const struct buffer *buf)
 {
   return buf->offset;
+}
+
+static inline bool
+buf_inc_len (struct buffer *buf, int inc)
+{
+  if (!buf_safe_bidir (buf, inc))
+    return false;
+  buf->len += inc;
+  return true;
 }
 
 /*
@@ -492,6 +510,62 @@ xor (uint8_t *dest, const uint8_t *src, int len)
 }
 
 /*
+ * Classify and mutate strings based on character types.
+ */
+
+/*#define CHARACTER_CLASS_DEBUG*/
+
+/* character classes */
+
+#define CC_ALNUM              (1<<0)
+#define CC_ALPHA              (1<<1)
+#define CC_ASCII              (1<<2)
+#define CC_CNTRL              (1<<3)
+#define CC_DIGIT              (1<<4)
+#define CC_PRINT              (1<<5)
+#define CC_PUNCT              (1<<6)
+#define CC_SPACE              (1<<7)
+#define CC_XDIGIT             (1<<8)
+
+#define CC_ANY                (1<<9)
+
+#define CC_BLANK              (1<<10)
+#define CC_NEWLINE            (1<<11)
+#define CC_CR                 (1<<12)
+
+#define CC_BACKSLASH          (1<<13)
+#define CC_UNDERBAR           (1<<14)
+#define CC_DASH               (1<<15)
+#define CC_DOT                (1<<16)
+#define CC_COMMA              (1<<17)
+#define CC_COLON              (1<<18)
+#define CC_SLASH              (1<<19)
+#define CC_SINGLE_QUOTE       (1<<20)
+#define CC_DOUBLE_QUOTE       (1<<21)
+#define CC_REVERSE_QUOTE      (1<<22)
+#define CC_AT                 (1<<23)
+#define CC_EQUAL              (1<<24)
+
+/* macro classes */
+#define CC_NAME               (CC_ALNUM|CC_UNDERBAR)
+#define CC_CRLF               (CC_CR|CC_NEWLINE)
+#define CC_LIMITED_PUNCT      (CC_UNDERBAR|CC_DASH|CC_DOT|CC_COLON|CC_SLASH|CC_AT|CC_EQUAL)
+
+bool char_class (const char c, const unsigned int flags);
+bool string_class (const char *str, const unsigned int inclusive, const unsigned int exclusive);
+bool string_mod (char *str, const unsigned int inclusive, const unsigned int exclusive, const char replace);
+
+const char *string_mod_const (const char *str,
+			      const unsigned int inclusive,
+			      const unsigned int exclusive,
+			      const char replace,
+			      struct gc_arena *gc);
+
+#ifdef CHARACTER_CLASS_DEBUG
+void character_class_debug (void);
+#endif
+
+/*
  * Very basic garbage collection, mostly for routines that return
  * char ptrs to malloced strings.
  */
@@ -558,10 +632,20 @@ void out_of_memory (void);
   CHECK_MALLOC_RETURN ((dptr) = (type *) malloc (sizeof (type) * (n))); \
 }
 
+#define ALLOC_ARRAY_GC(dptr, type, n, gc) \
+{ \
+  (dptr) = (type *) gc_malloc (sizeof (type) * (n), false, (gc)); \
+}
+
 #define ALLOC_ARRAY_CLEAR(dptr, type, n) \
 { \
   ALLOC_ARRAY (dptr, type, n); \
   memset ((dptr), 0, (sizeof(type) * (n))); \
+}
+
+#define ALLOC_ARRAY_CLEAR_GC(dptr, type, n, gc) \
+{ \
+  (dptr) = (type *) gc_malloc (sizeof (type) * (n), true, (gc)); \
 }
 
 #define ALLOC_OBJ_GC(dptr, type, gc) \

@@ -176,7 +176,7 @@ gettimeofday(struct timeval *tv, void *tz)
 
       QueryPerformanceFrequency((LARGE_INTEGER *) &frequency);
 
-      counterPerMicrosecond = (double)frequency / 1000000.0f;
+      counterPerMicrosecond = (double) ((__int64) frequency) / 1000000.0f;
 
       time(&t);
       QueryPerformanceCounter((LARGE_INTEGER *) &counter);
@@ -191,7 +191,7 @@ gettimeofday(struct timeval *tv, void *tz)
     }
 
   tv->tv_sec = (counter / frequency) + timeSecOffset;
-  tv->tv_usec = ((__int64)(counter / counterPerMicrosecond) % 1000000);
+  tv->tv_usec = ((__int64) (((__int64) counter) / counterPerMicrosecond) % 1000000);
 
   return 0;
 }

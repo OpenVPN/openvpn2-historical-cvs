@@ -43,6 +43,8 @@
 #include "sig.h"
 #include "misc.h"
 #include "mbuf.h"
+#include "pool.h"
+#include "work.h"
 
 /*
  * Our global key schedules, packaged thusly
@@ -120,17 +122,49 @@ struct context_buffers
  */
 struct context_1
 {
+  /* local and remote addresses */
   struct link_socket_addr link_socket_addr;
+
+  /* tunnel session keys */
   struct key_schedule ks;
+
+  /* persist crypto sequence number to/from file */
   struct packet_id_persist pid_persist;
+
+  /* array of remote addresses */
   struct remote_list *remote_list;
+
+  /* TUN/TAP interface */
   struct tuntap *tuntap;
   bool tuntap_owned;
+
+  /* list of --route directives */
   struct route_list *route_list;
+
+  /* --status file */
   struct status_output *status_output;
   bool status_output_owned;
+
+  /* HTTP proxy object */
   struct http_proxy_info *http_proxy;
+
+  /* SOCKS proxy object */
   struct socks_proxy_info *socks_proxy;
+  
+  /* work thread object */
+  struct work_thread *work_thread;
+
+#if P2MP
+  /* if client mode, option strings we pulled from server */
+  char *pulled_options_string_save;
+
+  /* persist --ifconfig-pool db to file */
+  struct ifconfig_pool_persist *ifconfig_pool_persist;
+  bool ifconfig_pool_persist_owned;
+
+  /* save user/pass for authentication */
+  struct user_pass *auth_user_pass;
+#endif
 };
 
 /*
@@ -282,6 +316,8 @@ struct context_2
   struct pid_state pid_state;
 
   /* workspace for --user/--group */
+  bool uid_gid_specified;
+  bool uid_gid_set;
   struct user_state user_state;
   struct group_state group_state;
 
@@ -322,8 +358,13 @@ struct context_2
   time_t explicit_exit_notification_time_wait;
   struct event_timeout explicit_exit_notification_interval;
 
-#if P2MP
+  /* environmental variables to pass to scripts */
+  struct env_set *es;
 
+  /* don't wait for TUN/TAP/UDP to be ready to accept write */
+  bool fast_io;
+
+#if P2MP
   /* --ifconfig endpoints to be pushed to client */
   bool push_reply_deferred;
   bool push_ifconfig_defined;
@@ -331,6 +372,8 @@ struct context_2
   in_addr_t push_ifconfig_remote_netmask;
 
   struct event_timeout push_request_interval;
+
+  const char *pulled_options_string;
 #endif
 };
 
@@ -359,6 +402,9 @@ struct context
   /* garbage collection for context scope
      allocations */
   struct gc_arena gc;
+
+  /* environmental variable settings */
+  struct env_set *es;
 
   /* signal info */
   struct signal_info *sig;

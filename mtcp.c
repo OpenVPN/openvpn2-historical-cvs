@@ -34,6 +34,7 @@
 #if P2MP
 
 #include "multi.h"
+#include "forward-inline.h"
 
 #include "memdbg.h"
 
@@ -374,7 +375,9 @@ multi_tcp_dispatch (struct multi_context *m, struct multi_instance *mi, const in
     case TA_SOCKET_READ_RESIDUAL:
       ASSERT (mi);
       ASSERT (mi->context.c2.link_socket);
+      set_prefix (mi);
       read_incoming_link (&mi->context);
+      clear_prefix ();
       if (!IS_SIG (&mi->context))
 	{
 	  multi_process_incoming_link (m, mi, mpp_flags);
@@ -627,6 +630,9 @@ tunnel_server_tcp (struct context *top)
   /* initialize a single multi_thread object */
   multi_top_init (&multi, top);
 
+  /* finished with initialization */
+  initialization_sequence_completed (top);
+
   /* per-packet event loop */
   while (true)
     {
@@ -654,6 +660,9 @@ tunnel_server_tcp (struct context *top)
 
       perf_pop ();
     }
+
+  /* save ifconfig-pool */
+  multi_ifconfig_pool_persist (&multi, true);
 
   /* tear down tunnel instance (unless --persist-tun) */
   multi_top_free (&multi);

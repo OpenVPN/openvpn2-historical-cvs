@@ -36,7 +36,7 @@ struct name { \
   int x_size; \
   int x_cap; \
   int x_sizeof; \
-  type x_list[0]; \
+  type x_list[0];   /* NOTE: some compilers will prefer: type x_list[]; */ \
 }
 
 #define CIRC_LIST_PUSH(obj, item) \

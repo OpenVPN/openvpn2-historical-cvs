@@ -139,7 +139,7 @@ helper_client_server (struct options *o)
    *   route 10.8.0.0 255.255.255.0
    *   if client-to-client:
    *     push "route 10.8.0.0 255.255.255.0"
-   *   else
+   *   else if !linear-addr:
    *     push "route 10.8.0.1"
    *
    * if tap:
@@ -157,6 +157,9 @@ helper_client_server (struct options *o)
 
       if (o->server_bridge_defined)
 	msg (M_USAGE, "Options Error: --server and --server-bridge cannot be used together");
+
+      if (o->shared_secret_file)
+	msg (M_USAGE, "Options Error: --server and --secret cannot be used together (you must use SSL/TLS keys)");
 
       if (o->ifconfig_pool_defined)
 	msg (M_USAGE, "Options Error: --server already defines an ifconfig-pool, so you can't also specify --ifconfig-pool explicitly");
@@ -196,7 +199,7 @@ helper_client_server (struct options *o)
 	  helper_add_route (o->server_network, o->server_netmask, o);
 	  if (o->enable_c2c)
 	    push_option (o, print_opt_route (o->server_network, o->server_netmask, &o->gc), M_USAGE);
-	  else
+	  else if (!o->ifconfig_pool_linear)
 	    push_option (o, print_opt_route (o->server_network + 1, 0, &o->gc), M_USAGE);
 	}
       else if (dev == DEV_TYPE_TAP)
@@ -244,6 +247,9 @@ helper_client_server (struct options *o)
 
       if (o->ifconfig_pool_defined)
 	msg (M_USAGE, "Options Error: --server-bridge already defines an ifconfig-pool, so you can't also specify --ifconfig-pool explicitly");
+
+      if (o->shared_secret_file)
+	msg (M_USAGE, "Options Error: --server-bridge and --secret cannot be used together (you must use SSL/TLS keys)");
 
       if (dev != DEV_TYPE_TAP)
 	msg (M_USAGE, "Options Error: --server-bridge directive only makes sense with --dev tap");

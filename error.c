@@ -72,6 +72,9 @@ static bool std_redir;      /* GLOBAL */
 /* Should messages be written to the syslog? */
 static bool use_syslog;     /* GLOBAL */
 
+/* Should timestamps be included on messages to stdout/stderr? */
+static bool suppress_timestamps; /* GLOBAL */
+
 /* The program name passed to syslog */
 static char *pgmname_syslog;  /* GLOBAL */
 
@@ -91,9 +94,16 @@ set_mute_cutoff (int cutoff)
 }
 
 void
+set_suppress_timestamps (bool suppressed)
+{
+  suppress_timestamps = suppressed;
+}
+
+void
 error_reset ()
 {
   use_syslog = std_redir = false;
+  suppress_timestamps = false;
   x_debug_level = 1;
   mute_cutoff = 0;
   mute_count = 0;
@@ -145,48 +155,28 @@ void x_msg (unsigned int flags, const char *format, ...)
 
 #ifndef HAVE_VARARG_MACROS
   /* the macro has checked this otherwise */
-  if (!MSG_TEST(flags))
+  if (!MSG_TEST (flags))
     return;
 #endif
-
-  gc_init (&gc);
 
   if (flags & M_ERRNO_SOCK)
     e = openvpn_errno_socket ();
   else
     e = openvpn_errno ();
 
-  if (!(flags & M_NOLOCK))
-    mutex_lock_static (L_MSG);
-
   /*
    * Apply muting filter.
    */
-  if (mute_cutoff > 0 && !(flags & M_NOMUTE))
-    {
-      const int mute_level = DECODE_MUTE_LEVEL(flags);
-      if (mute_level > 0 && mute_level == mute_category)
-	{
-	  if (++mute_count > mute_cutoff)
-	    {
-	      if (!(flags & M_NOLOCK))
-		mutex_unlock_static (L_MSG);
-	      gc_free (&gc);
-	      return;
-	    }
-	}
-      else
-	{
-	  const int suppressed = mute_count - mute_cutoff;
-	  if (suppressed > 0)
-	    msg (M_INFO | M_NOLOCK | M_NOMUTE,
-		 "%d variation(s) on previous %d message(s) suppressed by --mute",
-		 suppressed,
-		 mute_cutoff);
-	  mute_count = 1;
-	  mute_category = mute_level;
-	}
-    }
+#ifndef HAVE_VARARG_MACROS
+  /* the macro has checked this otherwise */
+  if (!dont_mute (flags))
+    return;
+#endif
+
+  gc_init (&gc);
+
+  if (!(flags & M_NOLOCK))
+    mutex_lock_static (L_MSG);
 
   m1 = (char *) gc_malloc (ERR_BUF_SIZE, false, &gc);
   m2 = (char *) gc_malloc (ERR_BUF_SIZE, false, &gc);
@@ -250,9 +240,9 @@ void x_msg (unsigned int flags, const char *format, ...)
   else
     {
       FILE *fp = msg_fp();
-      const bool show_usec = check_debug_level (DEBUG_LEVEL_USEC_TIME - 1);
+      const bool show_usec = check_debug_level (DEBUG_LEVEL_USEC_TIME);
 
-      if (flags & M_NOPREFIX)
+      if (flags & M_NOPREFIX || suppress_timestamps)
 	{
 	  fprintf (fp, "%s%s%s\n",
 		   prefix,
@@ -295,6 +285,38 @@ void x_msg (unsigned int flags, const char *format, ...)
   gc_free (&gc);
 }
 
+/*
+ * Apply muting filter.
+ */
+bool
+dont_mute (unsigned int flags)
+{
+  bool ret = true;
+  if (mute_cutoff > 0 && !(flags & M_NOMUTE))
+    {
+      const int mute_level = DECODE_MUTE_LEVEL (flags);
+      if (mute_level > 0 && mute_level == mute_category)
+	{
+	  if (mute_count == mute_cutoff)
+	    msg (M_INFO | M_NOLOCK | M_NOMUTE, "NOTE: --mute triggered...");
+	  if (++mute_count > mute_cutoff)
+	    ret = false;
+	}
+      else
+	{
+	  const int suppressed = mute_count - mute_cutoff;
+	  if (suppressed > 0)
+	    msg (M_INFO | M_NOLOCK | M_NOMUTE,
+		 "%d variation(s) on previous %d message(s) suppressed by --mute",
+		 suppressed,
+		 mute_cutoff);
+	  mute_count = 1;
+	  mute_category = mute_level;
+	}
+    }
+  return ret;
+}
+
 void
 assert_failed (const char *filename, int line)
 {
@@ -313,7 +335,7 @@ out_of_memory (void)
 }
 
 void
-open_syslog (const char *pgmname)
+open_syslog (const char *pgmname, bool stdio_to_null)
 {
 #if SYSLOG_CAPABILITY
   if (!msgfp && !std_redir)
@@ -325,7 +347,8 @@ open_syslog (const char *pgmname)
 	  use_syslog = true;
 
 	  /* Better idea: somehow pipe stdout/stderr output to msg() */
-	  set_std_files_to_null (false);
+	  if (stdio_to_null)
+	    set_std_files_to_null (false);
 	}
     }
 #else
@@ -454,6 +477,26 @@ set_check_status (unsigned int info_level, unsigned int verbose_level)
 }
 
 /*
+ * Return true if this is a system error
+ * which can be safely ignored.
+ */
+static inline bool
+ignore_sys_error (const int err)
+{
+  /* I/O operation pending */
+  if (err == EAGAIN)
+    return true;
+
+#ifdef ENOBUFS
+  /* No buffer space available */
+  if (err == ENOBUFS)
+    return true;
+#endif
+
+  return false;
+}
+
+/*
  * Called after most socket or tun/tap operations, via the inline
  * function check_status().
  *
@@ -494,7 +537,7 @@ x_check_status (int status,
       /* get possible driver error from TAP-Win32 driver */
       extended_msg = tap_win32_getinfo (tt, &gc);
 #endif
-      if (my_errno != EAGAIN)
+      if (!ignore_sys_error (my_errno))
 	{
 	  if (extended_msg)
 	    msg (x_cs_info_level, "%s %s [%s]: %s (code=%d)",

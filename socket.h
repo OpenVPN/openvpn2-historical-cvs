@@ -36,6 +36,12 @@
 #include "proxy.h"
 #include "socks.h"
 
+/*
+ * Number of seconds that "resolv-retry infinite"
+ * represents.
+ */
+#define RESOLV_RETRY_INFINITE 1000000000
+
 #define REMOTE_LIST_SIZE 64
 
 struct remote_entry
@@ -271,10 +277,13 @@ const char *print_sockaddr (const struct sockaddr_in *addr,
 #define IA_NET_ORDER      (1<<1)
 const char *print_in_addr_t (in_addr_t addr, unsigned int flags, struct gc_arena *gc);
 
-void setenv_sockaddr (const char *name_prefix,
+void setenv_sockaddr (struct env_set *es,
+		      const char *name_prefix,
 		      const struct sockaddr_in *addr);
 
-void setenv_in_addr_t (const char *name_prefix, in_addr_t addr);
+void setenv_in_addr_t (struct env_set *es,
+		       const char *name_prefix,
+		       in_addr_t addr);
 
 void bad_address_length (int actual, int expected);
 
@@ -283,7 +292,8 @@ in_addr_t link_socket_current_remote (const struct link_socket_info *info);
 void link_socket_connection_initiated (const struct buffer *buf,
 				       struct link_socket_info *info,
 				       const struct sockaddr_in *addr,
-				       const char *common_name);
+				       const char *common_name,
+				       struct env_set *es);
 
 void link_socket_bad_incoming_addr (struct buffer *buf,
 				    const struct link_socket_info *info,
@@ -291,7 +301,7 @@ void link_socket_bad_incoming_addr (struct buffer *buf,
 
 void link_socket_bad_outgoing_addr (void);
 
-void setenv_trusted (const struct link_socket_info *info);
+void setenv_trusted (struct env_set *es, const struct link_socket_info *info);
 
 void remote_list_randomize (struct remote_list *l);
 
@@ -481,7 +491,8 @@ static inline void
 link_socket_set_outgoing_addr (const struct buffer *buf,
 			       struct link_socket_info *info,
 			       const struct sockaddr_in *addr,
-			       const char *common_name)
+			       const char *common_name,
+			       struct env_set *es)
 {
   if (!buf || buf->len > 0)
     {
@@ -496,7 +507,7 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
 	      || addr_match_proto (addr, &lsa->remote, info->proto))
 	  )
 	{
-	  link_socket_connection_initiated (buf, info, addr, common_name);
+	  link_socket_connection_initiated (buf, info, addr, common_name, es);
 	}
     }
 }

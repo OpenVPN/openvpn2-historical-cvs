@@ -29,6 +29,11 @@
 #include "init.h"
 #include "forward.h"
 
+/*
+ * Initial default --ping-restart before --pull
+ */
+#define PRE_PULL_INITIAL_PING_RESTART 60  /* in seconds */
+
 extern const uint8_t ping_string[];
 
 /* PING_STRING_SIZE must be sizeof (ping_string) */

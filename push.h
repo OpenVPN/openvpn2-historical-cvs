@@ -34,6 +34,10 @@
 #define PUSH_MSG_REQUEST          1
 #define PUSH_MSG_REPLY            2
 #define PUSH_MSG_REQUEST_DEFERRED 3
+#define PUSH_MSG_AUTH_FAILURE     4
+
+void incoming_push_message (struct context *c,
+			    const struct buffer *buffer);
 
 int process_incoming_push_msg (struct context *c,
 			       const struct buffer *buffer,
@@ -47,6 +51,13 @@ void push_reset (struct options *o);
 
 bool send_push_request (struct context *c);
 bool send_push_reply (struct context *c);
+
+void remove_iroutes_from_push_route_list (struct options *o);
+
+/* Auth username/password */
+
+void receive_auth_failed (struct context *c, const struct buffer *buffer);
+bool send_auth_failed (struct context *c);
 
 #endif
 #endif

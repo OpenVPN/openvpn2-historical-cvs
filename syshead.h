@@ -268,10 +268,6 @@
 #include <sys/mman.h>
 #endif
 
-#ifdef USE_PTHREAD
-#include <pthread.h>
-#endif
-
 /*
  * Do we have the capability to support the --passtos option?
  */
@@ -342,6 +338,26 @@ typedef int socket_descriptor_t;
 #define P2MP 1
 #else
 #define P2MP 0
+#endif
+
+/*
+ * Do we have pthread capability?
+ */
+#ifdef USE_PTHREAD
+#if defined(USE_CRYPTO) && defined(USE_SSL) && P2MP
+#include <pthread.h>
+#else
+#undef USE_PTHREAD
+#endif
+#endif
+
+/*
+ * Should we include NTLM proxy functionality
+ */
+#if defined(USE_CRYPTO)
+#define NTLM 1
+#else
+#define NTLM 0
 #endif
 
 /*

@@ -569,56 +569,71 @@ netcmd_semaphore_release (void)
   semaphore_release (&netcmd_semaphore);
 }
 
-/* get password from console */
+/* get input from console */
 
-char *
-getpass (const char *prompt)
+bool
+get_console_input_win32 (const char *prompt, const bool echo, char *input, const int capacity)
 {
-  static char input[256]; /* GLOBAL */
-  HANDLE in;
-  HANDLE err;
-  DWORD  count;
+  HANDLE in = INVALID_HANDLE_VALUE;
+  HANDLE err = INVALID_HANDLE_VALUE;
+  DWORD len = 0;
+
+  ASSERT (prompt);
+  ASSERT (input);
+  ASSERT (capacity > 0);
 
   input[0] = '\0';
 
   in = GetStdHandle (STD_INPUT_HANDLE);
   err = GetStdHandle (STD_ERROR_HANDLE);
 
-  if (in == INVALID_HANDLE_VALUE || err == INVALID_HANDLE_VALUE)
-    return NULL;
-
-  if (WriteFile (err, prompt, strlen (prompt), &count, NULL))
+  if (in != INVALID_HANDLE_VALUE
+      && err != INVALID_HANDLE_VALUE
+      && WriteFile (err, prompt, strlen (prompt), &len, NULL))
     {
-      int istty = (GetFileType (in) == FILE_TYPE_CHAR);
-      DWORD old_flags;
-      int rc;
+      bool is_console = (GetFileType (in) == FILE_TYPE_CHAR);
+      DWORD flags_save = 0;
+      int status = 0;
 
-      if (istty)
+      if (is_console)
 	{
-	  if (GetConsoleMode (in, &old_flags))
-	    SetConsoleMode (in, ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT);
+	  if (GetConsoleMode (in, &flags_save))
+	    {
+	      DWORD flags = ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT;
+	      if (echo)
+		flags |= ENABLE_ECHO_INPUT;
+	      SetConsoleMode (in, flags);
+	    }
 	  else
-	    istty = 0;
+	    is_console = 0;
 	}
-      rc = ReadFile (in, input, sizeof (input), &count, NULL);
-      if (count >= 2 && input[count - 2] == '\r')
-	input[count - 2] = '\0';
-      else
-	{
-	  /* deplete excess input */
-	  char buf[256];
-	  while (ReadFile (in, buf, sizeof (buf), &count, NULL) > 0)
-	    if (count >= 2 && buf[count - 2] == '\r')
-	      break;
-	}
-      WriteFile (err, "\r\n", 2, &count, NULL);
-      if (istty)
-	SetConsoleMode (in, old_flags);
-      if (rc)
-	return input;
+
+      status = ReadFile (in, input, capacity, &len, NULL);
+
+      string_null_terminate (input, (int)len, capacity);
+      chomp (input);
+
+      if (!echo)
+	WriteFile (err, "\r\n", 2, &len, NULL);
+      if (is_console)
+	SetConsoleMode (in, flags_save);
+      if (status)
+	return true;
     }
 
-  return NULL;
+  return false;
+}
+
+/* get password from console */
+
+char *
+getpass (const char *prompt)
+{
+  static char line[256];
+  if (get_console_input_win32 (prompt, false, line, sizeof (line)))
+    return line;
+  else
+    return NULL;
 }
 
 #endif

@@ -123,6 +123,9 @@ main (int argc, char *argv[])
 	  /* initialize garbage collector scoped to context object */
 	  gc_init (&c.gc);
 
+	  /* initialize environmental variable store */
+	  c.es = env_set_create (&c.gc);
+
 	  /* static signal info object */
 	  c.sig = &siginfo_static;
 
@@ -130,7 +133,7 @@ main (int argc, char *argv[])
 	  init_options (&c.options);
 
 	  /* parse command line options, and read configuration file */
-	  parse_argv (&c.options, argc, argv, M_USAGE, OPT_P_DEFAULT, NULL);
+	  parse_argv (&c.options, argc, argv, M_USAGE, OPT_P_DEFAULT, NULL, c.es);
 
 	  /* init verbosity and mute levels */
 	  init_verb_mute (&c, IVM_LEVEL_1);
@@ -159,6 +162,9 @@ main (int argc, char *argv[])
 	  /* test crypto? */
 	  if (do_test_crypto (&c.options))
 	    break;
+
+	    /* set certain options as environmental variables */
+	  setenv_settings (c.es, &c.options);
 
 	  /* finish context init */
 	  context_init_1 (&c);

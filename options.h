@@ -88,9 +88,10 @@ struct options
   int persist_mode;
 
 #ifdef USE_CRYPTO
-  bool askpass;
+  const char *key_pass_file;
   bool show_ciphers;
   bool show_digests;
+  bool show_engines;
 #ifdef USE_SSL
   bool show_tls_ciphers;
 #endif
@@ -100,6 +101,7 @@ struct options
   /* Networking parms */
   const char *local;
   int local_port;
+  bool local_port_defined;
   int remote_port;
   bool remote_float;
   struct remote_list *remote_list;
@@ -175,6 +177,7 @@ struct options
   const char *writepid;
   const char *up_script;
   const char *down_script;
+  bool down_pre;
   bool up_delay;
   bool up_restart;
   bool daemon;
@@ -183,6 +186,7 @@ struct options
   int inetd;
 
   bool log;
+  bool suppress_timestamps;
   int nice;
   int verbosity;
   int mute;
@@ -190,6 +194,9 @@ struct options
 
   const char *status_file;
   int status_file_update_freq;
+
+  /* optimize TUN/TAP/UDP writes */
+  bool fast_io;
 
 #ifdef USE_LZO
   bool comp_lzo;
@@ -249,6 +256,9 @@ struct options
   in_addr_t ifconfig_pool_start;
   in_addr_t ifconfig_pool_end;
   in_addr_t ifconfig_pool_netmask;
+  const char *ifconfig_pool_persist_filename;
+  int ifconfig_pool_persist_refresh_freq;
+  bool ifconfig_pool_linear;
   int real_hash_size;
   int virtual_hash_size;
   const char *client_connect_script;
@@ -256,6 +266,7 @@ struct options
   const char *learn_address_script;
   const char *tmp_dir;
   const char *client_config_dir;
+  bool ccd_exclusive;
   int n_bcast_buf;
   int tcp_queue_limit;
   struct iroute *iroutes;
@@ -267,6 +278,12 @@ struct options
   int cf_max;
   int cf_per;
   int max_clients;
+
+  bool client_cert_not_required;
+  bool username_as_common_name;
+  const char *auth_user_pass_verify_script;
+  const char *auth_user_pass_file;
+
 #endif
 
 #ifdef USE_CRYPTO
@@ -278,7 +295,7 @@ struct options
   bool authname_defined;
   const char *authname;
   int keysize;
-  bool engine;
+  const char *engine;
   bool replay;
   bool mute_replay_warnings;
   int replay_window;
@@ -324,6 +341,8 @@ struct options
 
   /* Allow only one session */
   bool single_session;
+
+  bool tls_exit;
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
 
@@ -352,16 +371,17 @@ struct options
 #define OPT_P_SHAPER          (1<<6)
 #define OPT_P_TIMER           (1<<7)
 #define OPT_P_PERSIST         (1<<8)
-#define OPT_P_COMP            (1<<9)  /* TODO */
-#define OPT_P_MESSAGES        (1<<10)
-#define OPT_P_CRYPTO          (1<<11) /* TODO */
-#define OPT_P_TLS_PARMS       (1<<12) /* TODO */
-#define OPT_P_MTU             (1<<13) /* TODO */
-#define OPT_P_NICE            (1<<14)
-#define OPT_P_PUSH            (1<<15)
-#define OPT_P_INSTANCE        (1<<16)
-#define OPT_P_CONFIG          (1<<17)
-#define OPT_P_EXPLICIT_NOTIFY (1<<18)
+#define OPT_P_PERSIST_IP      (1<<9)
+#define OPT_P_COMP            (1<<10) /* TODO */
+#define OPT_P_MESSAGES        (1<<11)
+#define OPT_P_CRYPTO          (1<<12) /* TODO */
+#define OPT_P_TLS_PARMS       (1<<13) /* TODO */
+#define OPT_P_MTU             (1<<14) /* TODO */
+#define OPT_P_NICE            (1<<15)
+#define OPT_P_PUSH            (1<<16)
+#define OPT_P_INSTANCE        (1<<17)
+#define OPT_P_CONFIG          (1<<18)
+#define OPT_P_EXPLICIT_NOTIFY (1<<19)
 
 #define OPT_P_DEFAULT   (~OPT_P_INSTANCE)
 
@@ -390,7 +410,8 @@ void parse_argv (struct options* options,
 		 char *argv[],
 		 int msglevel,
 		 unsigned int permission_mask,
-		 unsigned int *option_types_found);
+		 unsigned int *option_types_found,
+		 struct env_set *es);
 
 void notnull (const char *arg, const char *description);
 
@@ -399,7 +420,7 @@ void usage_small (void);
 void init_options (struct options *o);
 void uninit_options (struct options *o);
 
-void setenv_settings (const struct options *o);
+void setenv_settings (struct env_set *es, const struct options *o);
 void show_settings (const struct options *o);
 
 bool string_defined_equal (const char *s1, const char *s2);
@@ -412,9 +433,10 @@ char *options_string (const struct options *o,
 		      bool remote,
 		      struct gc_arena *gc);
 
-int options_cmp_equal (char *actual, const char *expected, size_t actual_n);
-
-void options_warning (char *actual, const char *expected, size_t actual_n);
+int options_cmp_equal_safe (char *actual, const char *expected, size_t actual_n);
+void options_warning_safe (char *actual, const char *expected, size_t actual_n);
+int options_cmp_equal (char *actual, const char *expected);
+void options_warning (char *actual, const char *expected);
 
 void options_postprocess (struct options *options, bool first_time);
 
@@ -424,7 +446,8 @@ void pre_pull_restore (struct options *o);
 bool apply_push_options (struct options *options,
 			 struct buffer *buf,
 			 unsigned int permission_mask,
-			 unsigned int *option_types_found);
+			 unsigned int *option_types_found,
+			 struct env_set *es);
 
 bool is_persist_option (const struct options *o);
 bool is_stateful_restart (const struct options *o);
@@ -435,10 +458,13 @@ void options_server_import (struct options *o,
 			    const char *filename,
 			    int msglevel,
 			    unsigned int permission_mask,
-			    unsigned int *option_types_found);
+			    unsigned int *option_types_found,
+			    struct env_set *es);
 
 void pre_pull_default (struct options *o);
 
 void rol_check_alloc (struct options *options);
+
+int parse_line (char *line, char *p[], int n, const char *file, int line_num, int msglevel, struct gc_arena *gc);
 
 #endif

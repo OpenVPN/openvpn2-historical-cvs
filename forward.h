@@ -50,8 +50,6 @@
 
 #define IOW_READ            (IOW_READ_TUN|IOW_READ_LINK)
 
-void io_wait (struct context *c, const unsigned int flags);
-
 void pre_select (struct context *c);
 
 void process_io (struct context *c);
@@ -68,7 +66,7 @@ void process_incoming_tun (struct context *c);
 void process_outgoing_link (struct context *c);
 void process_outgoing_tun (struct context *c);
 
-bool send_control_channel_string (struct context *c, char *str);
+bool send_control_channel_string (struct context *c, char *str, int msglevel);
 
 #define PIPV4_PASSTOS         (1<<0)
 #define PIPV4_MSSFIX          (1<<1)

@@ -44,19 +44,11 @@ alloc_buf_debug (size_t size, const char *file, int line)
 alloc_buf (size_t size)
 #endif
 {
-  struct buffer buf;
-  buf.capacity = (int)size;
-  buf.offset = 0;
-  buf.len = 0;
 #ifdef DMALLOC
-  buf.data = (uint8_t *) openvpn_dmalloc (file, line, size);
+  return alloc_buf_gc_debug (size, NULL, file, line);
 #else
-  buf.data = (uint8_t *) malloc (size);
+  return alloc_buf_gc (size, NULL);
 #endif
-  CHECK_MALLOC_RETURN (buf.data);
-  if (size > 0)
-    *buf.data = 0;
-  return buf;
 }
 
 struct buffer
@@ -238,22 +230,33 @@ gc_malloc_debug (size_t size, bool clear, struct gc_arena *a, const char *file, 
 gc_malloc (size_t size, bool clear, struct gc_arena *a)
 #endif
 {
-  struct gc_entry *e;
   void *ret;
-
+  if (a)
+    {
+      struct gc_entry *e;
 #ifdef DMALLOC
-  e = (struct gc_entry *) openvpn_dmalloc (file, line, size + sizeof (struct gc_entry));
+      e = (struct gc_entry *) openvpn_dmalloc (file, line, size + sizeof (struct gc_entry));
 #else
-  e = (struct gc_entry *) malloc (size + sizeof (struct gc_entry));
+      e = (struct gc_entry *) malloc (size + sizeof (struct gc_entry));
 #endif
-  CHECK_MALLOC_RETURN (e);
-  ret = (char *) e + sizeof (struct gc_entry);
+      CHECK_MALLOC_RETURN (e);
+      ret = (char *) e + sizeof (struct gc_entry);
+      mutex_lock_static (L_GC_MALLOC);
+      e->next = a->list;
+      a->list = e;
+      mutex_unlock_static (L_GC_MALLOC);
+    }
+  else
+    {
+#ifdef DMALLOC
+      ret = openvpn_dmalloc (file, line, size);
+#else
+      ret = malloc (size);
+#endif
+      CHECK_MALLOC_RETURN (ret);
+    }
   if (clear)
     memset (ret, 0, size);
-  mutex_lock_static (L_GC_MALLOC);
-  e->next = a->list;
-  a->list = e;
-  mutex_unlock_static (L_GC_MALLOC);
   return ret;
 }
 
@@ -313,6 +316,28 @@ buf_rmtail (struct buffer *buf, uint8_t remove)
 }
 
 /*
+ * force a null termination even it requires
+ * truncation of the last char.
+ */
+void
+buf_null_terminate (struct buffer *buf)
+{
+  if (!buf_safe (buf, 1))
+    buf_inc_len (buf, -1);
+  buf_write_u8 (buf, 0);
+}
+
+void
+string_null_terminate (char *str, int len, int capacity)
+{
+  ASSERT (len >= 0 && len <= capacity && capacity > 0);
+  if (len < capacity)
+    *(str + len) = '\0';
+  else if (len == capacity)
+    *(str + len - 1) = '\0';
+}
+
+/*
  * Remove trailing \r and \n chars.
  */
 void
@@ -349,23 +374,11 @@ string_alloc (const char *str, struct gc_arena *gc)
       const int n = strlen (str) + 1;
       char *ret;
 
-      if (gc)
-	{
 #ifdef DMALLOC
-	  ret = (char *) gc_malloc_debug (n, false, gc, file, line);
+      ret = (char *) gc_malloc_debug (n, false, gc, file, line);
 #else
-	  ret = (char *) gc_malloc (n, false, gc);
+      ret = (char *) gc_malloc (n, false, gc);
 #endif
-	}
-      else
-	{
-#ifdef DMALLOC
-	  ret = (char *) openvpn_dmalloc (file, line, n);
-#else
-	  ret = (char *) malloc (n);
-#endif
-	  CHECK_MALLOC_RETURN (ret);
-	}
       memcpy (ret, str, n);
       return ret;
     }
@@ -427,3 +440,159 @@ buf_parse (struct buffer *buf, const int delim, char *line, const int size)
   line[size-1] = '\0';
   return !(eol && !strlen (line));
 }
+
+/*
+ * Classify and mutate strings based on character types.
+ */
+
+bool
+char_class (const char c, const unsigned int flags)
+{
+  if (!flags)
+    return false;
+  if (flags & CC_ANY)
+    return true;
+
+  if ((flags & CC_ALNUM) && isalnum (c))
+    return true;
+  if ((flags & CC_ALPHA) && isalpha (c))
+    return true;
+  if ((flags & CC_ASCII) && isascii (c))
+    return true;
+  if ((flags & CC_CNTRL) && iscntrl (c))
+    return true;
+  if ((flags & CC_DIGIT) && isdigit (c))
+    return true;
+  if ((flags & CC_PRINT) && isprint (c))
+    return true;
+  if ((flags & CC_PUNCT) && ispunct (c))
+    return true;    
+  if ((flags & CC_SPACE) && isspace (c))
+    return true;
+  if ((flags & CC_XDIGIT) && isxdigit (c))
+    return true;
+
+  if ((flags & CC_BLANK) && (c == ' ' || c == '\t'))
+    return true;
+  if ((flags & CC_NEWLINE) && c == '\n')
+    return true;
+  if ((flags & CC_CR) && c == '\r')
+    return true;
+
+  if ((flags & CC_BACKSLASH) && c == '\\')
+    return true;
+  if ((flags & CC_UNDERBAR) && c == '_')
+    return true;
+  if ((flags & CC_DASH) && c == '-')
+    return true;
+  if ((flags & CC_DOT) && c == '.')
+    return true;
+  if ((flags & CC_COMMA) && c == ',')
+    return true;
+  if ((flags & CC_COLON) && c == ':')
+    return true;
+  if ((flags & CC_SLASH) && c == '/')
+    return true;
+  if ((flags & CC_SINGLE_QUOTE) && c == '\'')
+    return true;
+  if ((flags & CC_DOUBLE_QUOTE) && c == '\"')
+    return true;
+  if ((flags & CC_REVERSE_QUOTE) && c == '`')
+    return true;
+  if ((flags & CC_AT) && c == '@')
+    return true;
+  if ((flags & CC_EQUAL) && c == '=')
+    return true;
+
+  return false;
+}
+
+static inline bool
+char_inc_exc (const char c, const unsigned int inclusive, const unsigned int exclusive)
+{
+  return char_class (c, inclusive) && !char_class (c, exclusive);
+}
+
+bool
+string_class (const char *str, const unsigned int inclusive, const unsigned int exclusive)
+{
+  char c;
+  ASSERT (str);
+  while ((c = *str++))
+    {
+      if (!char_inc_exc (c, inclusive, exclusive))
+	return false;
+    }
+  return true;
+}
+
+/*
+ * Modify string in place.
+ * Guaranteed to not increase string length.
+ */
+bool
+string_mod (char *str, const unsigned int inclusive, const unsigned int exclusive, const char replace)
+{
+  const char *in = str;
+  bool ret = true;
+
+  ASSERT (str);
+
+  while (true)
+    {
+      char c = *in++;
+      if (c)
+	{
+	  if (!char_inc_exc (c, inclusive, exclusive))
+	    {
+	      c = replace;
+	      ret = false;
+	    }
+	  if (c)
+	    *str++ = c;
+	}
+      else
+	{
+	  *str = '\0';
+	  break;
+	}
+    }
+  return ret;
+}
+
+const char *
+string_mod_const (const char *str,
+		  const unsigned int inclusive,
+		  const unsigned int exclusive,
+		  const char replace,
+		  struct gc_arena *gc)
+{
+  if (str)
+    {
+      char *buf = string_alloc (str, gc);
+      string_mod (buf, inclusive, exclusive, replace);
+      return buf;
+    }
+  else
+    return NULL;
+}
+
+#ifdef CHARACTER_CLASS_DEBUG
+
+#define CC_INCLUDE    (CC_PRINT)
+#define CC_EXCLUDE    (0)
+#define CC_REPLACE    ('.')
+
+void
+character_class_debug (void)
+{
+  char buf[256];
+
+  while (fgets (buf, sizeof (buf), stdin) != NULL)
+    {
+      string_mod (buf, CC_INCLUDE, CC_EXCLUDE, CC_REPLACE);
+      printf ("%s", buf);
+    }
+}
+
+#endif

@@ -34,6 +34,20 @@
 /* socket descriptor passed by inetd/xinetd server to us */
 #define INETD_SOCKET_DESCRIPTOR 0
 
+/*
+ * Handle environmental variable lists
+ */
+
+struct env_item {
+  char *string;
+  struct env_item *next;
+};
+
+struct env_set {
+  struct gc_arena *gc;
+  struct env_item *list;
+};
+
 /* Get/Set UID of process */
 
 struct user_state {
@@ -45,7 +59,7 @@ struct user_state {
 #endif
 };
 
-void get_user (const char *username, struct user_state *state);
+bool get_user (const char *username, struct user_state *state);
 void set_user (const struct user_state *state);
 
 /* Get/Set GID of process */
@@ -59,7 +73,7 @@ struct group_state {
 #endif
 };
 
-void get_group (const char *groupname, struct group_state *state);
+bool get_group (const char *groupname, struct group_state *state);
 void set_group (const struct group_state *state);
 
 void set_nice (int niceval);
@@ -73,10 +87,8 @@ void run_script (const char *command,
 		 const char* ifconfig_remote,
 		 const char *context,
 		 const char *signal_text,
-		 const char *script_type);
-
-/* remove non-parameter environmental vars except for signal */
-void del_env_nonparm (int n_tls_id);
+		 const char *script_type,
+		 struct env_set *es);
 
 /* workspace for get_pid_file/write_pid */
 struct pid_state {
@@ -101,8 +113,12 @@ int daemon (int nochdir, int noclose);
 /* check file protections */
 void warn_if_group_others_accessible(const char* filename);
 
+/* system flags */
+#define S_SCRIPT (1<<0)
+#define S_FATAL  (1<<1)
+
 /* wrapper around the system() call. */
-int openvpn_system (const char *command);
+int openvpn_system (const char *command, const struct env_set *es, unsigned int flags);
 
 /* interpret the status code returned by system() */
 bool system_ok(int);
@@ -111,7 +127,7 @@ const char *system_error_message (int, struct gc_arena *gc);
 
 /* run system() with error check, return true if success,
    false if error, exit if error and fatal==true */
-bool system_check (const char* command, const char* error_message, bool fatal);
+bool system_check (const char *command, const struct env_set *es, unsigned int flags, const char *error_message);
 
 #ifdef HAVE_STRERROR
 /* a thread-safe version of strerror */
@@ -132,16 +148,36 @@ void save_inetd_socket_descriptor (void);
 void init_random_seed(void);
 
 /* set/delete environmental variable */
-void setenv_str (const char *name, const char *value);
-void setenv_int (const char *name, int value);
-void setenv_del (const char *name);
+void setenv_str_ex (struct env_set *es,
+		    const char *name,
+		    const char *value,
+		    const unsigned int name_include,
+		    const unsigned int name_exclude,
+		    const char name_replace,
+		    const unsigned int value_include,
+		    const unsigned int value_exclude,
+		    const char value_replace);
+
+void setenv_int (struct env_set *es, const char *name, int value);
+void setenv_str (struct env_set *es, const char *name, const char *value);
+void setenv_del (struct env_set *es, const char *name);
+
+/* struct env_set functions */
+
+struct env_set *env_set_create (struct gc_arena *gc);
+bool env_set_del (struct env_set *es, const char *str);
+void env_set_add (struct env_set *es, const char *str);
+
+void env_set_print (int msglevel, const struct env_set *es);
+
+void env_set_inherit (struct env_set *es, const struct env_set *src);
+
+void env_set_add_to_environment (const struct env_set *es);
+void env_set_remove_from_environment (const struct env_set *es);
 
 /* convert netmasks for iproute2 */
 int count_netmask_bits(const char *);
 unsigned int count_bits(unsigned int );
-
-/* make cp safe to be passed to system() or set as an environmental variable */
-void safe_string (char *cp);
 
 /* go to sleep for n milliseconds */
 void sleep_milliseconds (unsigned int n);
@@ -167,5 +203,34 @@ bool delete_file (const char *filename);
 
 /* return the next largest power of 2 */
 unsigned int adjust_power_of_2 (unsigned int u);
+
+/*
+ * Get and store a username/password
+ */
+
+struct user_pass
+{
+  bool defined;
+
+/* max length of username/password */
+# define USER_PASS_LEN 128
+  char username[USER_PASS_LEN];
+  char password[USER_PASS_LEN];
+};
+
+bool get_console_input (const char *prompt, const bool echo, char *input, const int capacity);
+
+void get_user_pass (struct user_pass *up,
+		    const char *auth_file,
+		    const bool password_only,
+		    const char *prefix);
+
+
+/*
+ * Process string received by untrusted peer before
+ * printing to console or log file.
+ * Assumes that string has been null terminated.
+ */
+const char *safe_print (const char *str, struct gc_arena *gc);
 
 #endif

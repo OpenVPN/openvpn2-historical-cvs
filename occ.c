@@ -340,13 +340,13 @@ process_received_occ_msg (struct context *c)
       msg (D_PACKET_CONTENT, "RECEIVED OCC_REPLY");
       if (c->options.occ && !TLS_MODE && c->c2.options_string_remote)
 	{
-	  if (!options_cmp_equal (BPTR (&c->c2.buf),
-				  c->c2.options_string_remote,
-				  c->c2.buf.len))
+	  if (!options_cmp_equal_safe (BPTR (&c->c2.buf),
+				       c->c2.options_string_remote,
+				       c->c2.buf.len))
 	    {
-	      options_warning (BPTR (&c->c2.buf),
-			       c->c2.options_string_remote,
-			       c->c2.buf.len);
+	      options_warning_safe (BPTR (&c->c2.buf),
+				    c->c2.options_string_remote,
+				    c->c2.buf.len);
 	    }
 	}
       event_timeout_clear (&c->c2.occ_interval);

@@ -281,7 +281,7 @@ bool check_key (struct key *key, const struct key_type *kt);
 
 void fixup_key (struct key *key, const struct key_type *kt);
 
-void write_key (const struct key *key, const struct key_type *kt,
+bool write_key (const struct key *key, const struct key_type *kt,
 		struct buffer *buf);
 
 int read_key (struct key *key, const struct key_type *kt, struct buffer *buf);
@@ -330,7 +330,9 @@ void show_available_ciphers (void);
 
 void show_available_digests (void);
 
-void init_crypto_lib_engine (void);
+void show_available_engines (void);
+
+void init_crypto_lib_engine (const char *engine_name);
 
 void init_crypto_lib (void);
 

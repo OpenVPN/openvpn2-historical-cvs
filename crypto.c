@@ -1330,16 +1330,23 @@ verify_fix_key2 (struct key2 *key2, const struct key_type *kt, const char *share
 }
 
 /* given a key and key_type, write key to buffer */
-void
+bool
 write_key (const struct key *key, const struct key_type *kt,
 	   struct buffer *buf)
 {
   ASSERT (kt->cipher_length <= MAX_CIPHER_KEY_LENGTH
 	  && kt->hmac_length <= MAX_HMAC_KEY_LENGTH);
-  ASSERT (buf_write (buf, &kt->cipher_length, 1));
-  ASSERT (buf_write (buf, &kt->hmac_length, 1));
-  ASSERT (buf_write (buf, key->cipher, kt->cipher_length));
-  ASSERT (buf_write (buf, key->hmac, kt->hmac_length));
+
+  if (!buf_write (buf, &kt->cipher_length, 1))
+    return false;
+  if (!buf_write (buf, &kt->hmac_length, 1))
+    return false;
+  if (!buf_write (buf, key->cipher, kt->cipher_length))
+    return false;
+  if (!buf_write (buf, key->hmac, kt->hmac_length))
+    return false;
+
+  return true;
 }
 
 /*
@@ -1437,21 +1444,100 @@ show_available_digests ()
   printf ("\n");
 }
 
+void
+show_available_engines ()
+{
+#if CRYPTO_ENGINE
+  ENGINE *e;
+
+  printf ("OpenSSL Crypto Engines\n\n");
+
+  ENGINE_load_builtin_engines ();
+
+  e = ENGINE_get_first ();
+  while (e)
+    {
+      printf ("%s [%s]\n",
+	      ENGINE_get_name (e),
+	      ENGINE_get_id (e));
+      e = ENGINE_get_next (e);
+    }
+  ENGINE_cleanup ();
+#else
+  printf ("Sorry, OpenSSL hardware crypto engine functionality is not available.\n");
+#endif
+}
+
 /*
  * Enable crypto acceleration, if available
  */
 
 static bool engine_initialized = false; /* GLOBAL */
 
-void init_crypto_lib_engine ()
+#if CRYPTO_ENGINE
+
+static ENGINE *engine_persist = NULL;   /* GLOBAL */
+
+/* Try to load an engine in a shareable library */
+static ENGINE *
+try_load_engine (const char *engine)
+{
+  ENGINE *e = ENGINE_by_id ("dynamic");
+  if (e)
+    {
+      if (!ENGINE_ctrl_cmd_string (e, "SO_PATH", engine, 0)
+	  || !ENGINE_ctrl_cmd_string (e, "LOAD", NULL, 0))
+	{
+	  ENGINE_free (e);
+	  e = NULL;
+	}
+    }
+  return e;
+}
+
+static ENGINE *
+setup_engine (const char *engine)
+{
+  ENGINE *e = NULL;
+
+  ENGINE_load_builtin_engines ();
+
+  if (engine)
+    {
+      if (strcmp (engine, "auto") == 0)
+	{
+	  msg (M_INFO, "Initializing OpenSSL auto engine support");
+	  ENGINE_register_all_complete ();
+	  return NULL;
+	}
+      if ((e = ENGINE_by_id (engine)) == NULL
+	 && (e = try_load_engine (engine)) == NULL)
+	{
+	  msg (M_FATAL, "OpenSSL error: cannot load engine '%s'", engine);
+	}
+
+      if (!ENGINE_set_default (e, ENGINE_METHOD_ALL))
+	{
+	  msg (M_FATAL, "OpenSSL error: ENGINE_set_default failed on engine '%s'",
+	       engine);
+	}
+
+      msg (M_INFO, "Initializing OpenSSL support for engine '%s'",
+	   ENGINE_get_id (e));
+    }
+  return e;
+}
+#endif
+
+void
+init_crypto_lib_engine (const char *engine_name)
 {
   if (!engine_initialized)
     {
 #if CRYPTO_ENGINE
-      /* Init available hardware crypto engines. */
-      msg (M_INFO, "Initializing OpenSSL hardware crypto engine functionality");
-      ENGINE_load_builtin_engines ();
-      ENGINE_register_all_complete ();
+      ASSERT (engine_name);
+      ASSERT (!engine_persist);
+      engine_persist = setup_engine (engine_name);
 #else
       msg (M_WARN, "Note: OpenSSL hardware crypto engine functionality is not available");
 #endif
@@ -1473,6 +1559,7 @@ void uninit_crypto_lib ()
   if (engine_initialized)
     {
       ENGINE_cleanup ();
+      engine_persist = NULL;
       engine_initialized = false;
     }
 #endif

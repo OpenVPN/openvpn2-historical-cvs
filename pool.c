@@ -202,6 +202,212 @@ ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand)
   return ret;
 }
 
+/*
+ * private access functions
+ */
+
+static ifconfig_pool_handle
+ifconfig_pool_ip_base_to_handle (const struct ifconfig_pool* pool, const in_addr_t addr)
+{
+  ifconfig_pool_handle ret = -1;
+
+  switch (pool->type)
+    {
+    case IFCONFIG_POOL_30NET:
+      {
+	ret = (addr - pool->base) >> 2;
+	break;
+      }
+    case IFCONFIG_POOL_INDIV:
+      {
+	ret = (addr - pool->base);
+	break;
+      }
+    default:
+      ASSERT (0);
+    }
+
+  if (ret < 0 || ret >= pool->size)
+    ret = -1;
+
+  return ret;
+}
+
+static in_addr_t
+ifconfig_pool_handle_to_ip_base (const struct ifconfig_pool* pool, ifconfig_pool_handle hand)
+{
+  in_addr_t ret = 0;
+
+  if (hand >= 0 && hand < pool->size)
+    {
+      switch (pool->type)
+	{
+	case IFCONFIG_POOL_30NET:
+	  {
+	    ret = pool->base + (hand << 2);;
+	    break;
+	  }
+	case IFCONFIG_POOL_INDIV:
+	  {
+	    ret = pool->base + hand;
+	    break;
+	  }
+	default:
+	  ASSERT (0);
+	}
+    }
+
+  return ret;
+}
+
+static void
+ifconfig_pool_set (struct ifconfig_pool* pool, const char *cn, const in_addr_t addr)
+{
+  ifconfig_pool_handle h = ifconfig_pool_ip_base_to_handle (pool, addr);
+  if (h >= 0)
+    {
+      struct ifconfig_pool_entry *e = &pool->list[h];
+      ifconfig_pool_entry_free (e, true);
+      e->in_use = false;
+      e->common_name = string_alloc (cn, NULL);
+      e->last_release = now;
+    }
+}
+
+static void
+ifconfig_pool_list (const struct ifconfig_pool* pool, struct status_output *out)
+{
+  if (pool && out)
+    {
+      struct gc_arena gc = gc_new ();
+      int i;
+
+      for (i = 0; i < pool->size; ++i)
+	{
+	  const struct ifconfig_pool_entry *e = &pool->list[i];
+	  if (e->common_name)
+	    {
+	      const in_addr_t ip = ifconfig_pool_handle_to_ip_base (pool, i);
+	      status_printf (out, "%s,%s",
+			     e->common_name,
+			     print_in_addr_t (ip, 0, &gc));
+	    }
+	}
+      gc_free (&gc);
+    }
+}
+
+static void
+ifconfig_pool_msg (const struct ifconfig_pool* pool, int msglevel)
+{
+  struct status_output *so = status_open (NULL, 0, msglevel, 0);
+  ASSERT (so);
+  status_printf (so, "IFCONFIG POOL LIST");
+  ifconfig_pool_list (pool, so);
+  status_close (so);
+}
+
+/*
+ * Deal with reading/writing the ifconfig pool database to a file
+ */
+
+struct ifconfig_pool_persist *
+ifconfig_pool_persist_init (const char *filename, int refresh_freq)
+{
+  struct ifconfig_pool_persist *ret;
+
+  ASSERT (filename);
+
+  ALLOC_OBJ_CLEAR (ret, struct ifconfig_pool_persist);
+  if (refresh_freq > 0)
+    ret->file = status_open (filename, refresh_freq, -1, STATUS_OUTPUT_READ|STATUS_OUTPUT_WRITE);
+  else
+    ret->file = status_open (filename, 0, -1, STATUS_OUTPUT_READ);
+  return ret;
+}
+
+void
+ifconfig_pool_persist_close (struct ifconfig_pool_persist *persist)
+{
+  if (persist)
+    {
+      if (persist->file)
+	status_close (persist->file);
+      free (persist);
+    }
+}
+
+bool
+ifconfig_pool_write_trigger (struct ifconfig_pool_persist *persist)
+{
+  if (persist->file)
+    return status_trigger (persist->file);
+  else
+    return false;
+}
+
+void
+ifconfig_pool_read (struct ifconfig_pool_persist *persist, struct ifconfig_pool *pool)
+{
+  const int buf_size = 128;
+
+  update_time ();
+  if (persist && persist->file && pool)
+    {
+      struct gc_arena gc = gc_new ();
+      struct buffer in = alloc_buf_gc (256, &gc);
+      char *cn_buf;
+      char *ip_buf;
+      int line = 0;
+
+      ALLOC_ARRAY_CLEAR_GC (cn_buf, char, buf_size, &gc);
+      ALLOC_ARRAY_CLEAR_GC (ip_buf, char, buf_size, &gc);
+
+      while (true)
+	{
+	  ASSERT (buf_init (&in, 0));
+	  if (!status_read (persist->file, &in))
+	    break;
+	  ++line;
+	  if (BLEN (&in))
+	    {
+	      int c = *BSTR(&in);
+	      if (c == '#' || c == ';')
+		continue;
+	      if (buf_parse (&in, ',', cn_buf, buf_size)
+		  && buf_parse (&in, ',', ip_buf, buf_size))
+		{
+		  bool succeeded;
+		  const in_addr_t addr = getaddr (GETADDR_HOST_ORDER, ip_buf, 0, &succeeded, NULL);
+		  if (succeeded)
+		    {
+		      ifconfig_pool_set (pool, cn_buf, addr);
+		    }
+		}
+	    }
+	}
+
+      ifconfig_pool_msg (pool, D_IFCONFIG_POOL);
+  
+      gc_free (&gc);
+    }
+}
+
+void
+ifconfig_pool_write (struct ifconfig_pool_persist *persist, const struct ifconfig_pool *pool)
+{
+  if (persist && persist->file && (status_rw_flags (persist->file) & STATUS_OUTPUT_WRITE) && pool)
+    {
+      status_reset (persist->file);
+      ifconfig_pool_list (pool, persist->file);
+      status_flush (persist->file);
+    }
+}
+
+/*
+ * TESTING ONLY
+ */
+
 #ifdef IFCONFIG_POOL_TEST
 
 #define DUP_CN

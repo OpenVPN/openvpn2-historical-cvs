@@ -52,6 +52,8 @@
  * of output.
  */
 
+#define M_VERB0              LOGLEV(0, 0, 0)         /* Messages displayed even at --verb 0 (fatal errors only) */
+
 #define M_INFO               LOGLEV(1, 0, 0)         /* default informational messages */
 
 #define D_LINK_ERRORS        LOGLEV(1, 1, M_NONFATAL)   /* show link errors from main event loop */
@@ -59,14 +61,14 @@
 #define D_TLS_ERRORS         LOGLEV(1, 3, M_NONFATAL)   /* show TLS control channel errors */
 #define D_RESOLVE_ERRORS     LOGLEV(1, 4, M_NONFATAL)   /* show hostname resolve errors */
 #define D_COMP_ERRORS        LOGLEV(1, 5, M_NONFATAL)   /* show compression errors */
-#define D_PID_PERSIST        LOGLEV(1, 6, M_NONFATAL)   /* show packet_id persist errors */
-#define D_FRAG_ERRORS        LOGLEV(1, 7, M_NONFATAL)   /* show fragmentation errors */
-#define D_STREAM_ERRORS      LOGLEV(1, 8, M_NONFATAL)   /* TCP stream error requiring restart */
-#define D_MULTI_ERRORS       LOGLEV(1, 9, M_NONFATAL)   /* show multi-client server errors */
-#define D_PUSH_ERRORS        LOGLEV(1, 10, M_NONFATAL)  /* show push/pull errors */
-#define D_IMPORT_ERRORS      LOGLEV(1, 11, M_NONFATAL)  /* show server import option errors */
-#define D_EVENT_ERRORS       LOGLEV(1, 12, M_NONFATAL)  /* show event.[ch] errors */
-#define D_REPLAY_ERRORS      LOGLEV(1, 13, M_NONFATAL)  /* show packet replay errors */
+#define D_REPLAY_ERRORS      LOGLEV(1, 6, M_NONFATAL)   /* show packet replay errors */
+#define D_STREAM_ERRORS      LOGLEV(1, 7, M_NONFATAL)    /* TCP stream error requiring restart */
+#define D_IMPORT_ERRORS      LOGLEV(1, 8, M_NONFATAL)    /* show server import option errors */
+#define D_MULTI_ERRORS       LOGLEV(1, 9, M_NONFATAL)    /* show multi-client server errors */
+#define D_EVENT_ERRORS       LOGLEV(1, 10, M_NONFATAL)   /* show event.[ch] errors */
+#define D_PUSH_ERRORS        LOGLEV(1, 11, M_NONFATAL)   /* show push/pull errors */
+#define D_PID_PERSIST        LOGLEV(1, 12, M_NONFATAL)   /* show packet_id persist errors */
+#define D_FRAG_ERRORS        LOGLEV(1, 13, M_NONFATAL)   /* show fragmentation errors */
 
 #define D_HANDSHAKE          LOGLEV(2, 20, 0)        /* show data & control channel handshakes */
 #define D_MTU_INFO           LOGLEV(2, 21, 0)        /* show terse MTU info */
@@ -77,20 +79,21 @@
 #define D_TLS_DEBUG_LOW      LOGLEV(3, 20, 0)        /* low frequency info from tls_session routines */
 #define D_GREMLIN            LOGLEV(3, 30, 0)        /* show simulated outage info from gremlin module */
 #define D_GENKEY             LOGLEV(3, 31, 0)        /* print message after key generation */
-#define D_ROUTE              LOGLEV(3, 32, 0)        /* show routes added and deleted */
-#define D_TUNTAP_INFO        LOGLEV(3, 33, 0)        /* show debugging info from TUN/TAP driver */
-#define D_RESTART            LOGLEV(3, 34, 0)        /* show certain restart messages */
-#define D_PUSH               LOGLEV(3, 35, 0)        /* show push/pull info */
-#define D_IFCONFIG_POOL      LOGLEV(3, 36, 0)        /* show ifconfig pool info */
-#define D_MULTI_LOW          LOGLEV(3, 37, 0)        /* show point-to-multipoint low-freq debug info */
-#define D_BACKTRACK          LOGLEV(3, 38, 0)        /* show replay backtracks */
+#define D_ROUTE              LOGLEV(3, 0,  0)        /* show routes added and deleted (don't mute) */
+#define D_TUNTAP_INFO        LOGLEV(3, 32, 0)        /* show debugging info from TUN/TAP driver */
+#define D_RESTART            LOGLEV(3, 33, 0)        /* show certain restart messages */
+#define D_PUSH               LOGLEV(3, 34, 0)        /* show push/pull info */
+#define D_IFCONFIG_POOL      LOGLEV(3, 35, 0)        /* show ifconfig pool info */
+#define D_MULTI_LOW          LOGLEV(3, 36, 0)        /* show point-to-multipoint low-freq debug info */
+#define D_BACKTRACK          LOGLEV(3, 37, 0)        /* show replay backtracks */
+#define D_AUTH               LOGLEV(3, 38, 0)        /* show user/pass auth info */
 
-#define D_SHOW_PARMS         LOGLEV(4, 41, 0)        /* show all parameters on program initiation */
-#define D_SHOW_OCC           LOGLEV(4, 42, 0)        /* show options compatibility string */
-#define D_LOW                LOGLEV(4, 44, 0)        /* miscellaneous low-frequency debug info */
-#define D_DHCP_OPT           LOGLEV(4, 45, 0)        /* show DHCP options binary string */
-#define D_OSBUF              LOGLEV(4, 46, 0)        /* show socket/tun/tap buffer sizes */
-#define D_MBUF               LOGLEV(4, 47, 0)        /* mbuf.[ch] routines */
+#define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
+#define D_SHOW_OCC           LOGLEV(4, 41, 0)        /* show options compatibility string */
+#define D_LOW                LOGLEV(4, 42, 0)        /* miscellaneous low-frequency debug info */
+#define D_DHCP_OPT           LOGLEV(4, 43, 0)        /* show DHCP options binary string */
+#define D_OSBUF              LOGLEV(4, 44, 0)        /* show socket/tun/tap buffer sizes */
+#define D_MBUF               LOGLEV(4, 45, 0)        /* mbuf.[ch] routines */
 
 #define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 
@@ -114,6 +117,7 @@
 #define D_TLS_STATE_ERRORS   LOGLEV(7, 70, M_DEBUG)  /* no TLS state for client */
 #define D_SEMAPHORE_LOW      LOGLEV(7, 70, M_DEBUG)  /* show Win32 semaphore waits (low freq) */
 #define D_SEMAPHORE          LOGLEV(7, 70, M_DEBUG)  /* show Win32 semaphore waits */
+#define D_TEST_FILE          LOGLEV(7, 70, M_DEBUG)  /* show test_file() calls */
 
 #define D_HANDSHAKE_VERBOSE  LOGLEV(8, 70, M_DEBUG)  /* show detailed description of each handshake */
 #define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* limited info from tls_session routines */
@@ -142,5 +146,6 @@
 
 #define D_REGISTRY           LOGLEV(11, 70, M_DEBUG) /* win32 registry debugging info */
 #define D_OPENSSL_LOCK       LOGLEV(11, 70, M_DEBUG) /* show OpenSSL locks */
+
 
 #endif

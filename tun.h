@@ -37,6 +37,7 @@
 #include "win32.h"
 #include "event.h"
 #include "proto.h"
+#include "misc.h"
 
 #ifdef WIN32
 
@@ -89,6 +90,7 @@ struct tuntap_options {
   int nbdd_len;
 
   bool dhcp_renew;
+  bool dhcp_pre_release;
   bool dhcp_release;
 };
 
@@ -203,7 +205,8 @@ struct tuntap *init_tun (const char *dev,       /* --dev option */
 			 const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
 			 in_addr_t local_public,
 			 in_addr_t remote_public,
-			 const bool strict_warn);
+			 const bool strict_warn,
+			 struct env_set *es);
 
 void init_tun_post (struct tuntap *tt,
 		    const struct frame *frame,
@@ -211,7 +214,8 @@ void init_tun_post (struct tuntap *tt,
 
 void do_ifconfig (struct tuntap *tt,
 		  const char *actual,    /* actual device name */
-		  int tun_mtu);
+		  int tun_mtu,
+		  const struct env_set *es);
 
 const char *dev_component_in_dev_node (const char *dev_node);
 
@@ -238,7 +242,8 @@ tun_adjust_frame_parameters (struct frame* frame, int size)
 
 #define IFCONFIG_BEFORE_TUN_OPEN 0
 #define IFCONFIG_AFTER_TUN_OPEN  1
-#define IFCONFIG_DEFAULT         1
+
+#define IFCONFIG_DEFAULT         IFCONFIG_AFTER_TUN_OPEN
 
 static inline int
 ifconfig_order(void)
@@ -285,6 +290,13 @@ const char *get_device_guid (const char *name,
 			     char *actual_name,
 			     int actual_name_size,
 			     struct gc_arena *gc);
+
+const char *get_unspecified_device_guid (const int device_number,
+					 char *actual_name,
+					 int actual_name_size,
+					 const struct tap_reg *tap_reg_src,
+					 const struct panel_reg *panel_reg_src,
+					 struct gc_arena *gc);
 
 void verify_255_255_255_252 (in_addr_t local, in_addr_t remote);
 

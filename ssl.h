@@ -44,7 +44,7 @@
 #include "thread.h"
 
 /*
- * Openvpn Protocol.
+ * OpenVPN TLS-over-UDP Protocol.
  *
  * TCP/UDP Packet:
  *   packet length (16 bits, unsigned) -- TCP only, always sent as plaintext
@@ -76,6 +76,11 @@
  *   key_source structure (pre_master only defined for client -> server)
  *   options_string_length, including null (2 bytes)
  *   options string (n bytes, null terminated, client/server options string must match)
+ *   [The username/password data below is optional, record can end at this point]
+ *   username_string_length, including null (2 bytes)
+ *   username string (n bytes, null terminated)
+ *   password_string_length, including null (2 bytes)
+ *   password string (n bytes, null terminated)
  *
  * P_DATA Payload:
  *   hmac of ciphertext IV + ciphertext (if enabled by --auth)
@@ -175,6 +180,12 @@
 /* Maximum length of common name */
 #define TLS_CN_LEN 64
 
+/* Legal characters in a common name */
+#define COMMON_NAME_CHAR_CLASS (CC_ALNUM|CC_UNDERBAR|CC_DASH|CC_DOT|CC_AT)
+
+/* Maximum length of OCC options string passed as part of auth handshake */
+#define TLS_OPTIONS_LEN 512
+
 /*
  * Range of key exchange methods
  */
@@ -183,9 +194,6 @@
 
 /* key method taken from lower 4 bits */
 #define KEY_METHOD_MASK 0x0F
-
-/* high 4 bits in key_method uint8_t is used for flags */
-#define TLS_PASS_CONFIG_INFO 0x10
 
 /*
  * Measure success rate of TLS handshakes, for debugging only
@@ -253,6 +261,11 @@ struct key_state
 
   int n_bytes;			 /* how many bytes sent/recvd since last key exchange */
   int n_packets;		 /* how many packets sent/recvd since last key exchange */
+
+  /*
+   * If bad username/password, TLS connection will come up but 'authenticated' will be false.
+   */
+  bool authenticated;
 };
 
 /*
@@ -309,6 +322,17 @@ struct tls_options
 
   /* frame parameters for TLS control channel */
   struct frame frame;
+
+  /* used for username/password authentication */
+  const char *auth_user_pass_verify_script;
+  const struct user_pass *auth_user_pass;
+  bool username_as_common_name;
+
+  /* use the client-config-dir as a positive authenticator */
+  const char *client_config_dir_exclusive;
+
+  /* instance-wide environment variable set */
+  struct env_set *es;
 };
 
 /* index into tls_session.key */
@@ -414,6 +438,11 @@ struct tls_multi
   int n_errors;
 
   /*
+   * Our locked common name (cannot change during the life of this tls_multi object)
+   */
+  char *locked_cn;
+
+  /*
    * Our session objects.
    */
   struct tls_session session[TM_SIZE];
@@ -434,12 +463,14 @@ void init_ssl_lib (void);
 void free_ssl_lib (void);
 
 /* Build master SSL_CTX object that serves for the whole of openvpn instantiation */
-SSL_CTX *init_ssl (bool server,
+SSL_CTX *init_ssl (const bool server,
 		   const char *ca_file,
 		   const char *dh_file,
 		   const char *cert_file,
 		   const char *pkcs12_file,
-		   const char *priv_key_file, const char *cipher_list);
+		   const char *priv_key_file,
+		   const char *cipher_list,
+		   const bool require_peer_cert);
 
 struct tls_multi *tls_multi_init (struct tls_options *tls_options);
 
@@ -481,13 +512,13 @@ void tls_post_encrypt (struct tls_multi *multi, struct buffer *buf);
 void show_available_tls_ciphers (void);
 void get_highest_preference_tls_cipher (char *buf, int size);
 
+void pem_password_setup (const char *auth_file);
 int pem_password_callback (char *buf, int size, int rwflag, void *u);
+const struct user_pass *get_auth_user_pass (const char *auth_file);
 
 void tls_set_verify_command (const char *cmd);
 void tls_set_crl_verify (const char *crl);
 void tls_set_verify_x509name (const char *x509name);
-int get_max_tls_verify_id (struct tls_multi* multi);
-const char *tls_common_name (struct tls_multi* multi, bool null);
 
 void tls_adjust_frame_parameters(struct frame *frame);
 
@@ -496,6 +527,13 @@ bool tls_send_payload (struct tls_multi *multi,
 
 bool tls_rec_payload (struct tls_multi *multi,
 		      struct buffer *buf);
+
+const char *tls_common_name (struct tls_multi* multi, bool null);
+void tls_set_common_name (struct tls_multi *multi, const char *common_name);
+void tls_lock_common_name (struct tls_multi *multi);
+
+bool tls_authenticated (struct tls_multi *multi);
+void tls_deauthenticate (struct tls_multi *multi);
 
 /*
  * inline functions

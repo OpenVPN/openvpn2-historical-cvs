@@ -60,7 +60,10 @@ void pre_setup (const struct options *options);
 
 void init_instance (struct context *c, unsigned int flags);
 
-void do_route (const struct options *options, struct route_list *route_list, const struct tuntap *tt);
+void do_route (const struct options *options,
+	       struct route_list *route_list,
+	       const struct tuntap *tt,
+	       struct env_set *es);
 
 void close_instance (struct context *c);
 

@@ -43,8 +43,8 @@
 
 #include "memdbg.h"
 
-static void add_route (struct route *r, const struct tuntap *tt, unsigned int flags);
-static void delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags);
+static void add_route (struct route *r, const struct tuntap *tt, unsigned int flags, const struct env_set *es);
+static void delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags, const struct env_set *es);
 static bool get_default_gateway (in_addr_t *ret);
 
 struct route_option_list *
@@ -88,15 +88,15 @@ is_route_parm_defined (const char *parm)
 }
 
 static void
-setenv_route_addr (const char *key, const in_addr_t addr, int i)
+setenv_route_addr (struct env_set *es, const char *key, const in_addr_t addr, int i)
 {
   struct gc_arena gc = gc_new ();
-  char name[128];
+  struct buffer name = alloc_buf_gc (256, &gc);
   if (i >= 0)
-    openvpn_snprintf (name, sizeof (name), "route_%s_%d", key, i);
+    buf_printf (&name, "route_%s_%d", key, i);
   else
-    openvpn_snprintf (name, sizeof (name), "route_%s", key);
-  setenv_str (name, print_in_addr_t (addr, 0, &gc));
+    buf_printf (&name, "route_%s", key);
+  setenv_str (es, BSTR (&name), print_in_addr_t (addr, 0, &gc));
   gc_free (&gc);
 }
 
@@ -284,9 +284,9 @@ bool
 init_route_list (struct route_list *rl,
 		 const struct route_option_list *opt,
 		 const char *remote_endpoint,
-		 in_addr_t remote_host)
+		 in_addr_t remote_host,
+		 struct env_set *es)
 {
-  int i;
   bool ret = true;
 
   clear_route_list (rl);
@@ -300,7 +300,7 @@ init_route_list (struct route_list *rl,
   rl->spec.net_gateway_defined = get_default_gateway (&rl->spec.net_gateway);
   if (rl->spec.net_gateway_defined)
     {
-      setenv_route_addr ("net_gateway", rl->spec.net_gateway, -1);
+      setenv_route_addr (es, "net_gateway", rl->spec.net_gateway, -1);
     }
   rl->redirect_default_gateway = opt->redirect_default_gateway;
   rl->redirect_local = opt->redirect_local;
@@ -319,7 +319,7 @@ init_route_list (struct route_list *rl,
 
       if (rl->spec.remote_endpoint_defined)
 	{
-	  setenv_route_addr ("vpn_gateway", rl->spec.remote_endpoint, -1);
+	  setenv_route_addr (es, "vpn_gateway", rl->spec.remote_endpoint, -1);
 	}
       else
 	{
@@ -333,15 +333,21 @@ init_route_list (struct route_list *rl,
 
   ASSERT (opt->n >= 0 && opt->n < MAX_ROUTES);
 
-  for (i = 0; i < opt->n; ++i)
-    {
-      if (!init_route (&rl->routes[i],
-		       &opt->routes[i],
-		       &rl->spec))
-	ret = false;
-    }
+  /* parse the routes from opt to rl */
+  {
+    int i, j = 0;
+    for (i = 0; i < opt->n; ++i)
+      {
+	if (!init_route (&rl->routes[j],
+			 &opt->routes[i],
+			 &rl->spec))
+	  ret = false;
+	else
+	  ++j;
+      }
+    rl->n = j;
+  }
 
-  rl->n = i;
   return ret;
 }
 
@@ -350,7 +356,8 @@ add_route3 (in_addr_t network,
 	    in_addr_t netmask,
 	    in_addr_t gateway,
 	    const struct tuntap *tt,
-	    unsigned int flags)
+	    unsigned int flags,
+	    const struct env_set *es)
 {
   struct route r;
   CLEAR (r);
@@ -358,7 +365,7 @@ add_route3 (in_addr_t network,
   r.network = network;
   r.netmask = netmask;
   r.gateway = gateway;
-  add_route (&r, tt, flags);
+  add_route (&r, tt, flags, es);
 }
 
 static void
@@ -366,7 +373,8 @@ del_route3 (in_addr_t network,
 	    in_addr_t netmask,
 	    in_addr_t gateway,
 	    const struct tuntap *tt,
-	    unsigned int flags)
+	    unsigned int flags,
+	    const struct env_set *es)
 {
   struct route r;
   CLEAR (r);
@@ -374,11 +382,11 @@ del_route3 (in_addr_t network,
   r.network = network;
   r.netmask = netmask;
   r.gateway = gateway;
-  delete_route (&r, tt, flags);
+  delete_route (&r, tt, flags, es);
 }
 
 static void
-redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, unsigned int flags)
+redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, unsigned int flags, const struct env_set *es)
 {
   const char err[] = "NOTE: unable to redirect default gateway --";
 
@@ -404,7 +412,8 @@ redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, u
 			~0,
 			rl->spec.net_gateway,
 			tt,
-			flags);
+			flags,
+			es);
 
 	  if (rl->redirect_def1)
 	    {
@@ -413,14 +422,16 @@ redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, u
 			  0x80000000,
 			  rl->spec.remote_endpoint,
 			  tt,
-			  flags);
+			  flags,
+			  es);
 
 	      /* add new default route (2nd component) */
 	      add_route3 (0x80000000,
 			  0x80000000,
 			  rl->spec.remote_endpoint,
 			  tt,
-			  flags);
+			  flags,
+			  es);
 	    }
 	  else
 	    {
@@ -429,14 +440,16 @@ redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, u
 			  0,
 			  rl->spec.net_gateway,
 			  tt,
-			  flags);
+			  flags,
+			  es);
 
 	      /* add new default route */
 	      add_route3 (0,
 			  0,
 			  rl->spec.remote_endpoint,
 			  tt,
-			  flags);
+			  flags,
+			  es);
 	    }
 
 	  /* set a flag so we can undo later */
@@ -446,7 +459,7 @@ redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, u
 }
 
 static void
-undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, unsigned int flags)
+undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, unsigned int flags, const struct env_set *es)
 {
   if (rl->did_redirect_default_gateway)
     {
@@ -456,7 +469,8 @@ undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *
 		    ~0,
 		    rl->spec.net_gateway,
 		    tt,
-		    flags);
+		    flags,
+		    es);
 
       if (rl->redirect_def1)
 	{
@@ -465,14 +479,16 @@ undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *
 		      0x80000000,
 		      rl->spec.remote_endpoint,
 		      tt,
-		      flags);
+		      flags,
+		      es);
 
 	  /* delete default route (2nd component) */
 	  del_route3 (0x80000000,
 		      0x80000000,
 		      rl->spec.remote_endpoint,
 		      tt,
-		      flags);
+		      flags,
+		      es);
 	}
       else
 	{
@@ -481,14 +497,16 @@ undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *
 		      0,
 		      rl->spec.remote_endpoint,
 		      tt,
-		      flags);
+		      flags,
+		      es);
 
 	  /* restore original default route */
 	  add_route3 (0,
 		      0,
 		      rl->spec.net_gateway,
 		      tt,
-		      flags);
+		      flags,
+		      es);
 	}
 
       rl->did_redirect_default_gateway = false;
@@ -496,24 +514,24 @@ undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *
 }
 
 void
-add_routes (struct route_list *rl, const struct tuntap *tt, unsigned int flags)
+add_routes (struct route_list *rl, const struct tuntap *tt, unsigned int flags, const struct env_set *es)
 {
-  redirect_default_route_to_vpn (rl, tt, flags);
+  redirect_default_route_to_vpn (rl, tt, flags, es);
   if (!rl->routes_added)
     {
       int i;
       for (i = 0; i < rl->n; ++i)
 	{
 	  if (flags & ROUTE_DELETE_FIRST)
-	    delete_route (&rl->routes[i], tt, flags);
-	  add_route (&rl->routes[i], tt, flags);
+	    delete_route (&rl->routes[i], tt, flags, es);
+	  add_route (&rl->routes[i], tt, flags, es);
 	}
       rl->routes_added = true;
     }
 }
 
 void
-delete_routes (struct route_list *rl, const struct tuntap *tt, unsigned int flags)
+delete_routes (struct route_list *rl, const struct tuntap *tt, unsigned int flags, const struct env_set *es)
 {
   if (rl->routes_added)
     {
@@ -521,11 +539,13 @@ delete_routes (struct route_list *rl, const struct tuntap *tt, unsigned int flag
       for (i = rl->n - 1; i >= 0; --i)
 	{
 	  const struct route *r = &rl->routes[i];
-	  delete_route (r, tt, flags);
+	  delete_route (r, tt, flags, es);
 	}
       rl->routes_added = false;
     }
-  undo_redirect_default_route_to_vpn (rl, tt, flags);
+  undo_redirect_default_route_to_vpn (rl, tt, flags, es);
+
+  CLEAR (*rl);
 }
 
 static const char *
@@ -577,33 +597,35 @@ print_routes (const struct route_list *rl, int level)
 }
 
 static void
-setenv_route (const struct route *r, int i)
+setenv_route (struct env_set *es, const struct route *r, int i)
 {
+  struct gc_arena gc = gc_new ();
   if (r->defined)
     {
-      setenv_route_addr ("network", r->network, i);
-      setenv_route_addr ("netmask", r->netmask, i);
-      setenv_route_addr ("gateway", r->gateway, i);
+      setenv_route_addr (es, "network", r->network, i);
+      setenv_route_addr (es, "netmask", r->netmask, i);
+      setenv_route_addr (es, "gateway", r->gateway, i);
 
       if (r->metric_defined)
 	{
-	  char name[128];
-	  openvpn_snprintf (name, sizeof (name), "route_metric_%d", i);
-	  setenv_int (name, r->metric);
+	  struct buffer name = alloc_buf_gc (256, &gc);
+	  buf_printf (&name, "route_metric_%d", i);
+	  setenv_int (es, BSTR (&name), r->metric);
 	}
     }
+  gc_free (&gc);
 }
 
 void
-setenv_routes (const struct route_list *rl)
+setenv_routes (struct env_set *es, const struct route_list *rl)
 {
   int i;
   for (i = 0; i < rl->n; ++i)
-    setenv_route (&rl->routes[i], i + 1);
+    setenv_route (es, &rl->routes[i], i + 1);
 }
 
 static void
-add_route (struct route *r, const struct tuntap *tt, unsigned int flags)
+add_route (struct route *r, const struct tuntap *tt, unsigned int flags, const struct env_set *es)
 {
   struct gc_arena gc;
   struct buffer buf;
@@ -640,7 +662,7 @@ add_route (struct route *r, const struct tuntap *tt, unsigned int flags)
     buf_printf (&buf, " metric %d", r->metric);
 #endif  /*CONFIG_FEATURE_IPROUTE*/
   msg (D_ROUTE, "%s", BSTR (&buf));
-  status = system_check (BSTR (&buf), "ERROR: Linux route add command failed", false);
+  status = system_check (BSTR (&buf), es, 0, "ERROR: Linux route add command failed");
 
 #elif defined (WIN32)
 
@@ -661,7 +683,7 @@ add_route (struct route *r, const struct tuntap *tt, unsigned int flags)
   else if ((flags & ROUTE_METHOD_MASK) == ROUTE_METHOD_EXE)
     {
       netcmd_semaphore_lock ();
-      status = system_check (BSTR (&buf), "ERROR: Windows route add command failed", false);
+      status = system_check (BSTR (&buf), es, 0, "ERROR: Windows route add command failed");
       netcmd_semaphore_release ();
     }
   else
@@ -686,7 +708,7 @@ add_route (struct route *r, const struct tuntap *tt, unsigned int flags)
 	      gateway);
 
   msg (D_ROUTE, "%s", BSTR (&buf));
-  status = system_check (BSTR (&buf), "ERROR: Solaris route add command failed", false);
+  status = system_check (BSTR (&buf), es, 0, "ERROR: Solaris route add command failed");
 
 #elif defined(TARGET_FREEBSD)
 
@@ -703,7 +725,7 @@ add_route (struct route *r, const struct tuntap *tt, unsigned int flags)
 	      netmask);
 
   msg (D_ROUTE, "%s", BSTR (&buf));
-  status = system_check (BSTR (&buf), "ERROR: FreeBSD route add command failed", false);
+  status = system_check (BSTR (&buf), es, 0, "ERROR: FreeBSD route add command failed");
 
 #elif defined(TARGET_DARWIN)
 
@@ -720,9 +742,9 @@ add_route (struct route *r, const struct tuntap *tt, unsigned int flags)
               netmask);
 
   msg (D_ROUTE, "%s", BSTR (&buf));
-  status = system_check (BSTR (&buf), "ERROR: FreeBSD route add command failed", false);
+  status = system_check (BSTR (&buf), es, 0, "ERROR: OS X route add command failed");
 
-#elif defined(TARGET_OPENBSD)
+#elif defined(TARGET_OPENBSD) || defined(TARGET_NETBSD)
 
   buf_printf (&buf, ROUTE_PATH " add");
 
@@ -737,7 +759,7 @@ add_route (struct route *r, const struct tuntap *tt, unsigned int flags)
 	      netmask);
 
   msg (D_ROUTE, "%s", BSTR (&buf));
-  status = system_check (BSTR (&buf), "ERROR: OpenBSD route add command failed", false);
+  status = system_check (BSTR (&buf), es, 0, "ERROR: OpenBSD/NetBSD route add command failed");
 
 #else
   msg (M_FATAL, "Sorry, but I don't know how to do 'route' commands on this operating system.  Try putting your routes in a --route-up script");
@@ -748,7 +770,7 @@ add_route (struct route *r, const struct tuntap *tt, unsigned int flags)
 }
 
 static void
-delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags)
+delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags, const struct env_set *es)
 {
   struct gc_arena gc;
   struct buffer buf;
@@ -778,7 +800,7 @@ delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags
 	      netmask);
 #endif /*CONFIG_FEATURE_IPROUTE*/
   msg (D_ROUTE, "%s", BSTR (&buf));
-  system_check (BSTR (&buf), "ERROR: Linux route delete command failed", false);
+  system_check (BSTR (&buf), es, 0, "ERROR: Linux route delete command failed");
 
 #elif defined (WIN32)
 
@@ -795,7 +817,7 @@ delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags
   else if ((flags & ROUTE_METHOD_MASK) == ROUTE_METHOD_EXE)
     {
       netcmd_semaphore_lock ();
-      system_check (BSTR (&buf), "ERROR: Windows route delete command failed", false);
+      system_check (BSTR (&buf), es, 0, "ERROR: Windows route delete command failed");
       netcmd_semaphore_release ();
     }
   else
@@ -811,7 +833,7 @@ delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags
 	      gateway);
 
   msg (D_ROUTE, "%s", BSTR (&buf));
-  system_check (BSTR (&buf), "ERROR: Solaris route delete command failed", false);
+  system_check (BSTR (&buf), es, 0, "ERROR: Solaris route delete command failed");
 
 #elif defined(TARGET_FREEBSD)
 
@@ -821,8 +843,7 @@ delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags
 	      netmask);
 
   msg (D_ROUTE, "%s", BSTR (&buf));
-  system_check (BSTR (&buf), "ERROR: FreeBSD route delete command failed", false);
-
+  system_check (BSTR (&buf), es, 0, "ERROR: FreeBSD route delete command failed");
 
 #elif defined(TARGET_DARWIN)
 
@@ -832,9 +853,9 @@ delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags
               netmask);
 
   msg (D_ROUTE, "%s", BSTR (&buf));
-  system_check (BSTR (&buf), "ERROR: Darwin route delete command failed", false);
+  system_check (BSTR (&buf), es, 0, "ERROR: OS X route delete command failed");
 
-#elif defined(TARGET_OPENBSD)
+#elif defined(TARGET_OPENBSD) || defined(TARGET_NETBSD)
 
   buf_printf (&buf, ROUTE_PATH " delete -net %s %s -netmask %s",
 	      network,
@@ -842,7 +863,7 @@ delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags
 	      netmask);
 
   msg (D_ROUTE, "%s", BSTR (&buf));
-  system_check (BSTR (&buf), "ERROR: OpenBSD route delete command failed", false);
+  system_check (BSTR (&buf), es, 0, "ERROR: OpenBSD/NetBSD route delete command failed");
 
 #else
   msg (M_FATAL, "Sorry, but I don't know how to do 'route' commands on this operating system.  Try putting your routes in a --route-up script");
@@ -1474,6 +1495,161 @@ get_default_gateway (in_addr_t *ret)
   if (write(s, (char *)&m_rtmsg, l) < 0)
     {
       msg (M_WARN, "ROUTE: problem writing to routing socket");
+      gc_free (&gc);
+      return false;
+    }
+
+  do {
+    l = read(s, (char *)&m_rtmsg, sizeof(m_rtmsg));
+  } while (l > 0 && (rtm.rtm_seq != seq || rtm.rtm_pid != pid));
+                        
+
+  rtm_aux = &rtm;
+
+  cp = ((char *)(rtm_aux + 1));
+  if (rtm_aux->rtm_addrs) {
+    for (i = 1; i; i <<= 1)
+      if (i & rtm_aux->rtm_addrs) {
+	sa = (struct sockaddr *)cp;
+	if (i == RTA_GATEWAY )
+	  gate = sa;
+	ADVANCE(cp, sa);
+      }
+  }
+  else
+    {
+      gc_free (&gc);
+      return false;
+    }
+
+
+  if (gate != NULL )
+    {
+      *ret = ntohl(((struct sockaddr_in *)gate)->sin_addr.s_addr);
+#if 1
+      msg (M_INFO, "gw %s",
+	   print_in_addr_t ((in_addr_t) *ret, 0, &gc));
+#endif
+
+      gc_free (&gc);
+      return true;
+    }
+  else
+    {
+      gc_free (&gc);
+      return false;
+    }
+}
+
+#elif defined(TARGET_OPENBSD) || defined(TARGET_NETBSD)
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+/* all of this is taken from <net/route.h> in OpenBSD 3.6 */
+#define RTA_DST		0x1	/* destination sockaddr present */
+#define RTA_GATEWAY	0x2	/* gateway sockaddr present */
+#define RTA_NETMASK	0x4	/* netmask sockaddr present */
+
+#define RTM_GET		0x4	/* Report Metrics */
+
+#define RTM_VERSION	3	/* Up the ante and ignore older versions */
+
+#define	RTF_UP		0x1		/* route usable */
+#define	RTF_GATEWAY	0x2		/* destination is a gateway */
+
+/*
+ * Huge version for userland compatibility.
+ */
+struct rt_metrics {
+	u_long	rmx_locks;	/* Kernel must leave these values alone */
+	u_long	rmx_mtu;	/* MTU for this path */
+	u_long	rmx_hopcount;	/* max hops expected */
+	u_long	rmx_expire;	/* lifetime for route, e.g. redirect */
+	u_long	rmx_recvpipe;	/* inbound delay-bandwidth product */
+	u_long	rmx_sendpipe;	/* outbound delay-bandwidth product */
+	u_long	rmx_ssthresh;	/* outbound gateway buffer limit */
+	u_long	rmx_rtt;	/* estimated round trip time */
+	u_long	rmx_rttvar;	/* estimated rtt variance */
+	u_long	rmx_pksent;	/* packets sent using this route */
+};
+
+/*
+ * Structures for routing messages.
+ */
+struct rt_msghdr {
+	u_short	rtm_msglen;	/* to skip over non-understood messages */
+	u_char	rtm_version;	/* future binary compatibility */
+	u_char	rtm_type;	/* message type */
+	u_short	rtm_index;	/* index for associated ifp */
+	int	rtm_flags;	/* flags, incl. kern & message, e.g. DONE */
+	int	rtm_addrs;	/* bitmask identifying sockaddrs in msg */
+	pid_t	rtm_pid;	/* identify sender */
+	int	rtm_seq;	/* for sender to identify action */
+	int	rtm_errno;	/* why failed */
+	int	rtm_use;	/* from rtentry */
+	u_long	rtm_inits;	/* which metrics we are initializing */
+	struct	rt_metrics rtm_rmx; /* metrics themselves */
+};
+
+struct {
+  struct rt_msghdr m_rtm;
+  char       m_space[512];
+} m_rtmsg;
+
+#define ROUNDUP(a) \
+        ((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
+
+static bool
+get_default_gateway (in_addr_t *ret)
+{
+  struct gc_arena gc = gc_new ();
+  int s, seq, l, rtm_addrs, i;
+  pid_t pid;
+  struct sockaddr so_dst, so_mask;
+  char *cp = m_rtmsg.m_space; 
+  struct sockaddr *gate = NULL, *sa;
+  struct  rt_msghdr *rtm_aux;
+
+#define NEXTADDR(w, u) \
+        if (rtm_addrs & (w)) {\
+            l = ROUNDUP(u.sa_len); memmove(cp, &(u), l); cp += l;\
+        }
+
+#define ADVANCE(x, n) (x += ROUNDUP((n)->sa_len))
+
+#define rtm m_rtmsg.m_rtm
+
+  pid = getpid();
+  seq = 0;
+  rtm_addrs = RTA_DST | RTA_NETMASK;
+
+  bzero(&so_dst, sizeof(so_dst));
+  bzero(&so_mask, sizeof(so_mask));
+  bzero(&rtm, sizeof(struct rt_msghdr));
+
+  rtm.rtm_type = RTM_GET;
+  rtm.rtm_flags = RTF_UP | RTF_GATEWAY;
+  rtm.rtm_version = RTM_VERSION;
+  rtm.rtm_seq = ++seq;
+  rtm.rtm_addrs = rtm_addrs; 
+
+  so_dst.sa_family = AF_INET;
+  so_dst.sa_len = sizeof(struct sockaddr_in);
+  so_mask.sa_family = AF_INET;
+  so_mask.sa_len = sizeof(struct sockaddr_in);
+
+  NEXTADDR(RTA_DST, so_dst);
+  NEXTADDR(RTA_NETMASK, so_mask);
+
+  rtm.rtm_msglen = l = cp - (char *)&m_rtmsg;
+
+  s = socket(PF_ROUTE, SOCK_RAW, 0);
+
+  if (write(s, (char *)&m_rtmsg, l) < 0)
+    {
+      warn("writing to routing socket");
       gc_free (&gc);
       return false;
     }

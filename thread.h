@@ -41,8 +41,9 @@
 #define L_PRNG         6
 #define L_GC_MALLOC    7
 #define L_GETTIMEOFDAY 8
-#define L_SCRIPT       9
-#define N_MUTEXES      10
+#define L_ENV_SET      9
+#define L_SYSTEM       10
+#define N_MUTEXES      11
 
 #ifdef USE_PTHREAD
 

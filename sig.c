@@ -243,7 +243,7 @@ process_explicit_exit_notification_timer_wakeup (struct context *c)
 static void
 process_sigusr2 (const struct context *c)
 {
-  struct status_output *so = status_open (NULL, 0, M_INFO);
+  struct status_output *so = status_open (NULL, 0, M_INFO, 0);
   print_status (c, so);
   status_close (so);
   signal_reset (c->sig);
@@ -267,7 +267,7 @@ process_signal (struct context *c)
 {
   bool ret = true;
 
-  if (c->sig->signal_received == SIGTERM)
+  if (c->sig->signal_received == SIGTERM || c->sig->signal_received == SIGINT)
     {
       ret = process_sigterm (c);
     }

@@ -31,6 +31,7 @@
 #define ROUTE_H
 
 #include "tun.h"
+#include "misc.h"
 
 #define MAX_ROUTES 100
 
@@ -119,17 +120,20 @@ void clear_route_list (struct route_list *rl);
 bool init_route_list (struct route_list *rl,
 		      const struct route_option_list *opt,
 		      const char *remote_endpoint,
-		      in_addr_t remote_host);
+		      in_addr_t remote_host,
+		      struct env_set *es);
 
 void add_routes (struct route_list *rl,
 		 const struct tuntap *tt,
-		 unsigned int flags);
+		 unsigned int flags,
+		 const struct env_set *es);
 
 void delete_routes (struct route_list *rl,
 		    const struct tuntap *tt,
-		    unsigned int flags);
+		    unsigned int flags,
+		    const struct env_set *es);
 
-void setenv_routes (const struct route_list *rl);
+void setenv_routes (struct env_set *es, const struct route_list *rl);
 
 void print_route_options (const struct route_option_list *rol,
 			  int level);

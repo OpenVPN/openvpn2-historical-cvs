@@ -233,36 +233,38 @@ free_ssl_lib ()
 }
 
 /*
- * OpenSSL library calls back here if the private key
- * is protected by a password.
+ * OpenSSL library calls pem_password_callback if the
+ * private key is protected by a password.
  */
+
+static struct user_pass passbuf;
+
+void
+pem_password_setup (const char *auth_file)
+{
+  get_user_pass (&passbuf, auth_file, true, "Private Key");
+}
+
 int
 pem_password_callback (char *buf, int size, int rwflag, void *u)
 {
-#ifdef HAVE_GETPASS
-  static char passbuf[256];
-
-  if (!strlen (passbuf))
-    {
-      char *gp = getpass ("Enter PEM pass phrase:");
-      if (!gp)
-	msg (M_FATAL, "TLS Error: Error reading PEM pass phrase for private key");
-      strncpynt (passbuf, gp, sizeof (passbuf));
-      memset (gp, 0, strlen (gp));
-    }
-
   if (buf)
     {
-      if (!strlen (passbuf))
-	msg (M_FATAL, "TLS Error: Need PEM pass phrase for private key");
-      strncpynt (buf, passbuf, size);
-      CLEAR (passbuf);
+      strncpynt (buf, passbuf.password, size);
       return strlen (buf);
     }
-#else
-  msg (M_FATAL, "Sorry but I can't read a password from the console because this operating system or C library doesn't support the getpass() function");
-#endif
   return 0;
+}
+
+/*
+ * Auth username/password handling
+ */
+const struct user_pass *
+get_auth_user_pass (const char *auth_file)
+{
+  static struct user_pass auth_user_pass;
+  get_user_pass (&auth_user_pass, auth_file, false, "Auth");
+  return &auth_user_pass;
 }
 
 /*
@@ -345,7 +347,21 @@ extract_common_name (char *out, int size, const char *subject)
 static void
 setenv_untrusted (struct tls_session *session)
 {
-  setenv_sockaddr ("untrusted", &session->untrusted_sockaddr);
+  setenv_sockaddr (session->opt->es, "untrusted", &session->untrusted_sockaddr);
+}
+
+static void
+set_common_name (struct tls_session *session, const char *common_name)
+{
+  if (session->common_name)
+    {
+      free (session->common_name);
+      session->common_name = NULL;
+    }
+  if (common_name)
+    {
+      session->common_name = string_alloc (common_name, NULL);
+    }
 }
 
 /*
@@ -363,9 +379,6 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   const struct tls_options *opt;
   const int max_depth = 8;
 
-  /* acquire script mutex */
-  mutex_lock_static (L_SCRIPT);
-
   /*
    * Retrieve the pointer to the SSL of the connection currently treated
    * and the application specific data stored into the SSL object.
@@ -380,7 +393,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   X509_NAME_oneline (X509_get_subject_name (ctx->current_cert), subject,
 		     sizeof (subject));
   subject[sizeof (subject) - 1] = '\0';
-  safe_string (subject);
+  string_mod (subject, CC_ALNUM|CC_LIMITED_PUNCT, 0, '.');
 
 #if 0 /* print some debugging info */
   msg (D_LOW, "LOCAL OPT: %s", opt->local_options);
@@ -401,13 +414,13 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   /* export subject name string as environmental variable */
   session->verify_maxlevel = max_int (session->verify_maxlevel, ctx->error_depth);
   openvpn_snprintf (envname, sizeof(envname), "tls_id_%d", ctx->error_depth);
-  setenv_str (envname, subject);
+  setenv_str (session->opt->es, envname, subject);
 
   /* export serial number as environmental variable */
   {
     const int serial = (int) ASN1_INTEGER_get (X509_get_serialNumber (ctx->current_cert));
     openvpn_snprintf (envname, sizeof(envname), "tls_serial_%d", ctx->error_depth);
-    setenv_int (envname, serial);
+    setenv_int (session->opt->es, envname, serial);
   }
 
   /* export current untrusted IP */
@@ -431,7 +444,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
       struct buffer out;
       int ret;
 
-      setenv_str ("script_type", "tls-verify");
+      setenv_str (session->opt->es, "script_type", "tls-verify");
 
       buf_set_write (&out, (uint8_t*)command, sizeof (command));
       buf_printf (&out, "%s %d %s",
@@ -439,7 +452,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 		  ctx->error_depth,
 		  subject);
       msg (D_TLS_DEBUG, "TLS: executing verify command: %s", command);
-      ret = openvpn_system (command);
+      ret = openvpn_system (command, session->opt->es, S_SCRIPT);
 
       if (system_ok (ret))
 	{
@@ -479,6 +492,12 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 	goto end;
       }
 
+      if (X509_NAME_cmp(X509_CRL_get_issuer(crl), X509_get_issuer_name(ctx->current_cert)) != 0) {
+	msg (M_WARN, "CRL: CRL %s is from a different issuer than the issuer of certificate %s", opt->crl_file, subject);
+	retval = 1;
+	goto end;
+      }
+
       n = sk_num(X509_CRL_get_REVOKED(crl));
 
       for (i = 0; i < n; i++) {
@@ -506,40 +525,85 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
     {
       char common_name[TLS_CN_LEN];
       extract_common_name (common_name, TLS_CN_LEN, subject);
-      if (session->common_name)
-	free (session->common_name);
-      session->common_name = string_alloc (common_name, NULL);
+      string_mod (common_name, COMMON_NAME_CHAR_CLASS, 0, '_');
+      set_common_name (session, common_name);
     }
   
-  mutex_unlock_static (L_SCRIPT);
   return 1;			/* Accept connection */
 
  err:
-  mutex_unlock_static (L_SCRIPT);
   return 0;                     /* Reject connection */
 }
 
-int
-get_max_tls_verify_id (struct tls_multi* multi)
+void
+tls_set_common_name (struct tls_multi *multi, const char *common_name)
 {
   if (multi)
-    return multi->session[TM_ACTIVE].verify_maxlevel;
-  else
-    return 0;
+    set_common_name (&multi->session[TM_ACTIVE], common_name);
 }
 
 const char *
-tls_common_name (struct tls_multi* multi, bool null)
+tls_common_name (struct tls_multi *multi, bool null)
 {
   const char *ret = NULL;
   if (multi)
     ret = multi->session[TM_ACTIVE].common_name;
-  if (ret)
+  if (ret && strlen (ret))
     return ret;
   else if (null)
     return NULL;
   else
     return "UNDEF";
+}
+
+void
+tls_lock_common_name (struct tls_multi *multi)
+{
+  const char *cn = multi->session[TM_ACTIVE].common_name;
+  if (cn && !multi->locked_cn)
+    multi->locked_cn = string_alloc (cn, NULL);
+}
+
+/*
+ * Return true if at least one valid key state exists
+ * which has passed authentication.  If we are using
+ * username/password authentication, and the authentication
+ * failed, we may have a live S_ACTIVE/S_NORMAL key state
+ * even though the 'authenticated' var might be false.
+ *
+ * This is so that we can return an AUTH_FAILED error
+ * message to the client over the TLS channel.
+ *
+ * If 'authenticated' is false, tunnel traffic forwarding
+ * is disabled but TLS channel data can still be sent
+ * or received.
+ */
+bool
+tls_authenticated (struct tls_multi *multi)
+{
+  if (multi)
+    {
+      int i;
+      for (i = 0; i < KEY_SCAN_SIZE; ++i)
+	{
+	  const struct key_state *ks = multi->key_scan[i];
+	  if (DECRYPT_KEY_ENABLED (multi, ks) && ks->authenticated)
+	    return true;
+	}
+    }
+  return false;
+}
+
+void
+tls_deauthenticate (struct tls_multi *multi)
+{
+  if (multi)
+    {
+      int i, j;
+      for (i = 0; i < TM_SIZE; ++i)
+	for (j = 0; j < KS_SIZE; ++j)
+	  multi->session[i].key[j].authenticated = false;
+    }
 }
 
 /*
@@ -569,13 +633,14 @@ info_callback (INFO_CALLBACK_SSL_CONST SSL * s, int where, int ret)
  * All files are in PEM format.
  */
 SSL_CTX *
-init_ssl (bool server,
+init_ssl (const bool server,
 	  const char *ca_file,
 	  const char *dh_file,
 	  const char *cert_file,
 	  const char *priv_key_file,
 	  const char *pkcs12_file,
-	  const char *cipher_list)
+	  const char *cipher_list,
+	  const bool require_peer_cert)
 {
   SSL_CTX *ctx;
   DH *dh;
@@ -673,22 +738,29 @@ init_ssl (bool server,
     }
   else
     {
-    /* Use seperate PEM files for key, cert and CA certs */
+      /* Use seperate PEM files for key, cert and CA certs */
 
       /* Load Certificate */
-      if (!SSL_CTX_use_certificate_file (ctx, cert_file, SSL_FILETYPE_PEM))
-        msg (M_SSLERR, "Cannot load certificate file %s", cert_file);
+      if (cert_file)
+	{
+	  if (!SSL_CTX_use_certificate_file (ctx, cert_file, SSL_FILETYPE_PEM))
+	    msg (M_SSLERR, "Cannot load certificate file %s", cert_file);
+	}
 
       /* Load Private Key */
-      if (!SSL_CTX_use_PrivateKey_file (ctx, priv_key_file, SSL_FILETYPE_PEM))
-        msg (M_SSLERR, "Cannot load private key file %s", priv_key_file);
-      warn_if_group_others_accessible (priv_key_file);
+      if (priv_key_file)
+	{
+	  if (!SSL_CTX_use_PrivateKey_file (ctx, priv_key_file, SSL_FILETYPE_PEM))
+	    msg (M_SSLERR, "Cannot load private key file %s", priv_key_file);
+	  warn_if_group_others_accessible (priv_key_file);
 
-      /* Check Private Key */
-      if (!SSL_CTX_check_private_key (ctx))
-        msg (M_SSLERR, "Private key does not match the certificate");
+	  /* Check Private Key */
+	  if (!SSL_CTX_check_private_key (ctx))
+	    msg (M_SSLERR, "Private key does not match the certificate");
+	}
 
       /* Load CA file for verifying peer supplied certificate */
+      ASSERT (ca_file);
       if (!SSL_CTX_load_verify_locations (ctx, ca_file, NULL))
         msg (M_SSLERR, "Cannot load CA certificate file %s (SSL_CTX_load_verify_locations)", ca_file);
 
@@ -701,15 +773,18 @@ init_ssl (bool server,
         SSL_CTX_set_client_CA_list (ctx, cert_names);
       }
 
-      /* Enable the use of certificate chains */
-      if (!SSL_CTX_use_certificate_chain_file (ctx, cert_file))
-        msg (M_SSLERR, "Cannot load certificate chain file %s (SSL_use_certificate_chain_file)", cert_file);
+      if (cert_file)
+	{
+	  /* Enable the use of certificate chains */
+	  if (!SSL_CTX_use_certificate_chain_file (ctx, cert_file))
+	    msg (M_SSLERR, "Cannot load certificate chain file %s (SSL_use_certificate_chain_file)", cert_file);
+	}
     }
 
-
   /* Require peer certificate verification */
-  SSL_CTX_set_verify (ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-		      verify_callback);
+  if (require_peer_cert)
+    SSL_CTX_set_verify (ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+			verify_callback);
 
   /* Connection information callback */
   SSL_CTX_set_info_callback (ctx, info_callback);
@@ -1025,11 +1100,6 @@ bio_read (struct tls_multi* multi, BIO *bio, struct buffer *buf, int maxlen, con
       if (maxlen < len)
 	len = maxlen;
       /*
-       * Free the L_TLS lock prior to calling BIO routines
-       * so that foreground thread can still call
-       * tls_pre_decrypt or tls_pre_encrypt,
-       * allowing tunnel packet forwarding to continue.
-       *
        * BIO_read brackets most of the serious RSA
        * key negotiation number crunching.
        */
@@ -1495,6 +1565,9 @@ tls_multi_free (struct tls_multi *multi, bool clear)
 
   ASSERT (multi);
 
+  if (multi->locked_cn)
+    free (multi->locked_cn);
+
   for (i = 0; i < TM_SIZE; ++i)
     tls_session_free (&multi->session[i], false);
 
@@ -1917,17 +1990,19 @@ generate_key_expansion (struct key_ctx_bi *key,
   return ret;
 }
 
-static void
+static bool
 random_bytes_to_buf (struct buffer *buf,
 		     uint8_t *out,
 		     int outlen)
 {
   if (!RAND_bytes (out, outlen))
     msg (M_FATAL, "ERROR: Random number generator cannot obtain entropy for key generation [SSL]");
-  ASSERT (buf_write (buf, out, outlen));
+  if (!buf_write (buf, out, outlen))
+    return false;
+  return true;
 }
 
-static void
+static bool
 key_source2_randomize_write (struct key_source2 *k2,
 			     struct buffer *buf,
 			     bool server)
@@ -1939,10 +2014,17 @@ key_source2_randomize_write (struct key_source2 *k2,
   CLEAR (*k);
 
   if (!server)
-    random_bytes_to_buf (buf, k->pre_master, sizeof (k->pre_master));
+    {
+      if (!random_bytes_to_buf (buf, k->pre_master, sizeof (k->pre_master)))
+	return false;
+    }
 
-  random_bytes_to_buf (buf, k->random1, sizeof (k->random1));
-  random_bytes_to_buf (buf, k->random2, sizeof (k->random2));
+  if (!random_bytes_to_buf (buf, k->random1, sizeof (k->random1)))
+    return false;
+  if (!random_bytes_to_buf (buf, k->random2, sizeof (k->random2)))
+    return false;
+
+  return true;
 }
 
 static int
@@ -1998,8 +2080,386 @@ key_state_soft_reset (struct tls_session *session)
 }
 
 /*
+ * Read/write strings from/to a struct buffer with a u16 length prefix.
+ */
+
+static bool
+write_string (struct buffer *buf, const char *str, const int maxlen)
+{
+  const int len = strlen (str) + 1;
+  if (len < 1 || (maxlen >= 0 && len > maxlen))
+    return false;
+  if (!buf_write_u16 (buf, len))
+    return false;
+  if (!buf_write (buf, str, len))
+    return false;
+  return true;
+}
+
+static bool
+read_string (struct buffer *buf, char *str, const unsigned int capacity)
+{
+  const int len = buf_read_u16 (buf);
+  if (len < 1 || len > (int)capacity)
+    return false;
+  if (!buf_read (buf, str, len))
+    return false;
+  str[len-1] = '\0';
+  return true;
+}
+
+/*
+ * Authenticate a client using username/password.
+ * Runs on server.
+ *
+ * If you want to add new authentication methods,
+ * this is the place to start.
+ */
+static bool
+verify_user_pass (struct tls_session *session, const struct user_pass *up)
+{
+  struct gc_arena gc = gc_new ();
+  struct buffer cmd = alloc_buf_gc (256, &gc);
+  int retval;
+  bool ret = false;
+
+  /* Is username defined? */
+  if (strlen (up->username))
+    {
+      /* Set environmental variables prior to calling script */
+      setenv_str (session->opt->es, "script_type", "user-pass-verify");
+
+      setenv_str (session->opt->es, "username", up->username);
+      setenv_str (session->opt->es, "password", up->password);
+
+      /* setenv incoming cert common name for script */
+      setenv_str (session->opt->es, "common_name", session->common_name);
+
+      /* setenv client real IP address */
+      setenv_untrusted (session);
+
+      /* format command line */
+      buf_printf (&cmd, "%s", session->opt->auth_user_pass_verify_script);
+      
+      /* call command */
+      retval = openvpn_system (BSTR (&cmd), session->opt->es, S_SCRIPT);
+
+      /* test return status of command */
+      if (system_ok (retval))
+	ret = true;
+      else if (!system_executed (retval))
+	msg (D_TLS_ERRORS, "TLS Auth Error: user-pass-verify script failed to execute: %s", BSTR (&cmd));
+	  
+      setenv_del (session->opt->es, "password");
+    }
+  else
+    {
+      msg (D_TLS_ERRORS, "TLS Auth Error: peer provided a blank username");
+    }
+  gc_free (&gc);
+  return ret;
+}
+
+/*
+ * Handle the reading and writing of key data to and from
+ * the TLS control channel (cleartext).
+ */
+
+static bool
+key_method_1_write (struct buffer *buf, struct tls_session *session)
+{
+  struct key key;
+  const int optlen = strlen (session->opt->local_options) + 1;
+
+  ASSERT (session->opt->key_method == 1);
+  ASSERT (buf_init (buf, 0));
+
+  generate_key_random (&key, &session->opt->key_type);
+  if (!check_key (&key, &session->opt->key_type))
+    {
+      msg (D_TLS_ERRORS, "TLS Error: Bad encrypting key generated");
+      return false;
+    }
+
+  if (!write_key (&key, &session->opt->key_type, buf))
+    {
+      msg (D_TLS_ERRORS, "TLS Error: write_key failed");
+      return false;
+    }
+
+  init_key_ctx (&ks->key.encrypt, &key, &session->opt->key_type,
+		DO_ENCRYPT, "Data Channel Encrypt");
+  CLEAR (key);
+
+  /* send local options string */
+  if (!buf_write (buf, session->opt->local_options, optlen))
+    {
+      msg (D_TLS_ERRORS, "TLS Error: KM1 write options failed");
+      return false;
+    }
+
+  return true;
+}
+
+static bool
+key_method_2_write (struct buffer *buf, struct tls_session *session)
+{
+  ASSERT (session->opt->key_method == 2);
+  ASSERT (buf_init (buf, 0));
+
+  /* write a uint32 0 */
+  if (!buf_write_u32 (buf, 0))
+    goto error;
+
+  /* write key_method + flags */
+  if (!buf_write_u8 (buf, (session->opt->key_method & KEY_METHOD_MASK)))
+    goto error;
+
+  /* write key source material */
+  if (!key_source2_randomize_write (ks->key_src, buf, session->opt->server))
+    goto error;
+
+  /* write options string */
+  if (!write_string (buf, session->opt->local_options, TLS_OPTIONS_LEN))
+    goto error;
+
+  /* write username/password if specified */
+  if (session->opt->auth_user_pass)
+    {
+      if (!write_string (buf, session->opt->auth_user_pass->username, -1))
+	goto error;
+      if (!write_string (buf, session->opt->auth_user_pass->password, -1))
+	goto error;
+    }
+
+  /*
+   * generate tunnel keys if server
+   */
+  if (session->opt->server)
+    {
+      if (!generate_key_expansion (&ks->key,
+				   &session->opt->key_type,
+				   ks->key_src,
+				   &ks->session_id_remote,
+				   &session->session_id,
+				   true))
+	{
+	  msg (D_TLS_ERRORS, "TLS Error: server generate_key_expansion failed");
+	  goto error;
+	}
+		      
+      CLEAR (*ks->key_src);
+    }
+
+  return true;
+
+ error:
+  msg (D_TLS_ERRORS, "TLS Error: Key Method #2 write failed");
+  CLEAR (*ks->key_src);
+  return false;
+}
+
+static bool
+key_method_1_read (struct buffer *buf, struct tls_session *session)
+{
+  int status;
+  struct key key;
+
+  ASSERT (session->opt->key_method == 1);
+
+  status = read_key (&key, &session->opt->key_type, buf);
+  if (status != 1)
+    {
+      msg (D_TLS_ERRORS,
+	   "TLS Error: Error reading data channel key from plaintext buffer");
+      goto error;
+    }
+
+  if (!check_key (&key, &session->opt->key_type))
+    {
+      msg (D_TLS_ERRORS, "TLS Error: Bad decrypting key received from peer");
+      goto error;
+    }
+
+  if (buf->len < 1)
+    {
+      msg (D_TLS_ERRORS, "TLS Error: Missing options string");
+      goto error;
+    }
+
+  /* compare received remote options string
+     with our locally computed options string */
+  if (!session->opt->disable_occ &&
+      !options_cmp_equal_safe (BPTR (buf), session->opt->remote_options, buf->len))
+    {
+      options_warning_safe (BPTR (buf), session->opt->remote_options, buf->len);
+    }
+
+  buf_clear (buf);
+
+  init_key_ctx (&ks->key.decrypt, &key, &session->opt->key_type,
+		DO_DECRYPT, "Data Channel Decrypt");
+  CLEAR (key);
+  return true;
+
+ error:
+  buf_clear (buf);
+  CLEAR (key);
+  return false;
+}
+
+static bool
+key_method_2_read (struct buffer *buf, struct tls_multi *multi, struct tls_session *session)
+{
+  struct gc_arena gc = gc_new ();
+  int key_method_flags;
+  char *options;
+  struct user_pass *up;
+
+  ASSERT (session->opt->key_method == 2);
+
+  /* allocate temporary objects */
+  ALLOC_ARRAY_CLEAR_GC (options, char, TLS_OPTIONS_LEN, &gc);
+		  
+  /* discard leading uint32 */
+  ASSERT (buf_advance (buf, 4));
+
+  /* get key method */
+  key_method_flags = buf_read_u8 (buf);
+  if ((key_method_flags & KEY_METHOD_MASK) != 2)
+    {
+      msg (D_TLS_ERRORS,
+	   "TLS ERROR: Unknown key_method/flags=%d received from remote host",
+	   key_method_flags);
+      goto error;
+    }
+
+  /* get key source material (not actual keys yet) */
+  if (!key_source2_read (ks->key_src, buf, session->opt->server))
+    {
+      msg (D_TLS_ERRORS, "TLS Error: Error reading remote data channel key source entropy from plaintext buffer");
+      goto error;
+    }
+
+  /* get options */
+  if (!read_string (buf, options, TLS_OPTIONS_LEN))
+    {
+      msg (D_TLS_ERRORS, "TLS Error: Failed to read required OCC options string");
+      goto error;
+    }
+
+  /* should we check username/password? */
+  ks->authenticated = false;
+  if (session->opt->auth_user_pass_verify_script)
+    {
+      /* get username/password from plaintext buffer */
+      ALLOC_OBJ_CLEAR_GC (up, struct user_pass, &gc);
+      if (!read_string (buf, up->username, USER_PASS_LEN)
+	  || !read_string (buf, up->password, USER_PASS_LEN))
+	{
+	  msg (D_TLS_ERRORS, "TLS Error: Auth Username/Password was not provided by peer");
+	  CLEAR (*up);
+	  goto error;
+	}
+
+      /* enforce character class restrictions in username/password */
+      string_mod (up->username, COMMON_NAME_CHAR_CLASS, 0, '_');
+      string_mod (up->password, CC_PRINT, CC_CRLF, '_');
+      
+      /* verify it */
+      if (verify_user_pass (session, up))
+	{
+	  ks->authenticated = true;
+	  if (session->opt->username_as_common_name)
+	    set_common_name (session, up->username);
+	  msg (D_HANDSHAKE, "TLS: Username/Password authentication succeeded for username '%s' %s",
+	       up->username,
+	       session->opt->username_as_common_name ? "[CN SET]" : "");
+	}
+      else
+	{
+	  msg (D_TLS_ERRORS, "TLS Auth Error: Auth Username/Password verification failed for peer");
+	}
+
+      CLEAR (*up);
+    }
+  else
+    ks->authenticated = true;
+
+  /* While it shouldn't really happen, don't allow the common name to be NULL */
+  if (!session->common_name)
+    set_common_name (session, "");
+
+  /* Don't allow the CN to change once it's been locked */
+  if (ks->authenticated && multi->locked_cn)
+    {
+      const char *cn = session->common_name;
+      if (cn && strcmp (cn, multi->locked_cn))
+	{
+	  msg (D_TLS_ERRORS, "TLS Auth Error: TLS object CN attempted to change from '%s' to '%s' -- tunnel disabled",
+	       multi->locked_cn,
+	       cn);
+
+	  /* change the common name back to its original value and disable the tunnel */
+	  set_common_name (session, multi->locked_cn);
+	  tls_deauthenticate (multi);
+	}
+    }
+
+  /* verify --client-config-dir based authentication */
+  if (ks->authenticated && session->opt->client_config_dir_exclusive)
+    {
+      const char *path = gen_path (session->opt->client_config_dir_exclusive, session->common_name, &gc);
+      if (!test_file (path))
+	{
+	  ks->authenticated = false;
+	  msg (D_TLS_ERRORS, "TLS Auth Error: --client-config-dir authentication failed for common name '%s' file='%s'",
+	       session->common_name,
+	       path ? path : "UNDEF");
+	}
+    }
+
+  /* check options consistency */
+  if (!session->opt->disable_occ &&
+      !options_cmp_equal (options, session->opt->remote_options))
+    {
+      options_warning (options, session->opt->remote_options);
+    }
+
+  buf_clear (buf);
+
+  /*
+   * generate tunnel keys if client
+   */
+  if (!session->opt->server)
+    {
+      if (!generate_key_expansion (&ks->key,
+				   &session->opt->key_type,
+				   ks->key_src,
+				   &session->session_id,
+				   &ks->session_id_remote,
+				   false))
+	{
+	  msg (D_TLS_ERRORS, "TLS Error: client generate_key_expansion failed");
+	  goto error;
+	}
+		      
+      CLEAR (*ks->key_src);
+    }
+
+  gc_free (&gc);
+  return true;
+
+ error:
+  CLEAR (*ks->key_src);
+  buf_clear (buf);
+  gc_free (&gc);
+  return false;
+}
+
+/*
  * This is the primary routine for processing TLS stuff inside the
- * the main event loop (see openvpn.c).  When this routine exits
+ * the main event loop.  When this routine exits
  * with non-error status, it will set *wakeup to the number of seconds
  * when it wants to be called again.
  *
@@ -2131,7 +2591,7 @@ tls_process (struct tls_multi *multi,
 		  INCR_SUCCESS;
 
 		  /* Set outgoing address for data channel packets */
-		  link_socket_set_outgoing_addr (NULL, to_link_socket_info, &ks->remote_addr, session->common_name);
+		  link_socket_set_outgoing_addr (NULL, to_link_socket_info, &ks->remote_addr, session->common_name, session->opt->es);
 
 #ifdef MEASURE_TLS_HANDSHAKE_STATS
 		  show_tls_performance_stats();
@@ -2229,57 +2689,19 @@ tls_process (struct tls_multi *multi,
 	  if (!buf->len && ((ks->state == S_START && !session->opt->server) ||
 			    (ks->state == S_GOT_KEY && session->opt->server)))
 	    {
-	      const int optlen = strlen (session->opt->local_options) + 1;
 	      if (session->opt->key_method == 1)
 		{
-		  struct key key;
-		  ASSERT (buf_init (buf, 0));
-		  generate_key_random (&key, &session->opt->key_type);
-		  if (!check_key (&key, &session->opt->key_type))
-		    {
-		      msg (D_TLS_ERRORS, "TLS Error: Bad encrypting key generated");
-		      goto error;
-		    }
-		  write_key (&key, &session->opt->key_type, buf);
-		  init_key_ctx (&ks->key.encrypt, &key, &session->opt->key_type,
-				DO_ENCRYPT, "Data Channel Encrypt");
-		  CLEAR (key);
-
-		  /* send local options string */
-		  ASSERT (buf_write (buf, session->opt->local_options, optlen));
+		  if (!key_method_1_write (buf, session))
+		    goto error;
+		}
+	      else if (session->opt->key_method == 2)
+		{
+		  if (!key_method_2_write (buf, session))
+		    goto error;
 		}
 	      else
 		{
-		  ASSERT (session->opt->key_method == 2);
-		  ASSERT (buf_init (buf, 0));
-
-		  /* write a uint32 0 */
-		  ASSERT (buf_write_u32 (buf, 0));
-
-		  /* write key_method + flags */
-		  ASSERT (buf_write_u8 (buf, (session->opt->key_method & KEY_METHOD_MASK)
-					| (session->opt->pass_config_info ? TLS_PASS_CONFIG_INFO : 0)));
-
-		  /* write key source material */
-		  key_source2_randomize_write (ks->key_src, buf, session->opt->server);
-
-		  /* write options string */
-		  ASSERT (optlen >= 0 && optlen < 65536);
-		  ASSERT (buf_write_u16 (buf, optlen));
-		  ASSERT (buf_write (buf, session->opt->local_options, optlen));
-
-		  if (session->opt->server)
-		    {
-		      if (!generate_key_expansion (&ks->key,
-						   &session->opt->key_type,
-						   ks->key_src,
-						   &ks->session_id_remote,
-						   &session->session_id,
-						   true))
-			goto error;
-		      
-		      CLEAR (*ks->key_src);
-		    }
+		  ASSERT (0);
 		}
 
 	      state_change = true;
@@ -2295,121 +2717,17 @@ tls_process (struct tls_multi *multi,
 	    {
 	      if (session->opt->key_method == 1)
 		{
-		  int status;
-		  struct key key;
-
-		  status = read_key (&key, &session->opt->key_type, buf);
-		  if (status == -1)
-		    {
-		      msg (D_TLS_ERRORS,
-			   "TLS Error: Error reading data channel key from plaintext buffer");
-		      goto error;
-		    }
-
-		  if (!check_key (&key, &session->opt->key_type))
-		    {
-		      msg (D_TLS_ERRORS, "TLS Error: Bad decrypting key received from peer");
-		      goto error;
-		    }
-
-		  ASSERT (buf->len > 0);
-
-		  /* compare received remote options string
-		     with our locally computed options string */
-		  if (!session->opt->disable_occ &&
-		      !options_cmp_equal (BPTR (buf),
-					  session->opt->remote_options, buf->len))
-		    {
-		      options_warning (BPTR (buf),
-				       session->opt->remote_options, buf->len);
-		    }
-		  buf_clear (buf);
-
-		  if (status == 1)
-		    {
-		      init_key_ctx (&ks->key.decrypt, &key, &session->opt->key_type,
-				    DO_DECRYPT, "Data Channel Decrypt");
-		    }
-		  CLEAR (key);
-
-		  if (status == 0)
+		  if (!key_method_1_read (buf, session))
+		    goto error;
+		}
+	      else if (session->opt->key_method == 2)
+		{
+		  if (!key_method_2_read (buf, multi, session))
 		    goto error;
 		}
 	      else
 		{
-		  int key_method_flags;
-		  int status;
-		  int optlen;
-
-		  ASSERT (session->opt->key_method >= 2);
-		  status = 0;
-		  
-		  /* discard leading uint32 */
-		  ASSERT (buf_advance (buf, 4));
-
-		  /* get key method */
-		  key_method_flags = buf_read_u8 (buf);
-		  if ((key_method_flags & KEY_METHOD_MASK) != 2)
-		    {
-		      msg (D_TLS_ERRORS,
-			   "TLS ERROR: Unknown key_method/flags=%d received from remote host",
-			   key_method_flags);
-		      goto error;
-		    }
-
-		  /* verify TLS_PASS_CONFIG_INFO consistency between peers */
-		  if (((key_method_flags & TLS_PASS_CONFIG_INFO) != 0) 
-		      ^ (session->opt->pass_config_info == true))
-		    {
-		      msg (D_TLS_ERRORS, "TLS ERROR: Inconsistent options between peers regarding configuration info exchange over the control channel");
-		      goto error;
-		    }
-		  
-		  /* get key source material (not actual keys yet) */
-		  if (!key_source2_read (ks->key_src, buf, session->opt->server))
-		    {
-		      msg (D_TLS_ERRORS, "TLS Error: Error reading remote data channel key source entropy from plaintext buffer");
-		      goto error;
-		    }
-
-		  /* get options */
-		  optlen = buf_read_u16 (buf);
-		  if (optlen < 0 || optlen >= 65536)
-		    {
-		      msg (D_TLS_ERRORS, "TLS Error: Bad options string length: %d", optlen);
-		      goto error;
-		    }
-
-		  if (BLEN(buf) < optlen)
-		    {
-		      msg (D_TLS_ERRORS, "TLS Error: Options string truncation");
-		      goto error;
-		    }
-
-		  /* check options consistency */
-
-		  if (!session->opt->disable_occ &&
-		      !options_cmp_equal (BPTR (buf),
-					  session->opt->remote_options, buf->len))
-		    {
-		      options_warning (BPTR (buf),
-				       session->opt->remote_options, buf->len);
-		    }
-
-		  buf_clear (buf);
-
-		  if (!session->opt->server)
-		    {
-		      if (!generate_key_expansion (&ks->key,
-						   &session->opt->key_type,
-						   ks->key_src,
-						   &session->session_id,
-						   &ks->session_id_remote,
-						   false))
-			goto error;
-		      
-		      CLEAR (*ks->key_src);
-		    }
+		  ASSERT (0);
 		}
 
 	      state_change = true;
@@ -2522,7 +2840,7 @@ error:
 #undef ks_lame
 
 /*
- * Called at the top of the event loop in openvpn.c.
+ * Called by the top-level event loop.
  *
  * Basically decides if we should call tls_process for
  * the active or untrusted sessions.
@@ -2605,10 +2923,16 @@ tls_multi_process (struct tls_multi *multi,
   /*
    * If untrusted session achieves TLS authentication,
    * move it to active session, usurping any prior session.
+   *
+   * A semi-trusted session is one in which the certificate authentication
+   * succeeded (if cert verification is enabled) but the username/password
+   * verification failed.  A semi-trusted session can forward data on the
+   * TLS control channel but not on the tunnel channel.
    */
   if (DECRYPT_KEY_ENABLED (multi, &multi->session[TM_UNTRUSTED].key[KS_PRIMARY])) {
     move_session (multi, TM_ACTIVE, TM_UNTRUSTED, true);
-    msg (D_TLS_DEBUG_LOW, "TLS: tls_multi_process: untrusted session promoted to trusted");
+    msg (D_TLS_DEBUG_LOW, "TLS: tls_multi_process: untrusted session promoted to %strusted",
+	 tls_authenticated (multi) ? "" : "semi-");
   }
 
   perf_pop ();
@@ -2725,6 +3049,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	      struct key_state *ks = multi->key_scan[i];
 	      if (DECRYPT_KEY_ENABLED (multi, ks)
 		  && key_id == ks->key_id
+		  && ks->authenticated
 		  && addr_port_match(from, &ks->remote_addr))
 		{
 		  /* return appropriate data channel decrypt key in opt */
@@ -2745,7 +3070,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	    }
 
 	  msg (D_TLS_ERRORS,
-	       "TLS Error: Unknown data channel key ID or IP address received from %s: %d (This usually means that the local and remote OpenVPN dynamic keys are out of sync)",
+	       "TLS Error: local/remote TLS keys are out of sync: %s [%d]",
 	       print_sockaddr (from, &gc), key_id);
 	  goto error;
 	}
@@ -3164,8 +3489,8 @@ tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
 
 	/*
 	 * We are in read-only mode at this point with respect to TLS
-	 * control channel state.  After we fork, we will process this
-	 * session-initiating packet for real.
+	 * control channel state.  After we build a new client instance
+	 * object, we will process this session-initiating packet for real.
 	 */
 	co.flags |= CO_IGNORE_PACKET_ID;
 
@@ -3211,7 +3536,7 @@ tls_pre_encrypt (struct tls_multi *multi,
       for (i = 0; i < KEY_SCAN_SIZE; ++i)
 	{
 	  struct key_state *ks = multi->key_scan[i];
-	  if (ks->state >= S_ACTIVE)
+	  if (ks->state >= S_ACTIVE && ks->authenticated)
 	    {
 	      opt->key_ctx_bi = &ks->key;
 	      opt->packet_id = multi->opt.replay ? &ks->packet_id : NULL;

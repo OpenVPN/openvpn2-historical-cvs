@@ -119,14 +119,16 @@ extern int x_msg_line_num;
  * mute_level: don't print more than n (--mute n) consecutive messages at
  *             a given mute level, or if 0 disable muting and print everything.
  */
-#define LOGLEV(log_level, mute_level, other) (((log_level)-1) | ENCODE_MUTE_LEVEL(mute_level) | other)
+#define LOGLEV(log_level, mute_level, other) ((log_level) | ENCODE_MUTE_LEVEL(mute_level) | other)
 
 /*
  * If compiler supports variable arguments in macros, define
  * msg() as a macro for optimization win.
  */
 
-#define MSG_TEST(flags) ((((unsigned int)flags) & M_DEBUG_LEVEL) < x_debug_level || ((flags) & M_FATAL))
+bool dont_mute (unsigned int flags); /* check muting filter */
+
+#define MSG_TEST(flags) (((((unsigned int)flags) & M_DEBUG_LEVEL) <= x_debug_level) && dont_mute (flags))
 
 #if defined(HAVE_CPP_VARARG_MACRO_ISO) && !defined(__LCLINT__)
 #define HAVE_VARARG_MACROS
@@ -135,7 +137,9 @@ extern int x_msg_line_num;
 #define HAVE_VARARG_MACROS
 #define msg(flags, args...) do { if (MSG_TEST(flags)) x_msg((flags), args); } while (false)
 #else
-#warning this compiler appears to lack vararg macros which will cause a significant degradation in efficiency (you can ignore this warning if you are using LCLINT)
+# ifndef _MSC_VER	/* MSVC++ doesn't have #warning... */
+# warning this compiler appears to lack vararg macros which will cause a significant degradation in efficiency (you can ignore this warning if you are using LCLINT)
+# endif
 #define msg x_msg
 #endif
 
@@ -152,6 +156,7 @@ void x_msg (unsigned int flags, const char *format, ...)
 void error_reset (void);
 void set_debug_level (int level);
 void set_mute_cutoff (int cutoff);
+void set_suppress_timestamps (bool suppressed);
 
 /*
  * File to print messages to before syslog is opened.
@@ -168,12 +173,12 @@ void assert_failed (const char *filename, int line);
 static inline bool
 check_debug_level (unsigned int level)
 {
-  return (level & M_DEBUG_LEVEL) < x_debug_level;
+  return (level & M_DEBUG_LEVEL) <= x_debug_level;
 }
 
 /* syslog output */
 
-void open_syslog (const char *pgmname);
+void open_syslog (const char *pgmname, bool stdio_to_null);
 void close_syslog ();
 
 /* log file output */

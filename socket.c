@@ -1151,24 +1151,22 @@ socket_adjust_frame_parameters (struct frame *frame, int proto)
 }
 
 void
-setenv_trusted (const struct link_socket_info *info)
+setenv_trusted (struct env_set *es, const struct link_socket_info *info)
 {
-  setenv_sockaddr ("trusted", &info->lsa->actual);
+  setenv_sockaddr (es, "trusted", &info->lsa->actual);
 }
 
 void
 link_socket_connection_initiated (const struct buffer *buf,
 				  struct link_socket_info *info,
 				  const struct sockaddr_in *addr,
-				  const char *common_name)
+				  const char *common_name,
+				  struct env_set *es)
 {
   struct gc_arena gc = gc_new ();
   
-  /* acquire script mutex */
-  mutex_lock_static (L_SCRIPT);
-
   info->lsa->actual = *addr; /* Note: skip this line for --force-dest */
-  setenv_trusted (info);
+  setenv_trusted (es, info);
   info->connection_established = true;
 
   /* Print connection initiated message, with common name if available */
@@ -1184,15 +1182,15 @@ link_socket_connection_initiated (const struct buffer *buf,
   if (info->ipchange_command)
     {
       struct buffer out = alloc_buf_gc (512, &gc);
-      setenv_str ("script_type", "ipchange");
+      setenv_str (es, "script_type", "ipchange");
+      setenv_str (es, "common_name", common_name);
       buf_printf (&out, "%s %s",
 		  info->ipchange_command,
 		  print_sockaddr_ex (&info->lsa->actual, true, " ", &gc));
       msg (D_TLS_DEBUG, "executing ip-change command: %s", BSTR (&out));
-      system_check (BSTR (&out), "ip-change command failed", false);
+      system_check (BSTR (&out), es, S_SCRIPT, "ip-change command failed");
     }
 
-  mutex_unlock_static (L_SCRIPT);
   gc_free (&gc);
 }
 
@@ -1469,26 +1467,29 @@ print_in_addr_t (in_addr_t addr, unsigned int flags, struct gc_arena *gc)
 
 /* set environmental variables for ip/port in *addr */
 void
-setenv_sockaddr (const char *name_prefix, const struct sockaddr_in *addr)
+setenv_sockaddr (struct env_set *es, const char *name_prefix, const struct sockaddr_in *addr)
 {
   char name_buf[256];
 
   openvpn_snprintf (name_buf, sizeof (name_buf), "%s_ip", name_prefix);
   mutex_lock_static (L_INET_NTOA);
-  setenv_str (name_buf, inet_ntoa (addr->sin_addr));
+  setenv_str (es, name_buf, inet_ntoa (addr->sin_addr));
   mutex_unlock_static (L_INET_NTOA);
 
-  openvpn_snprintf (name_buf, sizeof (name_buf), "%s_port", name_prefix);
-  setenv_int (name_buf, ntohs (addr->sin_port));
+  if (addr->sin_port)
+    {
+      openvpn_snprintf (name_buf, sizeof (name_buf), "%s_port", name_prefix);
+      setenv_int (es, name_buf, ntohs (addr->sin_port));
+    }
 }
 
 void
-setenv_in_addr_t (const char *name_prefix, in_addr_t addr)
+setenv_in_addr_t (struct env_set *es, const char *name_prefix, in_addr_t addr)
 {
   struct sockaddr_in si;
   CLEAR (si);
   si.sin_addr.s_addr = htonl (addr);
-  setenv_sockaddr (name_prefix, &si);
+  setenv_sockaddr (es, name_prefix, &si);
 }
 
 /*

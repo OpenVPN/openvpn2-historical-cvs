@@ -1,8 +1,98 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.39 2004/08/19 03:28:08 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.40 2004/10/18 05:35:27 jimyonan Exp $
 
+2004.10.17 -- Version 2.0-beta12
+
+* Added support for username/password-based authentication.
+  Clients can now authentication themselves with the server
+  using either a certificate, a username/password, or both.
+  New directives: --auth-user-pass, --auth-user-pass-verify,
+  --client-cert-not-required, and --username-as-common-name.
+* Added NTLM proxy patch (William Preston).
+* Added --ifconfig-pool-linear server flag to allocate
+  individual tun addresses for clients rather than /30
+  subnets (won't work with Windows clients).
+* Modified --http-proxy code to cache username/password
+  across restarts.
+* Modified --http-proxy code to read username/password
+  from the console when the auth file is given as "stdin".
+* Modified --askpass to take an optional filename argument.
+* --persist-tun and --persist-key now work in client mode
+  and can be pushed to clients as well.
+* Added --ifconfig-pool-persist directive, to maintain
+  ifconfig-pool info in a file which is persistent across
+  daemon instantiations.
+* --user and --group privilege downgrades as well as
+  --chroot now also work in client mode (the
+  dowgrade/chroot will be delayed until the initialization
+  sequence is completed).
+* Added --show-engines standalone directive to show
+  available OpenSSL crypto accelerator engine support.
+* --engine directive now accepts an optional engine-ID
+  parameter to control which engine is used.
+* "Connection reset, restarting" log message now shows
+  which client is being reset.
+* Added --dhcp-pre-release directive in Windows version.
+* Second parm to --ip-win32 can be "default", e.g.
+  --ip-win32 dynamic default 60.
+* Fixed documentation bug regarding environmental
+  variable settings for --ifconfig-pool IP addresses.
+  The correct environmental variable names are:
+  ifconfig_pool_local_ip and ifconfig_pool_remote_ip.
+* ifconfig_pool_local_ip and ifconfig_pool_remote_ip
+  environmental variables are now passed to the
+  client-disconnect script.
+* In server mode, environmental variables are now scoped
+  according to the client they are associated with,
+  to solve the problem of "crosstalk" between different
+  client's environmental variable sets.
+* Added --down-pre flag to cause --down script to be
+  called before TUN/TAP close (rather than after).
+* Added --tls-exit flag which will cause OpenVPN
+  to exit on any TLS errors.
+* Don't push a route to a client if it exactly
+  matches an iroute (this lets you push routes to
+  all clients, and OpenVPN will automatically remove
+  the route from the route push list only for that client
+  which the route actually belongs to).
+* Made '--resolv-retry infinite' the default.
+  --resolv-retry can be disabled by using a parameter of 0.
+* For clients which plan to pull config info from server,
+  set an initial default ping-restart of 60 seconds.
+* Optimized mute code to lessen the load on the processor
+  when messages are being muted at a higher frequency.
+* Made route log messages non-mutable.
+* Silence the Linux "No buffer space available" message.
+* Added miscellaneous additional option sanity checks.
+* Added Windows version of easy-rsa scripts in
+  easy-rsa/Windows directory (Andrew J. Richardson).
+* Added NetBSD route patch (Ed Ravin).
+* Added OpenBSD patch for TAP + --redirect-gateway
+  (Waldemar Brodkorb).
+* Directives which prompt for a username and/or password
+  will now work with --daemon (OpenVPN will prompt
+  before forking).
+* Warn if CRL is from a different issuer than the
+  issuer of the peer certificate (Bernhard Weisshuhn).
+* Changed init script chkconfig parameters to start
+  OpenVPN daemon(s) before NFS.
+* Bug fix attempt of "too many I/O wait events" which occurs
+  on OSes which prefer select() over poll() such as Mac OS X.
+* Added --ccd-exclusive flag.  This flag will require, as a
+  condition of authentication, that a connecting client has
+  a --client-config-dir file.
+* TAP-Win32 open code will attempt to open a free adapter
+  if --dev-node is not specified (Mathias Sundman).
+* Resequenced --nice and --chroot ordering so that --nice
+  occurs first.
+* Added --suppress-timestamps flag (Charles Duffy).
+* Source code changes to allow compilation by MSVC
+  (Peter 'Luna' Runestig).
+* Added experimental --fast-io flag which optimizes
+  TUN/TAP/UDP writes on non-Windows systems.
+	
 2004.08.18 -- Version 2.0-beta11
 
 * Added --server, --server-bridge, --client, and
@@ -413,6 +503,7 @@ $Id: ChangeLog,v 1.89.2.39 2004/08/19 03:28:08 jimyonan Exp $
   data structure and node rotation algorithm
   to keep the tree balanced.
 * Initial implementation of ifconfig-pool.
+* Made --key-method 2 the default.
 
 2004.03.20 -- Version 2.0-test14
 

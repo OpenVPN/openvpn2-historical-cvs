@@ -150,9 +150,10 @@ void multi_close_instance (struct multi_context *m, struct multi_instance *mi, b
 
 bool multi_process_timeout (struct multi_context *m, const unsigned int mpp_flags);
 
-#define MPP_PRE_SELECT        (1<<0)
-#define MPP_CLOSE_ON_SIGNAL   (1<<1)
-#define MPP_RECORD_TOUCH      (1<<2)
+#define MPP_PRE_SELECT             (1<<0)
+#define MPP_CONDITIONAL_PRE_SELECT (1<<1)
+#define MPP_CLOSE_ON_SIGNAL        (1<<2)
+#define MPP_RECORD_TOUCH           (1<<3)
 bool multi_process_post (struct multi_context *m, struct multi_instance *mi, const unsigned int flags);
 
 bool multi_process_incoming_link (struct multi_context *m, struct multi_instance *instance, const unsigned int mpp_flags);
@@ -166,6 +167,7 @@ void multi_add_mbuf (struct multi_context *m,
 		     struct multi_instance *mi,
 		     struct mbuf_buffer *mb);
 
+void multi_ifconfig_pool_persist (struct multi_context *m, bool force);
 
 /*
  * Return true if our output queue is not full
@@ -375,7 +377,7 @@ multi_process_outgoing_link_dowork (struct multi_context *m, struct multi_instan
   { \
     if (multi.top.sig->signal_received == SIGUSR2) \
       { \
-        struct status_output *so = status_open (NULL, 0, M_INFO); \
+        struct status_output *so = status_open (NULL, 0, M_INFO, 0); \
         multi_print_status (&multi, so); \
         status_close (so); \
         multi.top.sig->signal_received = 0; \

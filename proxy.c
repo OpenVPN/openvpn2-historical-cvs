@@ -37,8 +37,12 @@
 #include "socket.h"
 #include "fdmisc.h"
 #include "proxy.h"
+#include "ntlm.h"
 
 #include "memdbg.h"
+
+/* cached proxy username/password */
+static struct user_pass static_proxy_user_pass;
 
 static bool
 recv_line (socket_descriptor_t sd,
@@ -184,8 +188,8 @@ send_crlf (socket_descriptor_t sd)
   return send_line_crlf (sd, "");
 }
 
-static uint8_t *
-make_base64_string (const uint8_t *str, struct gc_arena *gc)
+uint8_t *
+make_base64_string2 (const uint8_t *str, int src_len, struct gc_arena *gc)
 {
   static const char base64_table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -193,10 +197,9 @@ make_base64_string (const uint8_t *str, struct gc_arena *gc)
   uint8_t *buf;
   const uint8_t *src;
   uint8_t *dst;
-  int bits, data, src_len, dst_len;
+  int bits, data, dst_len;
 
   /* make base64 string */
-  src_len = strlen (str);
   dst_len = (src_len + 2) / 3 * 4;
   buf = gc_malloc (dst_len + 1, false, gc);
   bits = data = 0;
@@ -208,8 +211,7 @@ make_base64_string (const uint8_t *str, struct gc_arena *gc)
 	{
 	  data = (data << 8) | *src;
 	  bits += 8;
-	  if (*src != 0)
-	    src++;
+	  src++;
 	}
       *dst++ = base64_table[0x3F & (data >> (bits - 6))];
       bits -= 6;
@@ -227,13 +229,19 @@ make_base64_string (const uint8_t *str, struct gc_arena *gc)
   return buf;
 }
 
+uint8_t *
+make_base64_string (const uint8_t *str, struct gc_arena *gc)
+{
+  return make_base64_string2 (str, strlen (str), gc);
+}
+
 static const char *
 username_password_as_base64 (const struct http_proxy_info *p,
 			     struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (strlen (p->username) + strlen (p->password) + 2, gc);
-  ASSERT (strlen (p->username) > 0);
-  buf_printf (&out, "%s:%s", p->username, p->password);
+  struct buffer out = alloc_buf_gc (strlen (p->up.username) + strlen (p->up.password) + 2, gc);
+  ASSERT (strlen (p->up.username) > 0);
+  buf_printf (&out, "%s:%s", p->up.username, p->up.password);
   return make_base64_string (BSTR (&out), gc);
 }
 
@@ -263,37 +271,27 @@ new_http_proxy (const char *server,
 	p->auth_method = HTTP_AUTH_NONE;
       else if (!strcmp (auth_method, "basic"))
 	p->auth_method = HTTP_AUTH_BASIC;
+      else if (!strcmp (auth_method, "ntlm"))
+	p->auth_method = HTTP_AUTH_NTLM;
       else
-	msg (M_FATAL, "ERROR: unknown HTTP authentication method: '%s' -- only the 'none' or 'basic' methods are currently supported",
+	msg (M_FATAL, "ERROR: unknown HTTP authentication method: '%s' -- only the 'none', 'basic', or 'ntlm' methods are currently supported",
 	     auth_method);
     }
 
-  /* only basic authentication supported so far */
-  if (p->auth_method == HTTP_AUTH_BASIC)
+  /* only basic and NTLM authentication supported so far */
+  if (p->auth_method == HTTP_AUTH_BASIC || p->auth_method == HTTP_AUTH_NTLM)
     {
-      FILE *fp;
-      
-      if (!auth_file)
-	msg (M_FATAL, "ERROR: http proxy authentication requires a username/password file");
-
-      p->auth_method = HTTP_AUTH_BASIC;
-      warn_if_group_others_accessible (auth_file);
-      fp = fopen (auth_file, "r");
-      if (!fp)
-	msg (M_ERR, "Error opening http proxy auth_file: %s", auth_file);
-      
-      if (fgets (p->username, sizeof (p->username), fp) == NULL
-	  || fgets (p->password, sizeof (p->password), fp) == NULL)
-	msg (M_FATAL, "Error reading username and password (must be on two consecutive lines) from http proxy authfile: %s", auth_file);
-      
-      fclose (fp);
-      
-      chomp (p->username);
-      chomp (p->password);
-      
-      if (strlen (p->username) == 0)
-	msg (M_FATAL, "ERROR: username from http proxy authfile '%s' is empty", auth_file);
+      get_user_pass (&static_proxy_user_pass,
+		     auth_file,
+		     false,
+		     "HTTP Proxy");
+      p->up = static_proxy_user_pass;
     }
+
+#if !NTLM
+  if (p->auth_method == HTTP_AUTH_NTLM)
+    msg (M_FATAL, "Sorry, this version of OpenVPN was built without NTLM Proxy support.");
+#endif
 
   p->defined = true;
   return p;
@@ -308,7 +306,9 @@ establish_http_proxy_passthru (struct http_proxy_info *p,
 			       volatile int *signal_received)
 {
   struct gc_arena gc = gc_new ();
-  char buf[128];
+  char buf[256];
+  char buf2[128];
+  char get[80];
   int status;
   int nparms;
 
@@ -336,6 +336,18 @@ establish_http_proxy_passthru (struct http_proxy_info *p,
 	goto error;
       break;
 
+#if NTLM
+    case HTTP_AUTH_NTLM:
+      openvpn_snprintf (buf, sizeof(buf), "Proxy-Authorization: NTLM %s",
+			ntlm_phase_1 (p, &gc));
+      msg (D_PROXY, "Attempting NTLM Proxy-Authorization phase 1");
+      msg (D_SHOW_KEYS, "Send to HTTP proxy: '%s'", buf);
+      sleep (1);
+      if (!send_line_crlf (sd, buf))
+	goto error;
+      break;
+#endif
+
     default:
       ASSERT (0);
     }
@@ -357,11 +369,97 @@ establish_http_proxy_passthru (struct http_proxy_info *p,
   /* parse return string */
   nparms = sscanf (buf, "%*s %d", &status);
 
+  /* check for a "407 Proxy Authentication Required" response */
+  if (nparms >= 1 && status == 407)
+    {
+      msg (D_PROXY, "Proxy requires authentication");
+
+      // check for NTLM
+      if (p->auth_method == HTTP_AUTH_NTLM)
+        {
+#if NTLM
+          // look for the phase 2 response
+
+          while (true)
+            {
+              if (!recv_line (sd, buf, sizeof(buf), 5, true, NULL, signal_received))
+                goto error;
+              chomp (buf);
+              msg (D_PROXY, "HTTP proxy returned: '%s'", buf);
+
+              snprintf (get, sizeof get, "%%*s NTLM %%%ds", sizeof (buf2) - 1);
+              nparms = sscanf (buf, get, buf2);
+              buf2[127] = 0; // we only need the beginning - ensure it's null terminated.
+
+              // check for "Proxy-Authenticate: NTLM TlRM..."
+              if (nparms == 1)
+                {
+                  // parse buf2
+                  msg (D_PROXY, "auth string: '%s'", buf2);
+                  break;
+                }
+            }
+          // if we are here then auth string was got
+          msg (D_PROXY, "Received NTLM Proxy-Authorization phase 2 response");
+
+          /* receive and discard everything else */
+          while (recv_line (sd, NULL, 0, 5, true, NULL, signal_received))
+            ;
+
+          /* now send the phase 3 reply */
+
+          /* format HTTP CONNECT message */
+          openvpn_snprintf (buf, sizeof(buf), "CONNECT %s:%d HTTP/1.0", host, port);
+          msg (D_PROXY, "Send to HTTP proxy: '%s'", buf);
+
+          /* send HTTP CONNECT message to proxy */
+          if (!send_line_crlf (sd, buf))
+            goto error;
+
+          /* send HOST etc, */
+          sleep (1);
+          openvpn_snprintf (buf, sizeof(buf), "Host: %s", host);
+          msg (D_PROXY, "Send to HTTP proxy: '%s'", buf);
+          if (!send_line_crlf (sd, buf))
+            goto error;
+
+          openvpn_snprintf (buf, sizeof(buf), "Proxy-Authorization: NTLM %s",
+			    ntlm_phase_3 (p, buf2, &gc));
+          msg (D_PROXY, "Attempting NTLM Proxy-Authorization phase 3");
+          msg (D_PROXY, "Send to HTTP proxy: '%s'", buf);
+          sleep (1);
+          if (!send_line_crlf (sd, buf))
+	    goto error;
+          // ok so far...
+          /* send empty CR, LF */
+          sleep (1);
+          if (!send_crlf (sd))
+            goto error;
+
+          /* receive reply from proxy */
+          if (!recv_line (sd, buf, sizeof(buf), 5, true, NULL, signal_received))
+            goto error;
+
+          /* remove trailing CR, LF */
+          chomp (buf);
+
+          msg (D_PROXY, "HTTP proxy returned: '%s'", buf);
+
+          /* parse return string */
+          nparms = sscanf (buf, "%*s %d", &status);
+#else
+	  ASSERT (0); // No NTLM support
+#endif
+	}
+      else goto error;
+    }
+
+
   /* check return code, success = 200 */
-  if (nparms != 1 || status != 200)
+  if (nparms < 1 || status != 200)
     {
       msg (D_LINK_ERRORS, "HTTP proxy returned bad status");
-#if 0
+#if 0 
       /* DEBUGGING -- show a multi-line HTTP error response */
       while (true)
 	{

@@ -67,21 +67,30 @@ learn_address_script (const struct multi_context *m,
       struct gc_arena gc = gc_new ();
       struct buffer cmd = alloc_buf_gc (256, &gc);
 
-      mutex_lock_static (L_SCRIPT);
-
-      setenv_str ("script_type", "learn-address");
+      setenv_str (mi->context.c2.es, "script_type", "learn-address");
 
       buf_printf (&cmd, "%s \"%s\" \"%s\"",
 		  m->learn_address_script,
 		  op,
 		  mroute_addr_print (addr, &gc));
       if (mi)
-	buf_printf (&cmd, " \"%s\"", tls_common_name (mi->context.c2.tls_multi, true));
+	buf_printf (&cmd, " \"%s\"", tls_common_name (mi->context.c2.tls_multi, false));
 
-      system_check (BSTR (&cmd), "learn-address command failed", false);
+      system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "learn-address command failed");
 
-      mutex_unlock_static (L_SCRIPT);
       gc_free (&gc);
+    }
+}
+
+void
+multi_ifconfig_pool_persist (struct multi_context *m, bool force)
+{
+ /* write pool data to file */
+  if (m->ifconfig_pool
+      && m->top.c1.ifconfig_pool_persist
+      && (force || ifconfig_pool_write_trigger (m->top.c1.ifconfig_pool_persist)))
+    {
+      ifconfig_pool_write (m->top.c1.ifconfig_pool_persist, m->ifconfig_pool);
     }
 }
 
@@ -235,18 +244,26 @@ multi_init (struct multi_context *m, struct context *t, bool tcp_mode)
    */
   if (t->options.ifconfig_pool_defined)
     {
-      if (dev == DEV_TYPE_TUN)
-	{
-	  m->ifconfig_pool = ifconfig_pool_init (IFCONFIG_POOL_30NET,
-						 t->options.ifconfig_pool_start,
-						 t->options.ifconfig_pool_end);
-	}
-      else if (dev == DEV_TYPE_TAP)
+      if (dev == DEV_TYPE_TAP || t->options.ifconfig_pool_linear)
 	{
 	  m->ifconfig_pool = ifconfig_pool_init (IFCONFIG_POOL_INDIV,
 						 t->options.ifconfig_pool_start,
 						 t->options.ifconfig_pool_end);
 	}
+      else if (dev == DEV_TYPE_TUN)
+	{
+	  m->ifconfig_pool = ifconfig_pool_init (IFCONFIG_POOL_30NET,
+						 t->options.ifconfig_pool_start,
+						 t->options.ifconfig_pool_end);
+	}
+      else
+	{
+	  ASSERT (0);
+	}
+
+      /* reload pool data from file */
+      if (t->c1.ifconfig_pool_persist)
+	ifconfig_pool_read (t->c1.ifconfig_pool_persist, m->ifconfig_pool);
     }
 
   /*
@@ -383,21 +400,30 @@ multi_close_instance (struct multi_context *m,
       struct gc_arena gc = gc_new ();
       struct buffer cmd = alloc_buf_gc (256, &gc);
 
-      mutex_lock_static (L_SCRIPT);
-
-      setenv_str ("script_type", "client-disconnect");
+      setenv_str (mi->context.c2.es, "script_type", "client-disconnect");
 
       /* setenv incoming cert common name for script */
-      setenv_str ("common_name", tls_common_name (mi->context.c2.tls_multi, false));
+      setenv_str (mi->context.c2.es, "common_name", tls_common_name (mi->context.c2.tls_multi, true));
 
       /* setenv client real IP address */
-      setenv_trusted (get_link_socket_info (&mi->context));
+      setenv_trusted (mi->context.c2.es, get_link_socket_info (&mi->context));
+
+      /* setenv tunnel endpoints */
+      {
+	in_addr_t local=0, remote=0;
+	if (mi->context.c2.push_ifconfig_defined)
+	  {
+	    remote = mi->context.c2.push_ifconfig_local;
+	    if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
+	      local = mi->context.c2.push_ifconfig_remote_netmask;
+	  }
+	setenv_in_addr_t (mi->context.c2.es, "ifconfig_pool_local", local);
+	setenv_in_addr_t (mi->context.c2.es, "ifconfig_pool_remote", remote);
+      }
 
       buf_printf (&cmd, "%s", mi->context.options.client_disconnect_script);
 
-      system_check (BSTR (&cmd), "client-disconnect command failed", false);
-
-      mutex_unlock_static (L_SCRIPT);
+      system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "client-disconnect command failed");
 
       gc_free (&gc);
     }
@@ -803,6 +829,7 @@ multi_add_iroutes (struct multi_context *m,
 	     multi_instance_string (mi, false, &gc));
 
       mroute_helper_add_iroute (m->route_helper, ir);
+      
       multi_learn_in_addr_t (m, mi, ir->network, ir->netbits);
     }
   gc_free (&gc);
@@ -849,210 +876,223 @@ multi_delete_dup (struct multi_context *m, struct multi_instance *new_mi)
 static void
 multi_connection_established (struct multi_context *m, struct multi_instance *mi)
 {
-  struct gc_arena gc = gc_new ();
-  in_addr_t local=0, remote=0;
-  const char *dynamic_config_file = NULL;
-  bool dynamic_config_file_mark_for_delete = false;
-
-  ASSERT (mi->context.c1.tuntap);
-
-  /* acquire script mutex */
-  mutex_lock_static (L_SCRIPT);
-
-  /* generate a msg() prefix for this client instance */
-  generate_prefix (mi);
-
-  /* delete instances of previous clients with same common-name */
-  if (!mi->context.options.duplicate_cn)
-    multi_delete_dup (m, mi);
-
-  /*
-   * Get a pool address, which may be released before the end
-   * of this function if it's not needed.
-   */
-  if (m->ifconfig_pool)
+  if (tls_authenticated (mi->context.c2.tls_multi))
     {
-      const char *cn = NULL;
+      struct gc_arena gc = gc_new ();
+      in_addr_t local=0, remote=0;
+      const char *dynamic_config_file = NULL;
+      bool dynamic_config_file_mark_for_delete = false;
+
+      ASSERT (mi->context.c1.tuntap);
+
+      /* lock down the common name so it can't change during future TLS renegotiations */
+      tls_lock_common_name (mi->context.c2.tls_multi);
+
+      /* generate a msg() prefix for this client instance */
+      generate_prefix (mi);
+
+      /* delete instances of previous clients with same common-name */
       if (!mi->context.options.duplicate_cn)
-	cn = tls_common_name (mi->context.c2.tls_multi, true);
+	multi_delete_dup (m, mi);
 
-      mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote, cn);
-      if (mi->vaddr_handle >= 0)
+      /*
+       * Get a pool address, which may be released before the end
+       * of this function if it's not needed.
+       */
+      if (m->ifconfig_pool)
 	{
-	  if (local)
-	    setenv_in_addr_t ("ifconfig_pool_local", local);
-	  if (remote)
-	    setenv_in_addr_t ("ifconfig_pool_remote", remote);
+	  const char *cn = NULL;
+	  if (!mi->context.options.duplicate_cn)
+	    cn = tls_common_name (mi->context.c2.tls_multi, true);
+
+	  mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote, cn);
+	  if (mi->vaddr_handle >= 0)
+	    {
+	      setenv_in_addr_t (mi->context.c2.es, "ifconfig_pool_local", local);
+	      setenv_in_addr_t (mi->context.c2.es, "ifconfig_pool_remote", remote);
+	    }
+	  else
+	    {
+	      msg (D_MULTI_ERRORS, "MULTI: no free --ifconfig-pool addresses are available");
+	    }
+	}
+
+      /* setenv incoming cert common name for script */
+      setenv_str (mi->context.c2.es, "common_name", tls_common_name (mi->context.c2.tls_multi, true));
+
+      /* setenv client real IP address */
+      setenv_trusted (mi->context.c2.es, get_link_socket_info (&mi->context));
+
+      /*
+       * instance-specific directives to be processed:
+       *
+       *   iroute start-ip end-ip
+       *   ifconfig-push local remote-netmask
+       *   push
+       */
+
+      /*
+       * Run --client-connect script.
+       */
+      if (mi->context.options.client_connect_script)
+	{
+	  struct buffer cmd = alloc_buf_gc (256, &gc);
+	  setenv_str (mi->context.c2.es, "script_type", "client-connect");
+
+	  dynamic_config_file = create_temp_filename (mi->context.options.tmp_dir, &gc);
+
+	  delete_file (dynamic_config_file);
+
+	  buf_printf (&cmd, "%s %s",
+		      mi->context.options.client_connect_script,
+		      dynamic_config_file);
+
+	  system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "client-connect command failed");
+
+	  if (test_file (dynamic_config_file))
+	    {
+	      dynamic_config_file_mark_for_delete = true;
+	    }
+	  else
+	    {
+	      dynamic_config_file = NULL;
+	    }
+	}
+
+      /*
+       * If client connect script was not run, or if it
+       * was run but did not create a dynamic config file,
+       * try to get a dynamic config file from the
+       * --client-config-dir directory.
+       */
+      if (!dynamic_config_file)
+	{
+	  dynamic_config_file = gen_path (mi->context.options.client_config_dir,
+					  tls_common_name (mi->context.c2.tls_multi, false),
+					  &gc);
+
+	  if (!test_file (dynamic_config_file))
+	    dynamic_config_file = NULL;
+	}
+
+      /*
+       * Load the dynamic options.
+       */
+      if (dynamic_config_file)
+	{
+	  unsigned int option_types_found = 0;
+	  options_server_import (&mi->context.options,
+				 dynamic_config_file,
+				 D_IMPORT_ERRORS,
+				 OPT_P_PUSH|OPT_P_INSTANCE|OPT_P_TIMER|OPT_P_CONFIG,
+				 &option_types_found,
+				 mi->context.c2.es);
+	  do_deferred_options (&mi->context, option_types_found);
+	}
+
+      /*
+       * Delete script-generated dynamic config file.
+       */
+      if (dynamic_config_file && dynamic_config_file_mark_for_delete)
+	{
+	  if (!delete_file (dynamic_config_file))
+	    msg (D_MULTI_ERRORS, "MULTI: problem deleting temporary file: %s",
+		 dynamic_config_file);
+	}
+
+      /*
+       * If ifconfig addresses were set by dynamic config file,
+       * release pool addresses, otherwise keep them.
+       */
+      if (mi->context.options.push_ifconfig_defined)
+	{
+	  /* ifconfig addresses were set statically,
+	     release dynamic allocation */
+	  ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle);
+	  mi->vaddr_handle = -1;
+
+	  mi->context.c2.push_ifconfig_defined = true;
+	  mi->context.c2.push_ifconfig_local = mi->context.options.push_ifconfig_local;
+	  mi->context.c2.push_ifconfig_remote_netmask = mi->context.options.push_ifconfig_remote_netmask;
 	}
       else
 	{
-	  msg (D_MULTI_ERRORS, "MULTI: no free --ifconfig-pool addresses are available");
-	}
-    }
-
-  /* setenv incoming cert common name for script */
-  setenv_str ("common_name", tls_common_name (mi->context.c2.tls_multi, false));
-
-  /* setenv client real IP address */
-  setenv_trusted (get_link_socket_info (&mi->context));
-
-  /*
-   * instance-specific directives to be processed:
-   *
-   *   iroute start-ip end-ip
-   *   ifconfig-push local remote-netmask
-   *   push
-   */
-
-  /*
-   * Run --client-connect script.
-   */
-  if (mi->context.options.client_connect_script)
-    {
-      struct buffer cmd = alloc_buf_gc (256, &gc);
-      setenv_str ("script_type", "client-connect");
-
-      dynamic_config_file = create_temp_filename (mi->context.options.tmp_dir, &gc);
-
-      delete_file (dynamic_config_file);
-
-      buf_printf (&cmd, "%s %s",
-		  mi->context.options.client_connect_script,
-		  dynamic_config_file);
-
-      system_check (BSTR (&cmd), "client-connect command failed", false);
-
-      if (test_file (dynamic_config_file))
-	{
-	  dynamic_config_file_mark_for_delete = true;
-	}
-      else
-	{
-	  dynamic_config_file = NULL;
-	}
-    }
-
-  /*
-   * If client connect script was not run, or if it
-   * was run but did not create a dynamic config file,
-   * try to get a dynamic config file from the
-   * --client-config-dir directory.
-   */
-  if (!dynamic_config_file)
-    {
-      dynamic_config_file = gen_path
-	(mi->context.options.client_config_dir,
-	 tls_common_name (mi->context.c2.tls_multi, false),
-	 &gc);
-
-      if (!test_file (dynamic_config_file))
-	dynamic_config_file = NULL;
-    }
-
-  /*
-   * Load the dynamic options.
-   */
-  if (dynamic_config_file)
-    {
-      unsigned int option_types_found = 0;
-      options_server_import (&mi->context.options,
-			     dynamic_config_file,
-			     D_IMPORT_ERRORS,
-			     OPT_P_PUSH|OPT_P_INSTANCE|OPT_P_TIMER|OPT_P_CONFIG,
-			     &option_types_found);
-      do_deferred_options (&mi->context, option_types_found);
-    }
-
-  /*
-   * Delete script-generated dynamic config file.
-   */
-  if (dynamic_config_file && dynamic_config_file_mark_for_delete)
-    {
-      if (!delete_file (dynamic_config_file))
-	msg (D_MULTI_ERRORS, "MULTI: problem deleting temporary file: %s",
-	     dynamic_config_file);
-    }
-
-  /*
-   * If ifconfig addresses were set by dynamic config file,
-   * release pool addresses, otherwise keep them.
-   */
-  if (mi->context.options.push_ifconfig_defined)
-    {
-      /* ifconfig addresses were set statically,
-	 release dynamic allocation */
-      ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle);
-      mi->vaddr_handle = -1;
-
-      mi->context.c2.push_ifconfig_defined = true;
-      mi->context.c2.push_ifconfig_local = mi->context.options.push_ifconfig_local;
-      mi->context.c2.push_ifconfig_remote_netmask = mi->context.options.push_ifconfig_remote_netmask;
-    }
-  else
-    {
-      if (mi->vaddr_handle >= 0)
-	{
-	  /* use pool ifconfig address(es) */
-	  mi->context.c2.push_ifconfig_local = remote;
-	  if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
+	  if (mi->vaddr_handle >= 0)
 	    {
-	      mi->context.c2.push_ifconfig_remote_netmask = local;
-	      mi->context.c2.push_ifconfig_defined = true;
-	    }
-	  else if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TAP)
-	    {
-	      mi->context.c2.push_ifconfig_remote_netmask = mi->context.options.ifconfig_pool_netmask;
-	      if (!mi->context.c2.push_ifconfig_remote_netmask)
-		mi->context.c2.push_ifconfig_remote_netmask = mi->context.c1.tuntap->remote_netmask;
-	      if (mi->context.c2.push_ifconfig_remote_netmask)
-		mi->context.c2.push_ifconfig_defined = true;
-	      else
-		msg (D_MULTI_ERRORS, "MULTI: no --ifconfig-pool netmask parameter is available to push to %s",
-		     multi_instance_string (mi, false, &gc));
+	      /* use pool ifconfig address(es) */
+	      mi->context.c2.push_ifconfig_local = remote;
+	      if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
+		{
+		  if (mi->context.options.ifconfig_pool_linear)		    
+		    mi->context.c2.push_ifconfig_remote_netmask = mi->context.c1.tuntap->local;
+		  else
+		    mi->context.c2.push_ifconfig_remote_netmask = local;
+		  mi->context.c2.push_ifconfig_defined = true;
+		}
+	      else if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TAP)
+		{
+		  mi->context.c2.push_ifconfig_remote_netmask = mi->context.options.ifconfig_pool_netmask;
+		  if (!mi->context.c2.push_ifconfig_remote_netmask)
+		    mi->context.c2.push_ifconfig_remote_netmask = mi->context.c1.tuntap->remote_netmask;
+		  if (mi->context.c2.push_ifconfig_remote_netmask)
+		    mi->context.c2.push_ifconfig_defined = true;
+		  else
+		    msg (D_MULTI_ERRORS, "MULTI: no --ifconfig-pool netmask parameter is available to push to %s",
+			 multi_instance_string (mi, false, &gc));
+		}
 	    }
 	}
-    }
 
-  /*
-   * make sure we got ifconfig settings from somewhere
-   */
-  if (!mi->context.c2.push_ifconfig_defined)
-    {
-      msg (D_MULTI_ERRORS, "MULTI: no dynamic or static remote --ifconfig address is available for %s",
-	   multi_instance_string (mi, false, &gc));
-    }
-
-  /*
-   * For routed tunnels, set up internal route to endpoint
-   * plus add all iroute routes.
-   */
-  if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
-    {
-      if (mi->context.c2.push_ifconfig_defined)
+      /*
+       * make sure we got ifconfig settings from somewhere
+       */
+      if (!mi->context.c2.push_ifconfig_defined)
 	{
-	  multi_learn_in_addr_t (m, mi, mi->context.c2.push_ifconfig_local, -1);
-	  msg (D_MULTI_LOW, "MULTI: primary virtual IP for %s: %s",
-	       multi_instance_string (mi, false, &gc),
-	       print_in_addr_t (mi->context.c2.push_ifconfig_local, 0, &gc));
+	  msg (D_MULTI_ERRORS, "MULTI: no dynamic or static remote --ifconfig address is available for %s",
+	       multi_instance_string (mi, false, &gc));
 	}
 
-      /* add routes locally, pointing to new client, if
-	 --iroute options have been specified */
-      multi_add_iroutes (m, mi);
-    }
-  else if (mi->context.options.iroutes)
-    {
-      msg (D_MULTI_ERRORS, "MULTI: --iroute options rejected for %s -- iroute only works with tun-style tunnels",
-	   multi_instance_string (mi, false, &gc));
+      /*
+       * For routed tunnels, set up internal route to endpoint
+       * plus add all iroute routes.
+       */
+      if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
+	{
+	  if (mi->context.c2.push_ifconfig_defined)
+	    {
+	      multi_learn_in_addr_t (m, mi, mi->context.c2.push_ifconfig_local, -1);
+	      msg (D_MULTI_LOW, "MULTI: primary virtual IP for %s: %s",
+		   multi_instance_string (mi, false, &gc),
+		   print_in_addr_t (mi->context.c2.push_ifconfig_local, 0, &gc));
+	    }
+
+	  /* add routes locally, pointing to new client, if
+	     --iroute options have been specified */
+	  multi_add_iroutes (m, mi);
+
+	  /*
+	   * iroutes represent subnets which are "owned" by a particular
+	   * client.  Therefore, do not actually push a route to a client
+	   * if it matches one of the client's iroutes.
+	   */
+	  remove_iroutes_from_push_route_list (&mi->context.options);
+	}
+      else if (mi->context.options.iroutes)
+	{
+	  msg (D_MULTI_ERRORS, "MULTI: --iroute options rejected for %s -- iroute only works with tun-style tunnels",
+	       multi_instance_string (mi, false, &gc));
+	}
+
+      /* set flag so we don't get called again */
+      mi->connection_established_flag = true;
+
+      gc_free (&gc);
     }
 
   /*
    * Reply now to client's PUSH_REQUEST query
    */
   mi->context.c2.push_reply_deferred = false;
-
-  mutex_unlock_static (L_SCRIPT);
-  gc_free (&gc);
 }
 
 /*
@@ -1172,7 +1212,7 @@ multi_process_post (struct multi_context *m, struct multi_instance *mi, const un
 {
   bool ret = true;
 
-  if (!IS_SIG (&mi->context) && (flags & MPP_PRE_SELECT))
+  if (!IS_SIG (&mi->context) && ((flags & MPP_PRE_SELECT) || ((flags & MPP_CONDITIONAL_PRE_SELECT) && !ANY_OUT (&mi->context))))
     {
       /* figure timeouts and fetch possible outgoing
 	 to_link packets (such as ping or TLS control) */
@@ -1190,14 +1230,13 @@ multi_process_post (struct multi_context *m, struct multi_instance *mi, const un
 			      &mi->wakeup,
 			      compute_wakeup_sigma (&mi->context.c2.timeval));
 
-	  /* connection is "established" when SSL/TLS key negotiation succeeds */
+	  /* connection is "established" when SSL/TLS key negotiation succeeds
+	     and (if specified) auth user/pass succeeds */
 	  if (!mi->connection_established_flag && CONNECTION_ESTABLISHED (&mi->context))
-	    {
-	      multi_connection_established (m, mi);
-	      mi->connection_established_flag = true;
-	    }
+	    multi_connection_established (m, mi);
 	}
     }
+
   if (IS_SIG (&mi->context))
     {
       if (flags & MPP_CLOSE_ON_SIGNAL)
@@ -1223,7 +1262,7 @@ multi_process_post (struct multi_context *m, struct multi_instance *mi, const un
 #endif
     }
 
-  if (flags & MPP_RECORD_TOUCH && m->mpp_touched)
+  if ((flags & MPP_RECORD_TOUCH) && m->mpp_touched)
     *m->mpp_touched = mi;
 
   return ret;
@@ -1523,6 +1562,9 @@ multi_process_per_second_timers_dowork (struct multi_context *m)
       if (status_trigger (m->top.c1.status_output))
 	multi_print_status (m, m->top.c1.status_output);
     }
+
+  /* possibly flush ifconfig-pool file */
+  multi_ifconfig_pool_persist (m, false);
 }
 
 void

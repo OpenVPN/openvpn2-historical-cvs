@@ -41,6 +41,7 @@ LIB_DIRS = -L${OPENSSL}/out -L${LZO}/src/.libs
 EXE = openvpn.exe
 
 HEADERS = \
+	base64.h \
 	basic.h \
 	buffer.h \
 	circ_list.h common.h \
@@ -70,6 +71,7 @@ HEADERS = \
 	mtu.h \
 	mudp.h \
 	multi.h \
+	ntlm.h \
 	occ-inline.h \
 	occ.h \
         openvpn.h \
@@ -96,9 +98,11 @@ HEADERS = \
 	syshead.h \
         thread.h \
 	tun.h \
-	win32.h
+	win32.h \
+	work.h
 
-OBJS =  buffer.o \
+OBJS =  base64.o \
+	buffer.o \
 	crypto.o \
 	error.o \
 	event.o \
@@ -120,6 +124,7 @@ OBJS =  buffer.o \
 	mtu.o \
 	mudp.o \
 	multi.o \
+	ntlm.o \
 	occ.o \
         openvpn.o \
 	options.o \
@@ -142,7 +147,8 @@ OBJS =  buffer.o \
 	status.o \
 	thread.o \
 	tun.o \
-	win32.o
+	win32.o \
+	work.o
 
 dynamic : ${OBJS}
 	${CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl32 -leay32 ${LIBS}

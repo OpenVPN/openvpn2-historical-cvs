@@ -194,6 +194,7 @@ void netcmd_semaphore_close (void);
 void netcmd_semaphore_lock (void);
 void netcmd_semaphore_release (void);
 
+bool get_console_input_win32 (const char *prompt, const bool echo, char *input, const int capacity);
 char *getpass (const char *prompt);
 
 /* Set Win32 security attributes structure to allow all access */

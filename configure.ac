@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [2.0_beta11], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [2.0_beta12], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -48,7 +48,7 @@ AC_ARG_ENABLE(ssl,
 )
 
 AC_ARG_ENABLE(pthread,
-   [  --enable-pthread        Compile pthread support (Not implemented in 2.0)],
+   [  --enable-pthread        Compile pthread support],
    [PTHREAD="$enableval"],
    [PTHREAD="no"]
 )
@@ -318,26 +318,26 @@ dnl
 dnl check for pthread library
 dnl
 
-dnl if test "$PTHREAD" = "yes"; then
-dnl   AC_CHECKING([for pthread support])
-dnl   ACX_PTHREAD(
-dnl	[
-dnl	    case "$target" in
-dnl	    *openbsd*)
-dnl		AC_MSG_RESULT([WARNING: pthread support on OpenBSD is unstable!])
-dnl		CFLAGS="$CFLAGS -pthread"
-dnl		;;
-dnl	    esac
-dnl	    LIBS="$PTHREAD_LIBS $LIBS"
-dnl	    CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
-dnl	    CC="$PTHREAD_CC"
-dnl	    AC_DEFINE(USE_PTHREAD, 1, [Use pthread-based multithreading])
-dnl	],
-dnl	[
-dnl	    AC_MSG_RESULT([I don't know how to build with pthread support on this platform.])
-dnl	    AC_MSG_ERROR([try ./configure --disable-pthread])
-dnl	])
-dnl fi
+if test "$PTHREAD" = "yes"; then
+  AC_CHECKING([for pthread support])
+  ACX_PTHREAD(
+        [
+	    case "$target" in
+	    *openbsd*)
+		AC_MSG_RESULT([WARNING: pthread support on OpenBSD is unstable!])
+		CFLAGS="$CFLAGS -pthread"
+		;;
+	    esac
+	    LIBS="$PTHREAD_LIBS $LIBS"
+	    CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
+	    CC="$PTHREAD_CC"
+	    AC_DEFINE(USE_PTHREAD, 1, [Use pthread-based multithreading])
+	],
+	[
+	    AC_MSG_RESULT([I don't know how to build with pthread support on this platform.])
+	    AC_MSG_ERROR([try ./configure --disable-pthread])
+	])
+fi
 
 dnl
 dnl check for dmalloc library
@@ -455,7 +455,7 @@ fi
 
 dnl enable strict compiler warnings
 if test "$STRICT" = "yes"; then
-   CFLAGS="$CFLAGS -Wall -W -Wpointer-arith -Wsign-compare -Wno-unused-parameter -Wno-unused-function"
+   CFLAGS="$CFLAGS -Wall -Wpointer-arith -Wsign-compare -Wno-unused-parameter -Wno-unused-function"
 fi
 
 dnl enable profiling

@@ -29,9 +29,9 @@
 #include "config.h"
 #endif
 
-#ifdef USE_PTHREAD
-
 #include "syshead.h"
+
+#ifdef USE_PTHREAD
 
 #include "thread.h"
 #include "buffer.h"
@@ -40,8 +40,6 @@
 #include "crypto.h"
 
 #include "memdbg.h"
-
-#if defined(USE_CRYPTO) && defined(USE_SSL)
 
 static struct sparse_mutex *ssl_mutex;  /* GLOBAL */
 
@@ -92,8 +90,6 @@ ssl_thread_cleanup (void)
     pthread_mutex_destroy (&ssl_mutex[i].mutex);
   OPENSSL_free (ssl_mutex);
 }
-
-#endif /* defined(USE_CRYPTO) && defined(USE_SSL) */
 
 struct sparse_mutex mutex_array[N_MUTEXES]; /* GLOBAL */
 bool pthread_initialized;                   /* GLOBAL */

@@ -40,26 +40,71 @@
  * printf-style interface for outputting status info
  */
 
+static const char *
+print_status_mode (unsigned int flags)
+{
+  switch (flags)
+    {
+    case STATUS_OUTPUT_WRITE:
+      return "WRITE";
+    case STATUS_OUTPUT_READ:
+      return "READ";
+    case STATUS_OUTPUT_READ|STATUS_OUTPUT_WRITE:
+      return "READ/WRITE";
+    default:
+      return "UNDEF";
+    }
+}
+
 struct status_output *
-status_open (const char *filename, int refresh_freq, int msglevel)
+status_open (const char *filename, const int refresh_freq, const int msglevel, const unsigned int flags)
 {
   struct status_output *so = NULL;
   if (filename || msglevel >= 0)
     {
       ALLOC_OBJ_CLEAR (so, struct status_output);
+      so->flags = flags;
       so->msglevel = msglevel;
       so->fd = -1;
+      buf_reset (&so->read_buf);
+      event_timeout_clear (&so->et);
       if (filename)
 	{
-	  so->fd = open (filename,
-			 O_CREAT | O_TRUNC | O_WRONLY,
-			 S_IRUSR | S_IWUSR);
+	  switch (so->flags)
+	    {
+	    case STATUS_OUTPUT_WRITE:
+	      so->fd = open (filename,
+			     O_CREAT | O_TRUNC | O_WRONLY,
+			     S_IRUSR | S_IWUSR);
+	      break;
+	    case STATUS_OUTPUT_READ:
+	      so->fd = open (filename,
+			     O_RDONLY,
+			     S_IRUSR | S_IWUSR);
+	      break;
+	    case STATUS_OUTPUT_READ|STATUS_OUTPUT_WRITE:
+	      so->fd = open (filename,
+			     O_CREAT | O_RDWR,
+			     S_IRUSR | S_IWUSR);
+	      break;
+	    default:
+	      ASSERT (0);
+	    }
 	  if (so->fd >= 0)
-	    so->filename = string_alloc (filename, NULL);
+	    {
+	      so->filename = string_alloc (filename, NULL);
+
+	      /* allocate read buffer */
+	      if (so->flags & STATUS_OUTPUT_READ)
+		so->read_buf = alloc_buf (512);
+	    }
 	  else
-	    msg (M_WARN, "Note: cannot open %s for status info output", filename);
+	    msg (M_WARN, "Note: cannot open %s for %s", filename, print_status_mode (so->flags));
 	}
-      if (refresh_freq > 0)
+      else
+	so->flags = STATUS_OUTPUT_WRITE;
+
+      if ((so->flags & STATUS_OUTPUT_WRITE) && refresh_freq > 0)
 	{
 	  event_timeout_init (&so->et, refresh_freq, 0);
 	}
@@ -70,21 +115,28 @@ status_open (const char *filename, int refresh_freq, int msglevel)
 bool
 status_trigger (struct status_output *so)
 {
-  struct timeval null;
-  CLEAR (null);
-  return event_timeout_trigger (&so->et, &null, ETT_DEFAULT);
+  if (so)
+    {
+      struct timeval null;
+      CLEAR (null);
+      return event_timeout_trigger (&so->et, &null, ETT_DEFAULT);
+    }
+  else
+    return false;
 }
 
 bool
 status_trigger_tv (struct status_output *so, struct timeval *tv)
 {
-  return event_timeout_trigger (&so->et, tv, ETT_DEFAULT);
+  if (so)
+    return event_timeout_trigger (&so->et, tv, ETT_DEFAULT);
+  else
+    return false;
 }
 
 void
 status_reset (struct status_output *so)
 {
-  perf_push (PERF_MULTI_SHOW_STATS);
   if (so && so->fd >= 0)
     lseek (so->fd, (off_t)0, SEEK_SET);
 }
@@ -92,22 +144,8 @@ status_reset (struct status_output *so)
 void
 status_flush (struct status_output *so)
 {
-  if (so && so->fd >= 0)
+  if (so && so->fd >= 0 && (so->flags & STATUS_OUTPUT_WRITE))
     {
-#if 0
-      // test truncate
-      {
-	static int foo;
-	if (foo++ & 1)
-	  {
-	    int i;
-	    for (i = 0; i < 10; ++i)
-	      status_printf (so, "[%d] LONG This is a test", i);
-	  }
-	else
-	  status_printf (so, "[0] SHORT");
-      }
-#endif
 #if defined(HAVE_FTRUNCATE)
       {
 	const off_t off = lseek (so->fd, (off_t)0, SEEK_CUR);
@@ -121,8 +159,13 @@ status_flush (struct status_output *so)
 #else
 #warning both ftruncate and chsize functions appear to be missing from this OS
 #endif
+
+      /* clear read buffer */
+      if (buf_defined (&so->read_buf))
+	{
+	  ASSERT (buf_init (&so->read_buf, 0));
+	}
     }
-  perf_pop ();
 }
 
 void
@@ -134,6 +177,8 @@ status_close (struct status_output *so)
 	close (so->fd);
       if (so->filename)
 	free (so->filename);
+      if (buf_defined (&so->read_buf))
+	free_buf (&so->read_buf);
       free (so);
     }
 }
@@ -143,7 +188,7 @@ status_close (struct status_output *so)
 void
 status_printf (struct status_output *so, const char *format, ...)
 {
-  if (so)
+  if (so && (so->flags & STATUS_OUTPUT_WRITE))
     {
       char buf[STATUS_PRINTF_MAXLEN+1]; /* leave extra byte for newline */
       va_list arglist;
@@ -165,4 +210,48 @@ status_printf (struct status_output *so, const char *format, ...)
       if (so->msglevel >= 0)
 	msg (so->msglevel, "%s", buf);
     }
+}
+
+bool
+status_read (struct status_output *so, struct buffer *buf)
+{
+  bool ret = false;
+
+  if (so && so->fd >= 0 && (so->flags & STATUS_OUTPUT_READ))
+    {
+      ASSERT (buf_defined (&so->read_buf));      
+      ASSERT (buf_defined (buf));
+      while (true)
+	{
+	  const int c = buf_read_u8 (&so->read_buf);
+
+	  /* read more of file into buffer */
+	  if (c == -1)
+	    {
+	      int len;
+
+	      ASSERT (buf_init (&so->read_buf, 0));
+	      len = read (so->fd, BPTR (&so->read_buf), BCAP (&so->read_buf));
+	      if (len <= 0)
+		break;
+
+	      ASSERT (buf_inc_len (&so->read_buf, len));
+	      continue;
+	    }
+
+	  ret = true;
+
+	  if (c == '\r')
+	    continue;
+
+	  if (c == '\n')
+	    break;
+
+	  buf_write_u8 (buf, c);
+	}
+
+      buf_null_terminate (buf);
+    }
+
+  return ret;
 }

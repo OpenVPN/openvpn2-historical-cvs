@@ -1,7 +1,13 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.26 2004/05/06 21:24:28 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.27 2004/05/07 22:26:31 jimyonan Exp $
+
+2004.05.07 -- Version 2.0-test28
+
+* Fixed bug which could cause segfault on program
+  shutdown if --route and --persist-tun are used
+  together.
 
 2004.05.06 -- Version 2.0-test27
 
@@ -10,9 +16,10 @@ $Id: ChangeLog,v 1.89.2.26 2004/05/06 21:24:28 jimyonan Exp $
 * Fixed bug in verify_callback() that might have
   caused uninitialized data to be referenced.
 * --iroute now allows full CIDR subnet routing.
-* Source addresses on VPN packets coming from a
-  particular client must be associated with that
-  client in the OpenVPN internal routing table.
+* In "--mode server --dev tun" usage, source addresses
+  on VPN packets coming from a particular client must
+  be associated with that client in the OpenVPN internal
+  routing table.
 	
 2004.04.28 -- Version 2.0-test26
 

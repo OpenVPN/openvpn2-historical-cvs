@@ -440,7 +440,7 @@ static void
 do_alloc_route_list (struct context *c)
 {
   if (c->options.routes)
-    c->c1.route_list = new_route_list (&c->c2.gc);
+    c->c1.route_list = new_route_list (&c->gc);
 }
 
 

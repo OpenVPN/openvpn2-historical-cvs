@@ -1,4 +1,4 @@
-dnl Special Macros
+dnl Special Autoconf Macros for OpenVPN
 
 dnl OPENVPN_ADD_LIBS(LIB)
 AC_DEFUN(OPENVPN_ADD_LIBS, [
@@ -121,7 +121,7 @@ dnl (with help from M. Frigo), as well as ac_pthread and hb_pthread
 dnl macros posted by AFC to the autoconf macro repository.  We are also
 dnl grateful for the helpful feedback of numerous users.
 dnl
-dnl @version $Id: acinclude.m4,v 1.2 2003/02/20 05:02:36 jimyonan Exp $
+dnl @version $Id: acinclude.m4,v 1.3 2003/02/21 16:14:05 jimyonan Exp $
 dnl @author Steven G. Johnson <stevenj@alum.mit.edu> and Alejandro Forero Cuervo <bachue@bachue.com>
 
 AC_DEFUN([ACX_PTHREAD], [

@@ -880,11 +880,12 @@ openvpn (const struct options *options,
 	      udp_socket.mtu_changed = false;
 	    }
 	  fragment_housekeeping (fragment, current, &timeval);
+	  tv = &timeval;
 	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame, current))
 	    {
 	      to_tun = buf;
 	    }
-	  else if (!to_udp.len && fragment_ready_to_send (fragment, &buf, &frame, current))
+	  if (!to_udp.len && fragment_ready_to_send (fragment, &buf, &frame, current))
 	    {
 #ifdef USE_CRYPTO
 #ifdef USE_SSL

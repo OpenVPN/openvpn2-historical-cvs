@@ -115,8 +115,9 @@ struct frame {
  * a tap device ifconfiged to an MTU of 1200 might actually want
  * to return a packet size of 1214 on a read().
  */
-#define PAYLOAD_SIZE(f)      ((f)->mtu + (f)->extra_tun)
-#define PAYLOAD_SIZE_MIN(f)  ((f)->mtu_dynamic_min + (f)->extra_tun)
+#define PAYLOAD_SIZE(f)         ((f)->mtu + (f)->extra_tun)
+#define PAYLOAD_SIZE_MIN(f)     ((f)->mtu_dynamic_min + (f)->extra_tun)
+#define PAYLOAD_SIZE_DYNAMIC(f) ((f)->mtu_dynamic + (f)->extra_tun)
 
 /*
  * In general, OpenVPN packet building routines set the initial

@@ -41,6 +41,7 @@
 #define D_RESOLVE_ERRORS     LOGLEV(1, 4, M_NONFATAL)   /* show hostname resolve errors */
 #define D_COMP_ERRORS        LOGLEV(1, 5, M_NONFATAL)   /* show compression errors */
 #define D_PID_PERSIST        LOGLEV(1, 6, M_NONFATAL)   /* show packet_id persist errors */
+#define D_FRAG_ERRORS        LOGLEV(1, 7, M_NONFATAL)   /* show fragmentation errors */
 
 #define D_SHOW_PARMS         LOGLEV(2, 10, 0)   /* show all parameters on program initiation */
 

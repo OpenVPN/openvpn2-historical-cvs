@@ -26,6 +26,7 @@
 #ifndef FRAGMENT_H
 #define FRAGMENT_H
 
+#include "common.h"
 #include "buffer.h"
 #include "interval.h"
 #include "mtu.h"
@@ -34,14 +35,45 @@
 #define N_FRAG_BUF            40   /* number of packet buffers, should be <= N_FRAG_ID */
 #define FRAG_TTL_SEC          10   /* number of seconds time-to-live for a fragment */
 
+struct fragment {
+  bool defined;
+
+  int max_frag_size;               /* maximum size of each fragment */
+
+  /*
+   * 32 bit array corresponding to each fragment.  A 1 bit in element n means that
+   * the fragment n has been received.  Needs to have at least MAX_FRAGS bits.
+   */
+# define FRAG_MAP_MASK 0xFFFFFFFF
+# define MAX_FRAGS             32  /* maximum number of fragments per packet */
+  unsigned int map;
+
+  struct buffer buf;               /* fragment assembly buffer for received datagrams */
+};
+
+struct fragment_list {
+  int seq_id;
+  int index;
+  struct fragment fragments[N_FRAG_BUF];
+};
+
 struct fragment_master {
-  struct event_timeout wakeup;
+  /* should we generate "fragmentation needed but DF set" messages? */
+  bool generate_icmp;
+
+  struct event_timeout wakeup;     /* when should main openvpn event loop wake us up */
 
   /* this value is bounced back to peer in FRAG_SIZE with FRAG_WHOLE/FRAG_YES_NOTLAST set */
   int max_packet_size_received;    /* value is zeroed after send to peer */
 
+  /* maximum packet size we've sent (without confirming receipt) */
+  int max_packet_size_sent;
+
+  /* maximum packet size we've sent where receipt was confirmed */
+  int max_packet_size_sent_confirmed;
+
   /* a sequence ID describes a set of fragments that make up one datagram */
-# define N_FRAG_ID          1024   /* sequence number wraps to 0 at this value */
+# define N_SEQ_ID           1024   /* sequence number wraps to 0 at this value */
   int outgoing_seq_id;             /* sent as FRAG_SEQ_ID below */
 
   /* outgoing packet is possibly sent as a series of fragments */
@@ -49,22 +81,12 @@ struct fragment_master {
 # define MAX_FRAG_PKT_SIZE 65536   /* maximum packet size */
   int outgoing_frag_size;          /* sent to peer via FRAG_SIZE when FRAG_YES_LAST set */
 
-# define MAX_FRAGS            32   /* maximum number of fragments per packet */
   int current_frag_id;             /* each fragment in a datagram is numbered 0 to MAX_FRAGS-1 */ 
 
   struct buffer outgoing;          /* outgoing datagram, free if current_frag_id == 0 */
-};
 
-struct fragment {
-  int max_frag_size;               /* maximum size of each fragment, or 0 if undef */
-
-  /*
-   * 32 bit array corresponding to each fragment.  A 1 bit in element n means that
-   * the fragment n has been received.  Needs to have at least MAX_FRAGS bits.
-   */
-  uint32_t map;
-
-  struct buffer buf;               /* fragment assembly buffer for received datagrams */
+  /* incoming fragments from remote */
+  struct fragment_list incoming;
 };
 
 /*
@@ -72,6 +94,12 @@ struct fragment {
  */
 
 typedef uint32_t fragment_header_type;
+
+/* convert a fragment_header_type from host to network order */
+#define hton_fragment_header_type(x) htonl(x)
+
+/* convert a fragment_header_type from network to host order */
+#define ntoh_fragment_header_type(x) ntohl(x)
 
 /* FRAG_TYPE 3 bits */
 #define FRAG_TYPE_MASK        0x00000007
@@ -108,14 +136,7 @@ typedef uint32_t fragment_header_type;
 #define FRAG_SIZE_SHIFT       18
 #define FRAG_SIZE_ROUND_SHIFT 2  /* fragment/datagram sizes represented as multiple of 4 */
 
-/*
- * Inline functions
- */
-
-static inline void
-fragment_housekeeping (struct fragment_master *f, time_t current, struct timeval *tv)
-{
-}
+#define FRAG_SIZE_ROUND_SHIFT_MASK ((1 << FRAG_SIZE_ROUND_SHIFT) - 1)
 
 /*
  * Public functions
@@ -124,6 +145,7 @@ fragment_housekeeping (struct fragment_master *f, time_t current, struct timeval
 struct fragment_master *fragment_init (bool generate_icmp, struct frame *frame);
 
 void fragment_frame_init (struct fragment_master *f, const struct frame *frame);
+
 void fragment_free (struct fragment_master *f);
 
 void fragment_incoming (struct fragment_master *f, struct buffer *buf,
@@ -137,5 +159,22 @@ bool fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
 
 bool fragment_icmp (struct fragment_master *f, struct buffer *buf,
 		    const struct frame* frame, const time_t current);
+
+/*
+ * Private functions.
+ */
+void fragment_wakeup (struct fragment_master *f, time_t current);
+
+/*
+ * Inline functions
+ */
+
+static inline void
+fragment_housekeeping (struct fragment_master *f, time_t current, struct timeval *tv)
+{
+  if (event_timeout_trigger (&f->wakeup, current))
+    fragment_wakeup (f, current);
+  event_timeout_wakeup (&f->wakeup, current, tv);
+}
 
 #endif

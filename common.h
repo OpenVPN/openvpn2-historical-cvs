@@ -34,8 +34,44 @@ typedef unsigned long counter_type;
 /*
  * Printf formats for special types
  */
-#define counter_format "%10lu"
-#define ptr_format     "0x%08zx"
-#define time_format    "%u"
+#define counter_format        "%10lu"
+#define ptr_format            "0x%08zx"
+#define time_format           "%u"
+#define fragment_type_format  "0x%08x"
+
+/*
+ * Functions used for circular buffer index arithmetic.
+ */
+
+/*
+ * Return x - y on a circle of circumference mod by shortest path.
+ *
+ * 0 <= x < mod
+ * 0 <= y < mod
+ */
+static inline int
+modulo_subtract(int x, int y, int mod)
+{
+  const int d1 = x - y;
+  const int d2 = (x > y ? -mod : mod) + d1;
+  return abs(d1) > abs(d2) ? d2 : d1;
+}
+
+/*
+ * Return x + y on a circle of circumference mod.
+ *
+ * 0 <= x < mod
+ * -mod <= y <= mod
+ */
+static inline int
+modulo_add(int x, int y, int mod)
+{
+  int sum = x + y;
+  if (sum >= mod)
+    sum -= mod;
+  if (sum < 0)
+    sum += mod;
+  return sum;
+}
 
 #endif

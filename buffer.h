@@ -261,6 +261,25 @@ buf_copy (struct buffer *dest, const struct buffer *src)
 }
 
 static inline bool
+buf_copy_range (struct buffer *dest,
+		int dest_index,
+		const struct buffer *src,
+		int src_index,
+		int src_len)
+{
+  if (src_index < 0
+      || src_len < 0
+      || src_index + src_len > src->len
+      || dest_index < 0
+      || dest->offset + dest_index + src_len > dest->capacity)
+    return false;
+  memcpy (dest->data + dest->offset + dest_index, src->data + src->offset + src_len, src_len);
+  if (dest_index + src_len > dest->len)
+    dest->len = dest_index + src_len;
+  return true;
+}
+
+static inline bool
 buf_read (struct buffer *src, void *dest, int size)
 {
   uint8_t *cp = buf_read_alloc (src, size);

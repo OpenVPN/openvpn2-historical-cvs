@@ -383,6 +383,11 @@ get_cipher (const char *ciphername)
   cipher = EVP_get_cipherbyname (ciphername);
   if ( !(cipher && cipher_ok (OBJ_nid2sn (EVP_CIPHER_nid (cipher)))))
     msg (M_SSLERR, "Cipher algorithm '%s' not found", ciphername);
+  if (EVP_CIPHER_key_length (cipher) > MAX_CIPHER_KEY_LENGTH)
+    msg (M_FATAL, "Cipher algorithm '%s' uses a default key size (%d bytes) which is larger than OpenVPN's current maximum key size (%d bytes)",
+	 ciphername,
+	 EVP_CIPHER_key_length (cipher),
+	 MAX_CIPHER_KEY_LENGTH);
   return cipher;
 }
 
@@ -393,7 +398,12 @@ get_md (const char *digest)
   ASSERT (digest);
   md = EVP_get_digestbyname (digest);
   if (!md)
-    msg (M_SSLERR, "Message digest algorithm '%s' not found", digest);
+    msg (M_SSLERR, "Message hash algorithm '%s' not found", digest);
+  if (EVP_MD_size (md) > MAX_HMAC_KEY_LENGTH)
+    msg (M_FATAL, "Message hash algorithm '%s' uses a default hash size (%d bytes) which is larger than OpenVPN's current maximum hash size (%d bytes)",
+	 digest,
+	 EVP_MD_size (md),
+	 MAX_HMAC_KEY_LENGTH);
   return md;
 }
 
@@ -434,7 +444,7 @@ init_hmac (HMAC_CTX * ctx, const EVP_MD * digest,
 {
   HMAC_Init (ctx, key->hmac, kt->hmac_length, digest);
   msg (D_HANDSHAKE,
-       "%s: Using %d bit message digest '%s' for HMAC authentication",
+       "%s: Using %d bit message hash '%s' for HMAC authentication",
        prefix, HMAC_size (ctx) * 8, OBJ_nid2sn (EVP_MD_type (digest)));
 
   /* make sure we used a big enough key */
@@ -471,7 +481,7 @@ init_key_type (struct key_type *kt, const char *ciphername,
 	      || (cfb_ofb_allowed && (mode == EVP_CIPH_CFB_MODE || mode == EVP_CIPH_OFB_MODE))
 #endif
 	      ))
-	  msg (M_FATAL, "Cipher %s uses a mode not supported by OpenVPN in your current configuration.  CBC mode is always supported, while CFB and OFB modes are supported only when using SSL/TLS authentication and key exchange mode, and when OpenVPN has been built with ALLOW_NON_CBC_CIPHERS.", ciphername);
+	  msg (M_FATAL, "Cipher '%s' uses a mode not supported by OpenVPN in your current configuration.  CBC mode is always supported, while CFB and OFB modes are supported only when using SSL/TLS authentication and key exchange mode, and when OpenVPN has been built with ALLOW_NON_CBC_CIPHERS.", ciphername);
       }
     }
   else
@@ -800,70 +810,64 @@ test_crypto (const struct crypto_options *co, struct frame* frame)
 #ifdef USE_SSL
 void
 get_tls_handshake_key (const struct key_type *key_type,
-		       struct key_ctx_bi *ctx, const char *passphrase_file)
+		       struct key_ctx_bi *ctx,
+		       const char *passphrase_file,
+		       bool key_direction)
 {
   if (passphrase_file && key_type->hmac_length)
     {
-      struct key key;
+      struct key2 key2;
       struct key_type kt = *key_type;
+      struct key_direction_state kds;
 
       /* for control channel we are only authenticating, not encrypting */
       kt.cipher_length = 0;
       kt.cipher = NULL;
 
-      /* get key material for hmac */
-      {
-	unsigned int digest_len;
-	uint8_t digest[MAX_HMAC_KEY_LENGTH];
-	EVP_MD_CTX md;
+      /* first try to parse as an OpenVPN static key file */
+      read_key_file (&key2, passphrase_file, false);
 
-	CLEAR (key);
-	EVP_DigestInit (&md, kt.digest);
-
-	/* read passphrase file */
+      /* succeeded? */
+      if (key2.n)
 	{
-	  const int min_passphrase_size = 8;
-	  uint8_t buf[512];
-	  int total_size = 0;
-	  int fd = open (passphrase_file, O_RDONLY);
+	  msg (M_INFO,
+	       "Control Channel Authentication: using '%s' as an OpenVPN static key file",
+	       passphrase_file);
+	}
+      else
+	{
+	  int hash_size;
 
-	  if (fd == -1)
-	    msg (M_ERR, "Cannot open passphrase file: %s", passphrase_file);
+	  CLEAR (key2);
 
-	  for (;;)
-	    {
-	      int size = read (fd, buf, sizeof (buf));
-	      if (size == 0)
-		break;
-	      if (size == -1)
-		msg (M_ERR, "Read error on passphrase file: %s",
-		     passphrase_file);
-	      EVP_DigestUpdate (&md, buf, size);
-	      total_size += size;
-	    }
-	  close (fd);
-	  warn_if_group_others_accessible (passphrase_file);
-	  if (total_size < min_passphrase_size)
-	    msg (M_FATAL,
-		 "Passphrase file %s is too small (must have at least %d characters)",
-		 passphrase_file, min_passphrase_size);
+	  /* failed, now try to get hash from a freeform file */
+	  hash_size = read_passphrase_hash (passphrase_file,
+					    kt.digest,
+					    key2.keys[0].hmac,
+					    MAX_HMAC_KEY_LENGTH);
+	  ASSERT (hash_size == kt.hmac_length);
+
+	  /* suceeded */
+	  key2.n = 1;
+
+	  msg (M_INFO,
+	       "Control Channel Authentication: using '%s' as a free-form passphrase file",
+	       passphrase_file);
 	}
 
-	EVP_DigestFinal (&md, digest, &digest_len);
-	ASSERT (digest_len == kt.hmac_length);
-	memcpy (key.hmac, digest, digest_len);
-	CLEAR (digest);
-	EVP_MD_CTX_cleanup (&md);
-      }
+      /* handle key direction */
 
-      /* use same hmac key in both directions */
+      key_direction_state_init (&kds, key_direction);
+      must_have_n_keys (passphrase_file, "tls-auth", &key2, kds.need_keys);
 
-      init_key_ctx (&ctx->encrypt, &key, &kt, DO_ENCRYPT,
+      /* initialize hmac key in both directions */
+
+      init_key_ctx (&ctx->encrypt, &key2.keys[kds.out_key], &kt, DO_ENCRYPT,
 		    "Outgoing Control Channel Authentication");
-      init_key_ctx (&ctx->decrypt, &key, &kt, DO_DECRYPT,
+      init_key_ctx (&ctx->decrypt, &key2.keys[kds.in_key], &kt, DO_DECRYPT,
 		    "Incoming Control Channel Authentication");
 
-      CLEAR (key);
+      CLEAR (key2);
     }
   else
     {
@@ -877,32 +881,50 @@ static const char static_key_head[] = "-----BEGIN OpenVPN Static key V1-----";
 static const char static_key_foot[] = "-----END OpenVPN Static key V1-----";
 
 static const char printable_char_fmt[] =
-  "Non-Hex character ('%c') found at line %d in key file %s (%d/%d bytes found/required)";
+  "Non-Hex character ('%c') found at line %d in key file '%s' (%d/%d/%d bytes found/min/max)";
 
 static const char unprintable_char_fmt[] =
-  "Non-Hex, unprintable character (0x%02x) found at line %d in key file %s (%d/%d bytes found/required)";
+  "Non-Hex, unprintable character (0x%02x) found at line %d in key file '%s' (%d/%d/%d bytes found/min/max)";
 
 /* read key from file */
 void
-read_key_file (struct key *key, const char *filename)
+read_key_file (struct key2 *key2, const char *filename, bool must_succeed)
 {
   const int gc_level = gc_new_level ();
-  struct buffer in = alloc_buf_gc (512);
-  int state = 0;
-  uint8_t* out = (uint8_t*) key;
-  int count = 0;
+  struct buffer in = alloc_buf_gc (64);
+  int fd, size;
   uint8_t hex_byte[3] = {0, 0, 0};
+
+  /* parse info */
   int hb_index = 0;
   int line_num = 1;
   int line_index = 0;
-  int matchlen = 0;
-  const int headlen = strlen(static_key_head);
-  const int keylen = sizeof (*key);
-  int fd, size;
+  int match = 0;
+
+  /* output */
+  uint8_t* out = (uint8_t*) &key2->keys;
+  const int keylen = sizeof (key2->keys);
+  int count = 0;
+
+  /* parse states */
+# define PARSE_INITIAL        0
+# define PARSE_HEAD           1
+# define PARSE_DATA           2
+# define PARSE_DATA_COMPLETE  3
+# define PARSE_FOOT           4
+# define PARSE_FINISHED       5
+  int state = PARSE_INITIAL;
+
+  /* constants */
+  const int hlen = strlen (static_key_head);
+  const int flen = strlen (static_key_foot);
+  const int onekeylen = sizeof (key2->keys[0]);
+
+  CLEAR (*key2);
 
   fd = open (filename, O_RDONLY);
   if (fd == -1)
-    msg (M_ERR, "Cannot open shared secret file %s", filename);
+    msg (M_ERR, "Cannot open file key file '%s'", filename);
 
   while ((size = read (fd, in.data, in.capacity)))
     {
@@ -911,55 +933,76 @@ read_key_file (struct key *key, const char *filename)
 	{
 	  const char c = *cp;
 
-	  /* msg (M_INFO, "char='%c' state=%d line_num=%d line_index=%d matchlen=%d",
-	     c, state, line_num, line_index, matchlen); */
+#if 0
+	  msg (M_INFO, "char='%c' s=%d ln=%d li=%d m=%d c=%d",
+	       c, state, line_num, line_index, match, count);
+#endif
 
 	  if (c == '\n')
 	    {
-	      line_index = 0;
-	      ++line_num;
+	      line_index = match = 0;
+	      ++line_num;	      
 	    }
 	  else
 	    {
-	      /* found header line? */
-	      if (state == 0 && !line_index)
+	      /* first char of new line */
+	      if (!line_index)
 		{
-		  if (matchlen == headlen)
-		    state = 1;
-		  matchlen = 0;
+		  /* first char of line after header line? */
+		  if (state == PARSE_HEAD)
+		    state = PARSE_DATA;
+
+		  /* first char of footer */
+		  if ((state == PARSE_DATA || state == PARSE_DATA_COMPLETE) && c == '-')
+		    state = PARSE_FOOT;
 		}
 
 	      /* compare read chars with header line */
-	      if (state == 0) {
-		if (line_index < headlen && c == static_key_head[line_index])
-		  ++matchlen;
-	      }
+	      if (state == PARSE_INITIAL)
+		{
+		  if (line_index < hlen && c == static_key_head[line_index])
+		    {
+		      if (++match == hlen)
+			state = PARSE_HEAD;
+		    }
+		}
+
+	      /* compare read chars with footer line */
+	      if (state == PARSE_FOOT)
+		{
+		  if (line_index < flen && c == static_key_foot[line_index])
+		    {
+		      if (++match == flen)
+			state = PARSE_FINISHED;
+		    }
+		}
 
 	      /* reading key */
-	      if (state == 1) {
-		if (isxdigit(c))
-		  {
-		    ASSERT(hb_index < 2);
-		    hex_byte[hb_index++] = c;
-		    if (hb_index == 2)
-		      {
-			unsigned int u;
-			ASSERT(sscanf((const char *)hex_byte, "%x", &u) == 1);
-			*out++ = u;
-			hb_index = 0;
-			if (++count == keylen)
-			  state = 2;
-		      }
-		  }
-		else if (isspace(c))
-		  ;
-		else
-		  {
-		    msg (M_FATAL,
-			 (isprint (c) ? printable_char_fmt : unprintable_char_fmt),
-			 c, line_num, filename, count, keylen);
-		  }
-	      }
+	      if (state == PARSE_DATA)
+		{
+		  if (isxdigit(c))
+		    {
+		      ASSERT (hb_index >= 0 && hb_index < 2);
+		      hex_byte[hb_index++] = c;
+		      if (hb_index == 2)
+			{
+			  unsigned int u;
+			  ASSERT(sscanf((const char *)hex_byte, "%x", &u) == 1);
+			  *out++ = u;
+			  hb_index = 0;
+			  if (++count == keylen)
+			    state = PARSE_DATA_COMPLETE;
+			}
+		    }
+		  else if (isspace(c))
+		    ;
+		  else
+		    {
+		      msg (M_FATAL,
+			   (isprint (c) ? printable_char_fmt : unprintable_char_fmt),
+			   c, line_num, filename, count, onekeylen, keylen);
+		    }
+		}
 	      ++line_index;
 	    }
 	  ++cp;
@@ -968,54 +1011,256 @@ read_key_file (struct key *key, const char *filename)
     }
 
   close (fd);
-  if (state != 2)
-    msg (M_ERR, "Key not found in file %s (%d/%d bytes found/required)",
-	 filename, count, keylen);
+
+  /*
+   * Normally we will read either 1 or 2 keys from file.
+   */
+  key2->n = count / onekeylen;
+
+  ASSERT (key2->n >= 0 && key2->n <= (int) SIZE (key2->keys));
+
+  if (must_succeed)
+    {
+      if (!key2->n)
+	msg (M_FATAL, "Insufficient key material or header text not found found in file '%s' (%d/%d/%d bytes found/min/max)",
+	     filename, count, onekeylen, keylen);
+
+      if (state != PARSE_FINISHED)
+	msg (M_FATAL, "Footer text not found in file '%s' (%d/%d/%d bytes found/min/max)",
+	     filename, count, onekeylen, keylen);
+    }
 
   /* zero file read buffer */
-  memset(in.data, 0, in.capacity);
+  buf_clear (&in);
 
-  warn_if_group_others_accessible (filename);
+  if (key2->n)
+    warn_if_group_others_accessible (filename);
+
+#if 0
+  /* DEBUGGING */
+  {
+    int i;
+    printf ("KEY READ, n=%d\n", key2->n);
+    for (i = 0; i < (int) SIZE (key2->keys); ++i)
+      {
+	/* format key as ascii */
+	const char *fmt = format_hex_ex ((const uint8_t*)&key2->keys[i],
+					 sizeof (key2->keys[i]),
+					 0,
+					 16,
+					 "\n");
+	printf ("[%d]\n%s\n\n", i, fmt);
+      }
+  }
+#endif
 
   /* pop our garbage collection level */
   gc_free_level (gc_level);
 }
 
-/* write key to file */
-void
-write_key_file (const struct key *key, const char *filename)
+int
+read_passphrase_hash (const char *passphrase_file,
+		      const EVP_MD *digest,
+		      uint8_t *output,
+		      int len)
 {
-  int fd, size, len;
-  char* fmt;
+  unsigned int outlen = 0;
+  EVP_MD_CTX md;
+
+  ASSERT (len >= EVP_MD_size (digest));
+  memset (output, 0, len);
+
+  EVP_DigestInit (&md, digest);
+
+  /* read passphrase file */
+  {
+    const int min_passphrase_size = 8;
+    uint8_t buf[64];
+    int total_size = 0;
+    int fd = open (passphrase_file, O_RDONLY);
+
+    if (fd == -1)
+      msg (M_ERR, "Cannot open passphrase file: '%s'", passphrase_file);
+
+    for (;;)
+      {
+	int size = read (fd, buf, sizeof (buf));
+	if (size == 0)
+	  break;
+	if (size == -1)
+	  msg (M_ERR, "Read error on passphrase file: '%s'",
+	       passphrase_file);
+	EVP_DigestUpdate (&md, buf, size);
+	total_size += size;
+      }
+    close (fd);
+
+    warn_if_group_others_accessible (passphrase_file);
+
+    if (total_size < min_passphrase_size)
+      msg (M_FATAL,
+	   "Passphrase file '%s' is too small (must have at least %d characters)",
+	   passphrase_file, min_passphrase_size);
+  }
+
+  EVP_DigestFinal (&md, output, &outlen);
+  EVP_MD_CTX_cleanup (&md);
+  return outlen;
+}
+
+/*
+ * Write key to file, return number of random bits
+ * written.
+ */
+int
+write_key_file (const int nkeys, const char *filename)
+{
   const int gc_level = gc_new_level ();
-  struct buffer out = alloc_buf_gc (512);
+
+  int fd, i;
+  int nbits = 0;
+
+  /* must be large enough to hold full key file */
+  struct buffer out = alloc_buf_gc (2048);
+  struct buffer nbits_head_text = alloc_buf_gc (128);
+
+  /* how to format the ascii file representation of key */
+  const int bytes_per_line = 16;
 
   /* open key file */
   fd = open (filename, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
 
   if (fd == -1)
-    msg (M_ERR, "Cannot open shared secret file %s for write", filename);
+    msg (M_ERR, "Cannot open shared secret file '%s' for write", filename);
 
-  /* format key as ascii */
-  fmt = format_hex_ex ((const uint8_t*)key, sizeof (*key), 0, 8, "\n");
   buf_printf (&out, "%s\n", static_key_head);
-  buf_printf (&out, "%s\n", fmt);
+
+  for (i = 0; i < nkeys; ++i)
+    {
+      struct key key;
+      char* fmt;
+
+      /* generate random bits */
+      generate_key_random (&key, NULL);
+
+      /* format key as ascii */
+      fmt = format_hex_ex ((const uint8_t*)&key,
+			   sizeof (key),
+			   0,
+			   bytes_per_line,
+			   "\n");
+
+      /* increment random bits counter */
+      nbits += sizeof (key) * 8;
+
+      /* write to holding buffer */
+      buf_printf (&out, "%s\n", fmt);
+
+      /* zero memory which held key component (will be freed by GC) */
+      memset (fmt, 0, strlen(fmt));
+      CLEAR (key);
+    }
+
   buf_printf (&out, "%s\n", static_key_foot);
 
-  /* write data to file */
-  len = strlen ((char *)BPTR(&out));
-  size = write (fd, BPTR(&out), len);
-  if (size != len)
-    msg (M_ERR, "Write error on shared secret file %s", filename);
+  /* write number of bits */
+  buf_printf (&nbits_head_text, "#\n# %d bit OpenVPN static key\n#\n", nbits);
+  buf_write_string_file (&nbits_head_text, filename, fd);
+
+  /* write key file, now formatted in out, to file */
+  buf_write_string_file (&out, filename, fd);
+
   if (close (fd))
     msg (M_ERR, "Close error on shared secret file %s", filename);
 
-  /* zero memory that held keys (memory will be freed by garbage collector) */
-  memset (BPTR(&out), 0, len);
-  memset (fmt, 0, strlen(fmt));
+  /* zero memory which held file content (memory will be freed by GC) */
+  buf_clear (&out);
 
   /* pop our garbage collection level */
   gc_free_level (gc_level);
+
+  return nbits;
+}
+
+void
+must_have_n_keys (const char *filename, const char *option, const struct key2 *key2, int n)
+{
+  if (key2->n < n)
+    msg (M_FATAL, "Key file '%s' used in --%s contains insufficient key material [keys found=%d required=%d] -- try generating a new key file with 'openvpn --genkey --secret [file]', or use the existing key file in bidirectional mode by specifying --%s without a key direction parameter", filename, option, key2->n, n, option);
+}
+
+int
+ascii2keydirection (const char *str)
+{
+  if (!str)
+    return KEY_DIRECTION_BIDIRECTIONAL;
+  else if (!strcmp (str, "0"))
+    return KEY_DIRECTION_NORMAL;
+  else if (!strcmp (str, "1"))
+    return KEY_DIRECTION_INVERSE;
+  else
+    msg (M_USAGE, "Unknown key direction '%s' -- must be '0' or '1'",
+	 str);
+  return KEY_DIRECTION_BIDIRECTIONAL; /* NOTREACHED */
+}
+
+const char *
+keydirection2ascii (int kd, bool remote)
+{
+  if (kd == KEY_DIRECTION_BIDIRECTIONAL)
+    return NULL;
+  else if (kd == KEY_DIRECTION_NORMAL)
+    return remote ? "1" : "0";
+  else if (kd == KEY_DIRECTION_INVERSE)
+    return remote ? "0" : "1";
+  else
+    {
+      ASSERT (0);
+    }
+  return NULL; /* NOTREACHED */
+}
+
+void
+key_direction_state_init (struct key_direction_state *kds, int key_direction)
+{
+  CLEAR (*kds);
+  switch (key_direction)
+    {
+    case KEY_DIRECTION_NORMAL:
+      kds->out_key = 0;
+      kds->in_key = 1;
+      kds->need_keys = 2;
+      break;
+    case KEY_DIRECTION_INVERSE:
+      kds->out_key = 1;
+      kds->in_key = 0;
+      kds->need_keys = 2;
+      break;
+    case KEY_DIRECTION_BIDIRECTIONAL:
+      kds->out_key = 0;
+      kds->in_key = 0;
+      kds->need_keys = 1;
+      break;
+    default:
+      ASSERT (0);
+    }
+}
+
+void
+verify_fix_key2 (struct key2 *key2, const struct key_type *kt, const char *shared_secret_file)
+{
+  int i;
+
+  for (i = 0; i < key2->n; ++i)
+    {
+      /* Fix parity for DES keys and make sure not a weak key */
+      fixup_key (&key2->keys[i], kt);
+
+      /* This should be a very improbable failure */
+      if (!check_key (&key2->keys[i], kt))
+	msg (M_FATAL, "Key #%d in '%s' is bad.  Try making a new key with --genkey.",
+	     i+1, shared_secret_file);
+    }
 }
 
 /* given a key and key_type, write key to buffer */

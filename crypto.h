@@ -154,7 +154,7 @@ cipher_ok (const char* name)
  * we don't want our key files to be suddenly rendered
  * unusable.
  */
-#define MAX_CIPHER_KEY_LENGTH 64 
+#define MAX_CIPHER_KEY_LENGTH 64
 
 /*
  * Max size in bytes of any HMAC key that might conceivably be used.
@@ -183,6 +183,30 @@ struct key
 {
   uint8_t cipher[MAX_CIPHER_KEY_LENGTH];
   uint8_t hmac[MAX_HMAC_KEY_LENGTH];
+};
+
+#define KEY_DIRECTION_BIDIRECTIONAL 0 /* same keys for both directions */
+#define KEY_DIRECTION_NORMAL        1 /* encrypt with keys[0], decrypt with keys[1] */
+#define KEY_DIRECTION_INVERSE       2 /* encrypt with keys[1], decrypt with keys[0] */
+
+/*
+ * Dual random keys (for encrypt/decrypt)
+ */
+struct key2
+{
+  int n;
+  struct key keys[2];
+};
+
+/*
+ * Used for controlling bidirectional keys
+ * vs. a separate key for each direction.
+ */
+struct key_direction_state
+{
+  int out_key;
+  int in_key;
+  int need_keys;
 };
 
 /*
@@ -221,9 +245,14 @@ void init_key_type (struct key_type *kt, const char *ciphername,
 		    bool authname_defined, int keysize,
 		    bool cfb_ofb_allowed, bool warn);
 
-void read_key_file (struct key *key, const char *filename);
+void read_key_file (struct key2 *key2, const char *filename, bool must_succeed);
 
-void write_key_file (const struct key *key, const char *filename);
+int write_key_file (const int nkeys, const char *filename);
+
+int read_passphrase_hash (const char *passphrase_file,
+			  const EVP_MD *digest,
+			  uint8_t *output,
+			  int len);
 
 void generate_key_random (struct key *key, const struct key_type *kt);
 
@@ -286,11 +315,26 @@ void show_available_digests (void);
 
 void init_crypto_lib (void);
 
+/* key direction functions */
+
+void key_direction_state_init (struct key_direction_state *kds, int key_direction);
+
+void verify_fix_key2 (struct key2 *key2, const struct key_type *kt, const char *shared_secret_file);
+
+void must_have_n_keys (const char *filename, const char *option, const struct key2 *key2, int n);
+
+int ascii2keydirection (const char *str);
+
+const char *keydirection2ascii (int kd, bool remote);
+
+
 #ifdef USE_SSL
 
 void get_tls_handshake_key (const struct key_type *key_type,
 			    struct key_ctx_bi *ctx,
-			    const char *passphrase_file);
+			    const char *passphrase_file,
+			    bool key_direction);
+
 #else
 
 void init_ssl_lib (void);

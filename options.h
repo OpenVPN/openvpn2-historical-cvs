@@ -163,6 +163,7 @@ struct options
 #ifdef USE_CRYPTO
   /* Cipher parms */
   const char *shared_secret_file;
+  int key_direction;
   bool ciphername_defined;
   const char *ciphername;
   bool authname_defined;

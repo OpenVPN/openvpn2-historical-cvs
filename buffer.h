@@ -149,6 +149,12 @@ buf_chomp (struct buffer *buf, uint8_t remove)
 }
 
 /*
+ * Write string in buf to file descriptor fd.
+ * NOTE: requires that string be null terminated.
+ */
+void buf_write_string_file (const struct buffer *buf, const char *filename, int fd);
+
+/*
  * write a string to the end of a buffer that was
  * truncated by buf_printf
  */

@@ -750,7 +750,8 @@ openvpn (const struct options *options,
 
       if (!key_ctx_bi_defined (&ks->static_key))
 	{
-	  struct key key;
+	  struct key2 key2;
+	  struct key_direction_state kds;
 
 	  /* Get cipher & hash algorithms */
 	  init_key_type (&ks->key_type, options->ciphername,
@@ -759,20 +760,19 @@ openvpn (const struct options *options,
 			 options->test_crypto, true);
 
 	  /* Read cipher and hmac keys from shared secret file */
-	  read_key_file (&key, options->shared_secret_file);
+	  read_key_file (&key2, options->shared_secret_file, true);
 
-	  /* Fix parity for DES keys and make sure not a weak key */
-	  fixup_key (&key, &ks->key_type);
-	  if (!check_key (&key, &ks->key_type)) /* This should be a very improbable failure */
-	    msg (M_FATAL, "Key in %s is bad.  Try making a new key with --genkey.",
-		 options->shared_secret_file);
+	  /* Check for and fix highly unlikely key problems */
+	  verify_fix_key2 (&key2, &ks->key_type, options->shared_secret_file);
 
-	  /* Init cipher & hmac */
-	  init_key_ctx (&ks->static_key.encrypt, &key, &ks->key_type, DO_ENCRYPT, "Static Encrypt");
-	  init_key_ctx (&ks->static_key.decrypt, &key, &ks->key_type, DO_DECRYPT, "Static Decrypt");
+	  /* Initialize OpenSSL key objects */
+	  key_direction_state_init (&kds, options->key_direction);
+	  must_have_n_keys (options->shared_secret_file, "secret", &key2, kds.need_keys);
+	  init_key_ctx (&ks->static_key.encrypt, &key2.keys[kds.out_key], &ks->key_type, DO_ENCRYPT, "Static Encrypt");
+	  init_key_ctx (&ks->static_key.decrypt, &key2.keys[kds.in_key], &ks->key_type, DO_DECRYPT, "Static Decrypt");
 
-	  /* Erase the key */
-	  CLEAR (key);
+	  /* Erase the temporary copy of key */
+	  CLEAR (key2);
 	}
       else
 	{
@@ -861,7 +861,10 @@ openvpn (const struct options *options,
 
 	  /* TLS handshake authentication (--tls-auth) */
 	  if (options->tls_auth_file)
-	    get_tls_handshake_key (&ks->key_type, &ks->tls_auth_key, options->tls_auth_file);
+	    get_tls_handshake_key (&ks->key_type,
+				   &ks->tls_auth_key,
+				   options->tls_auth_file,
+				   options->key_direction);
 	}
       else
 	{
@@ -2542,17 +2545,18 @@ main (int argc, char *argv[])
      */
     if (options.genkey)
       {
-	struct key key;
+	int nbits_written;
+
 	notnull (options.shared_secret_file,
 		 "shared secret output file (--secret)");
 
 	if (options.mlock)    /* should we disable paging? */
 	  do_mlockall(true);
 
-	generate_key_random (&key, NULL);
-	write_key_file (&key, options.shared_secret_file);
-	CLEAR (key);
-	msg (D_GENKEY|M_NOPREFIX, "Randomly generated key written to %s",
+	nbits_written = write_key_file (2, options.shared_secret_file);
+
+	msg (D_GENKEY|M_NOPREFIX, "Randomly generated %d bit key written to %s",
+	     nbits_written,
 	     options.shared_secret_file);
 	goto exit;
       }

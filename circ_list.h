@@ -41,9 +41,9 @@ struct name { \
 
 #define CIRC_LIST_PUSH(obj, item) \
 { \
-  obj->x_head = modulo_add ((obj)->x_head, -1, (obj)->x_cap); \
-  obj->x_list[obj->x_head] = (item); \
-  obj->x_size = min_int ((obj)->x_size + 1, (obj)->x_cap); \
+  (obj)->x_head = modulo_add ((obj)->x_head, -1, (obj)->x_cap); \
+  (obj)->x_list[(obj)->x_head] = (item); \
+  (obj)->x_size = min_int ((obj)->x_size + 1, (obj)->x_cap); \
 }
 
 #define CIRC_LIST_SIZE(obj) \

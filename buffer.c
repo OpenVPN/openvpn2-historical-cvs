@@ -184,6 +184,16 @@ convert_to_one_line (struct buffer *buf)
     }
 }
 
+/* NOTE: requires that string be null terminated */
+void
+buf_write_string_file (const struct buffer *buf, const char *filename, int fd)
+{
+  const int len = strlen (BPTR (buf));
+  const int size = write (fd, BPTR (buf), len);
+  if (size != len)
+    msg (M_ERR, "Write error on file '%s'", filename);
+}
+
 /*
  * Garbage collection
  */

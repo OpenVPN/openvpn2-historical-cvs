@@ -210,8 +210,12 @@ static const char usage_message[] =
   "\n"
   "Data Channel Encryption Options (must be compatible between peers):\n"
   "(These options are meaningful for both Static Key & TLS-mode)\n"
-  "--secret file   : Enable Static Key encryption mode (non-TLS),\n"
-  "                  use shared secret file, generate with --genkey.\n"
+  "--secret f [d]  : Enable Static Key encryption mode (non-TLS).\n"
+  "                  Use shared secret file f, generate with --genkey.\n"
+  "                  The optional d parameter controls key directionality.\n"
+  "                  If d is specified, use separate keys for each\n"
+  "                  direction, set d=0 on one side of the connection,\n"
+  "                  and d=1 on the other side.\n"
   "--auth alg      : Authenticate packets with HMAC using message\n"
   "                  digest algorithm alg (default=%s).\n"
   "                  (usually adds 16 or 20 bytes per packet)\n"
@@ -258,9 +262,11 @@ static const char usage_message[] =
   "--tran-window n : Transition window -- old key can live this many seconds\n"
   "                  after new key renegotiation begins (default=%d).\n"
   "--single-session: Allow only one session (reset state on restart).\n"
-  "--tls-auth f    : Add an additional layer of authentication on top of the TLS\n"
+  "--tls-auth f [d]: Add an additional layer of authentication on top of the TLS\n"
   "                  control channel to protect against DoS attacks.\n"
   "                  f (required) is a shared-secret passphrase file.\n"
+  "                  The optional d parameter controls key directionality,\n"
+  "                  see --secret option for more info.\n"
   "--askpass       : Get PEM password from controlling tty before we daemonize.\n"
   "--crl-verify crl: Check peer certificate against a CRL.\n"
   "--tls-verify cmd: Execute shell command cmd to verify the X509 name of a\n"
@@ -339,6 +345,7 @@ init_options (struct options *o)
   o->replay_window = DEFAULT_SEQ_BACKTRACK;
   o->replay_time = DEFAULT_TIME_BACKTRACK;
   o->use_iv = true;
+  o->key_direction = KEY_DIRECTION_BIDIRECTIONAL;
 #ifdef USE_SSL
   o->tls_timeout = 2;
   o->renegotiate_seconds = 3600;
@@ -475,6 +482,7 @@ show_settings (const struct options *o)
 
 #ifdef USE_CRYPTO
   SHOW_STR (shared_secret_file);
+  SHOW_INT (key_direction);
   SHOW_BOOL (ciphername_defined);
   SHOW_STR (ciphername);
   SHOW_BOOL (authname_defined);
@@ -607,6 +615,15 @@ options_string (const struct options *o,
 #define TLS_CLIENT (false)
 #define TLS_SERVER (false)
 #endif
+
+  /*
+   * Key direction
+   */
+  {
+    const char *kd = keydirection2ascii (o->key_direction, remote);
+    if (kd)
+      buf_printf (&out, ",keydir %s", kd);
+  }
 
   /*
    * Crypto Options
@@ -1420,6 +1437,11 @@ add_option (struct options *options, int i, char *p[],
     {
       ++i;
       options->shared_secret_file = p[1];
+      if (p[2])
+	{
+	  options->key_direction = ascii2keydirection (p[2]);
+	  ++i;
+	}
     }
   else if (streq (p[0], "genkey"))
     {
@@ -1599,6 +1621,11 @@ add_option (struct options *options, int i, char *p[],
     {
       ++i;
       options->tls_auth_file = p[1];
+      if (p[2])
+	{
+	  options->key_direction = ascii2keydirection (p[2]);
+	  ++i;
+	}
     }
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */

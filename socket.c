@@ -453,39 +453,82 @@ resolve_bind_local (struct link_socket *sock)
 
 static void
 resolve_remote (struct link_socket *sock,
+		int phase,
 		const char **remote_dynamic,
 		volatile int *signal_received)
 {
-  /* resolve remote address if undefined */
-  if (!addr_defined (&sock->lsa->remote))
+  if (!sock->did_resolve_remote)
     {
-      sock->lsa->remote.sin_family = AF_INET;
-      sock->lsa->remote.sin_addr.s_addr =
-	(sock->remote_host
-	 ? getaddr (
-		    GETADDR_RESOLVE
-		    | GETADDR_FATAL
-		    | GETADDR_MENTION_RESOLVE_RETRY,
+      /* resolve remote address if undefined */
+      if (!addr_defined (&sock->lsa->remote))
+	{
+	  sock->lsa->remote.sin_family = AF_INET;
+	  sock->lsa->remote.sin_addr.s_addr = 0;
+
+	  if (sock->remote_host)
+	    {
+	      unsigned int flags = 0;
+	      int retry = 0;
+	      bool status = false;
+
+	      if (phase == 1)
+		{
+		  if (sock->resolve_retry_seconds)
+		    {
+		      flags = GETADDR_RESOLVE;
+		      retry = 0;
+		    }
+		  else
+		    {
+		      flags = GETADDR_RESOLVE | GETADDR_FATAL | GETADDR_MENTION_RESOLVE_RETRY;
+		      retry = 0;
+		    }
+		}
+	      else if (phase == 2)
+		{
+		  if (sock->resolve_retry_seconds)
+		    {
+		      flags = GETADDR_RESOLVE | GETADDR_FATAL;
+		      retry = sock->resolve_retry_seconds;
+		    }
+		  else
+		    {
+		      ASSERT (0);
+		    }
+		}
+	      else
+		{
+		  ASSERT (0);
+		}
+
+	      sock->lsa->remote.sin_addr.s_addr = getaddr (
+		    flags,
 		    sock->remote_host,
-		    sock->resolve_retry_seconds,
-		    NULL,
-		    signal_received)
-	 : 0);
-      sock->lsa->remote.sin_port = htons (sock->remote_port);
-      if (signal_received && *signal_received)
-	return;
-    }
+		    retry,
+		    &status,
+		    signal_received);
+
+	      if (!status || (signal_received && *signal_received))
+		return;
+	    }
+
+	  sock->lsa->remote.sin_port = htons (sock->remote_port);
+	}
   
-  /* should we re-use previous active remote address? */
-  if (addr_defined (&sock->lsa->actual))
-    {
-      msg (M_INFO, "Preserving recently used remote address: %s",
-	   print_sockaddr (&sock->lsa->actual));
-      if (remote_dynamic)
-	*remote_dynamic = NULL;
+      /* should we re-use previous active remote address? */
+      if (addr_defined (&sock->lsa->actual))
+	{
+	  msg (M_INFO, "Preserving recently used remote address: %s",
+	       print_sockaddr (&sock->lsa->actual));
+	  if (remote_dynamic)
+	    *remote_dynamic = NULL;
+	}
+      else
+	sock->lsa->actual = sock->lsa->remote;
+
+      /* remember that we finished */
+      sock->did_resolve_remote = true;
     }
-  else
-    sock->lsa->actual = sock->lsa->remote;
 }
 
 void
@@ -562,8 +605,7 @@ link_socket_init_phase1 (struct link_socket *sock,
     {
       create_socket (sock);
       resolve_bind_local (sock);
-      if (!sock->resolve_retry_seconds)
-	resolve_remote (sock, NULL, NULL);
+      resolve_remote (sock, 1, NULL, NULL);
     }
 }
 
@@ -598,8 +640,7 @@ link_socket_init_phase2 (struct link_socket *sock,
     }
   else
     {
-      if (sock->resolve_retry_seconds)
-	resolve_remote (sock, &remote_dynamic, signal_received);
+      resolve_remote (sock, 2, &remote_dynamic, signal_received);
 
       if (*signal_received)
 	return;

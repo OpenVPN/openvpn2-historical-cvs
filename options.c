@@ -36,6 +36,7 @@
 #include "openvpn.h"
 #include "common.h"
 #include "shaper.h"
+#include "crypto.h"
 #include "ssl.h"
 #include "options.h"
 #include "openvpn.h"

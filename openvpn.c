@@ -1248,11 +1248,15 @@ openvpn (const struct options *options,
       /* chroot if requested */
       if (options->chroot_dir)
         {
+#if 0
+	  /* not needed because gethostbyname is now called in
+	     link_socket_init_phase1 even if --resolv-retry is also specified. */
+
           /* do a dummy DNS lookup before entering the chroot jail
              to load the resolver libraries */
           if (options->remote)
             (void) gethostbyname (options->remote);
-          
+#endif    
           do_chroot (options->chroot_dir);
         }
     }

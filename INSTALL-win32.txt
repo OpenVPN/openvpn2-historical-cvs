@@ -15,8 +15,15 @@ and XP.  OpenVPN also runs on Linux, Mac OS X,
 Solaris, FreeBSD, NetBSD, and OpenBSD, making it
 one of the most portable VPN packages today.
 
-What's new in 1.5-beta13
+What's new in 1.5-beta14
 ------------------------
+
+See Change Log for more details:
+
+http://openvpn.sourceforge.net/changelog.html
+
+What's new overall in the 1.5-beta series
+-----------------------------------------
 
 The often-requested HTTP proxy feature
 has been added to allow OpenVPN to connect
@@ -64,13 +71,6 @@ protocol compatibility with previous releases,
 however all of the new crypto options (with the
 exception of --replay-window) require current
 versions of OpenVPN on both sides of the connection.
-
-See Change Log for more details:
-
-http://openvpn.sourceforge.net/changelog.html
-
-What's new overall in the 1.5-beta series
------------------------------------------
 
 OpenSSL 0.9.7c DLLs are now shipped with 1.5-beta9
 and higher in response to an OpenSSL security

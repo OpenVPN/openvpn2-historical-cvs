@@ -126,6 +126,8 @@ struct link_socket
   int mtu;                      /* OS discovered MTU, or 0 if unknown */
   int mtu_changed;              /* Set to true when mtu value is changed */
 
+  bool did_resolve_remote;
+
 # define CONNECTION_ESTABLISHED(ls) ((ls)->set_outgoing_initial)
   bool set_outgoing_initial;
 

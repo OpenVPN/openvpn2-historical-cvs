@@ -27,3 +27,15 @@
 #include "syshead.h"
 #include "fragment.h"
 #include "memdbg.h"
+
+struct fragment_master *
+fragment_init (bool generate_icmp, struct frame *frame)
+{
+  struct fragment_master *ret;
+
+  ret = (struct fragment_master *) malloc (sizeof (struct fragment_master));
+  ASSERT (ret);
+  CLEAR (*ret);
+
+  frame->extra_frame += 8;
+}

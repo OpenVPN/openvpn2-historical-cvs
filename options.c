@@ -104,7 +104,7 @@ static const char usage_message[] =
   "                  'yes'   -- Always DF (Don't Fragment)\n"
   "--mtu-dynamic [min] [max] : Enable advanced MTU negotiation and datagram\n"
   "                  fragmentation, automatic MTU size negotiation between min\n"
-  "                  and max, adds 1 to 8 octets of overhead per datagram.\n"
+  "                  and max, adds 4 octets of overhead per datagram.\n"
   "--mtu-noicmp    : Don't automatically generate 'Fragmentation needed but\n"
   "                  DF set' IPv4 ICMP messages.\n" 
   "--mlock         : Disable Paging -- ensures key material and tunnel\n"

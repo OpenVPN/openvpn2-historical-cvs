@@ -29,46 +29,34 @@
 #include "buffer.h"
 #include "interval.h"
 #include "mtu.h"
+#include "reliable.h"
 
-#define N_FRAG_BUF          40     /* number of packet buffers, should be <= N_FRAG_ID */
-
-#define FRAG_TTL_SEC        10     /* number of seconds time-to-live for a fragment */
-#define FRAG_WAKEUP         10     /* fragment code housekeeping is run once every n seconds */
-
-//#define TEST_EXP_SEC        300    /* try to increase MTU size after n seconds by sending big test packet */
-//#define TEST_EXP_TRIG_PCT   80     /* packet must be this % of max size to trigger N_TEST_SEC */
-//#define TEST_EXP_PCT        10     /* expansion test packet is this % larger than current max */
-//#define TEST_CON_PCT        50     /* contraction test packet is this % smaller than current max */
+#define N_FRAG_BUF            40   /* number of packet buffers, should be <= N_FRAG_ID */
+#define FRAG_TTL_SEC          10   /* number of seconds time-to-live for a fragment */
 
 struct fragment_master {
   struct event_timeout wakeup;
 
-  time_t last_wakeup;
-  time_t last_mtu_change;
-  int mtu;
+  /* this value is bounced back to peer in FRAG_SIZE with FRAG_WHOLE/FRAG_YES_NOTLAST set */
+  int max_packet_size_received;    /* value is zeroed after send to peer */
 
-  //int n_rec_big;
-  //int n_rec_small;
-  //int n_sent_big;
-  //int n_sent_small;
+  /* a sequence ID describes a set of fragments that make up one datagram */
+# define N_FRAG_ID          1024   /* sequence number wraps to 0 at this value */
+  int outgoing_seq_id;             /* sent as FRAG_SEQ_ID below */
 
-  /* this value is bounced back to peer via fragment_net.max_size_recent then zeroed */
-  int max_packet_size_received;
+  /* outgoing packet is possibly sent as a series of fragments */
 
-  uint8_t outgoing_id;
-  struct buffer outgoing;
+# define MAX_FRAG_PKT_SIZE 65536   /* maximum packet size */
+  int outgoing_frag_size;          /* sent to peer via FRAG_SIZE when FRAG_YES_LAST set */
+
+# define MAX_FRAGS            32   /* maximum number of fragments per packet */
+  int current_frag_id;             /* each fragment in a datagram is numbered 0 to MAX_FRAGS-1 */ 
+
+  struct buffer outgoing;          /* outgoing datagram, free if current_frag_id == 0 */
 };
 
-/*
- * Don't change these values unless you know what you
- * are doing.
- */
-#define N_FRAG_ID         256    /* sequence number wraps to 0 at this value */
-#define MAX_FRAGS         32     /* maximum number of fragments per packet */
-#define MAX_FRAG_PKT_SIZE 65536  /* maximum packet size */
-
 struct fragment {
-  int max_frag_size;                 /* Maximum size of each fragment, or 0 if undef */
+  int max_frag_size;               /* maximum size of each fragment, or 0 if undef */
 
   /*
    * 32 bit array corresponding to each fragment.  A 1 bit in element n means that
@@ -76,46 +64,49 @@ struct fragment {
    */
   uint32_t map;
 
-  struct buffer buf;                 /* Fragment assembly buffer */
+  struct buffer buf;               /* fragment assembly buffer for received datagrams */
 };
 
 /*
- * Fragment header sent over the wire, depending on flags may be 1, 2, 4, or 6 octets
- * in length.
+ * Fragment header sent over the wire.
  */
-struct fragment_net {
-  /*
-   * Flags containing fragment info, fragment type, and indicating whether
-   * other data follows.
-   */
-# define FRAG_ID_MASK       0x1F /* Fragments are numbered 0 through 31 */
 
-# define FRAG_TYPE_MASK     0x60 /* mask for below values */
-# define FRAG_TYPE_SHIFT    5    /* shift for below values */
-# define FRAG_WHOLE         0      /* packet is whole (not a fragment) */
-# define FRAG_YES_NOTLAST   1      /* packet is a fragment, but is not the last fragment (seq_id defined) */
-# define FRAG_YES_LAST      2      /* packet is the last fragment (seq_id and max_frag_size defined) */
-# define FRAG_TEST          3      /* dummy packet for establishing MTU size, bounce a FRAG_MSR on receipt */
+typedef uint32_t fragment_header_type;
 
-# define FRAG_MSR           0x80   /* Maximum size of recently received packet (max_size_recent defined) */
+/* FRAG_TYPE 3 bits */
+#define FRAG_TYPE_MASK        0x00000007
+#define FRAG_TYPE_SHIFT       0
 
-  uint8_t flags;
+#define FRAG_WHOLE            0    /* packet is whole, FRAG_SIZE = max_packet_size_received */
+#define FRAG_YES_NOTLAST      1    /* packet is a fragment, but is not the last fragment, FRAG_SIZE as above */
+#define FRAG_YES_LAST         2    /* packet is the last fragment, FRAG_SIZE = size of non-last frags */
+#define FRAG_TEST             3    /* control packet for establishing MTU size */
 
-  /*
-   * Wrapping sequence ID.
-   */
-  uint8_t seq_id;             /* Needs to accomodate a value up to N_FRAG_ID - 1 */
+/* FRAG_SEQ_ID 10 bits */
+#define FRAG_SEQ_ID_MASK      0x00001ff8
+#define FRAG_SEQ_ID_SHIFT     3
 
-  /*
-   * The max size of a fragment.  If a fragment is not the last fragment in the packet,
-   * then the fragment size is guaranteed to be equal to the max fragment size.  Therefore,
-   * max_frag_size is only sent over the wire if FRAG_LAST is set.  Otherwise it is assumed
-   * to be the actual fragment size received.
-   */
-  uint16_t max_frag_size;     /* Needs to accomodate a value up to MAX_FRAG_PKT_SIZE - 1 */
+/* FRAG_ID 5 bits */
+#define FRAG_ID_MASK          0x0003e000
+#define FRAG_ID_SHIFT         13
 
-  uint16_t max_size_recent;   /* Largest packet size received recently */
-};
+/*
+ * FRAG_SIZE 14 bits
+ *
+ * IF FRAG_YES_LAST:
+ *   The max size of a fragment.  If a fragment is not the last fragment in the packet,
+ *   then the fragment size is guaranteed to be equal to the max fragment size.  Therefore,
+ *   max_frag_size is only sent over the wire if FRAG_LAST is set.  Otherwise it is assumed
+ *   to be the actual fragment size received.
+ *
+ * IF FRAG_WHOLE or FRAG_YES_NOTLAST
+ *   Largest packet size received recently, or 0 if no packets received.  The remote peer
+ *   will reset its stored version of this value after each send.
+ */
+
+#define FRAG_SIZE_MASK        0xfffc0000
+#define FRAG_SIZE_SHIFT       18
+#define FRAG_SIZE_ROUND_SHIFT 2  /* fragment/datagram sizes represented as multiple of 4 */
 
 /*
  * Inline functions

@@ -1,7 +1,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.77 2003/05/12 01:24:50 jimyonan Exp $
+$Id: ChangeLog,v 1.78 2003/05/15 04:19:48 jimyonan Exp $
 
 Upcoming Version 1.4.1
 
@@ -13,6 +13,8 @@ Upcoming Version 1.4.1
   Occurs on platorms where
   EXTENDED_SOCKET_ERROR_CAPABILITY is defined,
   such as Linux 2.4.
+* Fixed typo in tun.c that was preventing
+  OpenBSD build.
 
 2003.05.07 -- Version 1.4.0
 

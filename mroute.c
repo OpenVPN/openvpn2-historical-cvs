@@ -44,14 +44,14 @@ mroute_extract_addr_from_packet (struct mroute_addr *addr, const struct buffer *
 {
   if (tunnel_type == DEV_TYPE_TUN)
     {
-      if (BLEN (buf) >= (int) (sizeof (struct openvpn_ethhdr) + 1))
+      if (BLEN (buf) >= 1)
 	{
 	  switch (OPENVPN_IPH_GET_VER (*BPTR(buf)))
 	    {
 	    case 4:
-	      if (BLEN (buf) >= (int) (sizeof (struct openvpn_ethhdr) + sizeof (struct openvpn_iphdr)))
+	      if (BLEN (buf) >= (int) sizeof (struct openvpn_iphdr))
 		{
-		  const struct openvpn_iphdr *ip = (const struct openvpn_iphdr *) (BPTR (buf) + sizeof (struct openvpn_ethhdr));
+		  const struct openvpn_iphdr *ip = (const struct openvpn_iphdr *) BPTR (buf);
 		  addr->type = MR_ADDR_IPV4;
 		  addr->len = 4;
 		  memcpy (addr->addr, dest ? &ip->daddr : &ip->saddr, 4);
@@ -60,7 +60,7 @@ mroute_extract_addr_from_packet (struct mroute_addr *addr, const struct buffer *
 	      break;
 	    case 6:
 	      {
-		msg (M_FATAL, "Need IPv6 code in mroute_extract_dest_addr_from_packet"); 
+		msg (M_WARN, "Need IPv6 code in mroute_extract_dest_addr_from_packet"); 
 		break;
 	      }
 	    }
@@ -135,10 +135,43 @@ mroute_addr_hash_function (const void *key, uint32_t iv)
 		    iv);
 }
 
-bool mroute_addr_compare_function (const void *key1, const void *key2)
+bool
+mroute_addr_compare_function (const void *key1, const void *key2)
 {
   return mroute_addr_equal ((const struct mroute_addr *) key1,
 			    (const struct mroute_addr *) key2);
+}
+
+static const char *
+mroute_addr_type_print (int type)
+{
+  switch (type)
+    {
+    case MR_ADDR_NONE:
+      return "MR_ADDR_NONE";
+    case MR_ADDR_ETHER:
+      return "MR_ADDR_ETHER";
+    case MR_ADDR_IPV4:
+      return "MR_ADDR_IPV4";
+    case MR_ADDR_IPV6:
+      return "MR_ADDR_IPV6";
+    case MR_ADDR_IPV4|MR_WITH_PORT:
+      return "MR_ADDR_IPV4|MR_WITH_PORT";
+    case MR_ADDR_IPV6|MR_WITH_PORT:
+      return "MR_ADDR_IPV6|MR_WITH_PORT";
+    default:
+      return "[UNKNOWN]";
+    }
+}
+
+const char *
+mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (64, gc);
+  buf_printf (&out, "%s %s",
+	      mroute_addr_type_print (ma->type),
+	      format_hex (ma->addr, ma->len, 0, gc));
+  return BSTR (&out);
 }
 
 #else

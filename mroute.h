@@ -72,6 +72,8 @@ void mroute_list_free (struct mroute_list *list);
 uint32_t mroute_addr_hash_function (const void *key, uint32_t iv);
 bool mroute_addr_compare_function (const void *key1, const void *key2);
 
+const char *mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc);
+
 static inline bool
 mroute_addr_equal (const struct mroute_addr *a1, const struct mroute_addr *a2)
 {

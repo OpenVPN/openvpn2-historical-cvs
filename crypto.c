@@ -1465,7 +1465,7 @@ void
 prng_bytes (uint8_t *output, int len)
 {
   SHA_CTX ctx;
-  mutex_lock (L_PRNG);
+  mutex_lock_static (L_PRNG);
   while (len > 0)
     {
       const int blen = min_int (len, SHA_DIGEST_LENGTH);
@@ -1476,7 +1476,7 @@ prng_bytes (uint8_t *output, int len)
       output += blen;
       len -= blen;
     }
-  mutex_unlock (L_PRNG);
+  mutex_unlock_static (L_PRNG);
 }
 
 /* an analogue to the random() function, but use prng_bytes */

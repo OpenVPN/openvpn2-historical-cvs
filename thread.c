@@ -43,8 +43,7 @@
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 
-static pthread_mutex_t *ssl_lock_cs;  /* GLOBAL */
-static long *ssl_lock_count;          /* GLOBAL */
+static struct sparse_mutex *ssl_mutex;  /* GLOBAL */
 
 static void
 ssl_pthreads_locking_callback (int mode, int type, char *file, int line)
@@ -55,14 +54,9 @@ ssl_pthreads_locking_callback (int mode, int type, char *file, int line)
 	   (type & CRYPTO_READ) ? "r" : "w", file, line);
 
   if (mode & CRYPTO_LOCK)
-    {
-      pthread_mutex_lock (&(ssl_lock_cs[type]));
-      ssl_lock_count[type]++;
-    }
+    pthread_mutex_lock (&ssl_mutex[type].mutex);
   else
-    {
-      pthread_mutex_unlock (&(ssl_lock_cs[type]));
-    }
+    pthread_mutex_unlock (&ssl_mutex[type].mutex);
 }
 
 static unsigned long
@@ -79,13 +73,9 @@ ssl_thread_setup (void)
 {
   int i;
 
-  ssl_lock_cs = OPENSSL_malloc (CRYPTO_num_locks () * sizeof (pthread_mutex_t));
-  ssl_lock_count = OPENSSL_malloc (CRYPTO_num_locks () * sizeof (long));
+  ssl_mutex = OPENSSL_malloc (CRYPTO_num_locks () * sizeof (struct sparse_mutex));
   for (i = 0; i < CRYPTO_num_locks (); i++)
-    {
-      ssl_lock_count[i] = 0;
-      pthread_mutex_init (&(ssl_lock_cs[i]), NULL);
-    }
+    pthread_mutex_init (&ssl_mutex[i].mutex, NULL);
 
   CRYPTO_set_id_callback ((unsigned long (*)(void)) ssl_pthreads_thread_id);
   CRYPTO_set_locking_callback ((void (*)(int, int, const char*, int)) ssl_pthreads_locking_callback);
@@ -99,15 +89,14 @@ ssl_thread_cleanup (void)
   msg (D_OPENSSL_LOCK, "SSL LOCK cleanup");
   CRYPTO_set_locking_callback (NULL);
   for (i = 0; i < CRYPTO_num_locks (); i++)
-    pthread_mutex_destroy (&(ssl_lock_cs[i]));
-  OPENSSL_free (ssl_lock_cs);
-  OPENSSL_free (ssl_lock_count);
+    pthread_mutex_destroy (&ssl_mutex[i].mutex);
+  OPENSSL_free (ssl_mutex);
 }
 
 #endif /* defined(USE_CRYPTO) && defined(USE_SSL) */
 
-pthread_mutex_t pthread_lock[N_MUTEXES];  /* GLOBAL */
-bool pthread_initialized;                 /* GLOBAL */
+struct sparse_mutex mutex_array[N_MUTEXES]; /* GLOBAL */
+bool pthread_initialized;                   /* GLOBAL */
 
 openvpn_thread_t
 openvpn_thread_create (void *(*start_routine) (void *), void* arg)
@@ -142,7 +131,7 @@ openvpn_thread_init ()
   
   /* initialize static mutexes */
   for (i = 0; i < N_MUTEXES; i++)
-    ASSERT (!pthread_mutex_init (&pthread_lock[i], NULL));
+    ASSERT (!pthread_mutex_init (&mutex_array[i].mutex, NULL));
 
   pthread_initialized = true;
 }
@@ -161,7 +150,7 @@ openvpn_thread_cleanup ()
 
       /* destroy static mutexes */
       for (i = 0; i < N_MUTEXES; i++)
-	ASSERT (!pthread_mutex_destroy (&pthread_lock[i]));
+	ASSERT (!pthread_mutex_destroy (&mutex_array[i].mutex));
 
       pthread_initialized = false;
     }

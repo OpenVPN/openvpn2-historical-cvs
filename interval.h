@@ -39,6 +39,10 @@
 
 #define INTERVAL_DEBUG 1 // JYFIXME
 
+#ifdef WIN32
+int gettimeofday(struct timeval *tv, void *tz);
+#endif
+
 /* struct timeval functions */
 
 const char *tv_string (const struct timeval *tv, struct gc_arena *gc);

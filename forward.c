@@ -85,7 +85,6 @@ check_tls_dowork (struct context *c)
 	}
 
       interval_future_trigger (&c->c2.tmp_int, wakeup, c->c2.current);
-      c->c2.free_to_link = false;
     }
 
   interval_schedule_wakeup (&c->c2.tmp_int, c->c2.current, &wakeup);
@@ -106,6 +105,30 @@ check_tls_errors_dowork (struct context *c)
 }
 #endif
 
+static void
+do_up_delay (struct context *c)
+{
+  if (c->c2.enable_up_delay)
+    {
+      /* if --up-delay specified, open tun, do ifconfig, and run up script now */
+      if (c->options.up_delay)
+	{
+	  c->c2.did_open_tun = do_open_tun (c);
+	  TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
+	  c->c2.current = time (NULL);
+	}
+
+      if (c->c2.did_open_tun)
+	{
+	  /* if --route-delay was specified, start timer */
+	  if (c->options.route_delay_defined)
+	    event_timeout_init (&c->c2.route_wakeup, c->c2.current,
+				c->options.route_delay);
+	}
+      c->c2.enable_up_delay = false;
+    }
+}
+
 /*
  * Handle incoming configuration
  * messages on the control channel.
@@ -124,8 +147,11 @@ check_incoming_control_channel_dowork (struct context *c)
 	  msg (D_LOW, "NOTE: Received control message: '%s'", BSTR (&buf));
 	  if (buf_string_match_head_str (&buf, "PUSH_"))
 	    {
-	      if (!process_incoming_push_msg (c, &buf))
-		msg (D_LOW, "NOTE: Failed to reply to push/pull message");
+	      const int status = process_incoming_push_msg (c, &buf, c->options.pull);
+	      if (status == PUSH_MSG_ERROR)
+		msg (D_LOW, "NOTE: Received bad push/pull message");
+	      else if (status == PUSH_MSG_REPLY)
+		do_up_delay (c); /* delay bringing tun/tap up until --push parms received from remote */
 	    }
 	  else
 	    {
@@ -152,29 +178,15 @@ check_connection_established_dowork (struct context *c)
     {
       if (CONNECTION_ESTABLISHED (&c->c2.link_socket))
 	{
-	  /* if --up-delay specified, open tun, do ifconfig, and run up script now */
-	  if (c->options.up_delay)
-	    {
-	      c->c2.did_open_tun =
-		do_open_tun (&c->options, &c->c2.frame, &c->c2.link_socket,
-			     &c->c1.tuntap, c->c1.route_list);
-	      TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
-	      c->c2.current = time (NULL);
-	    }
-
-	  if (c->c2.did_open_tun)
-	    {
-	      /* if --route-delay was specified, start timer */
-	      if (c->options.route_delay_defined)
-		event_timeout_init (&c->c2.route_wakeup, c->c2.current,
-				    c->options.route_delay);
-	    }
-
 #if P2MP
-	  /* if --pull was specified, send a pull request to server */
+	  /* if --pull was specified, send a push request to server */
 	  if (c->c2.tls_multi && c->options.pull)
 	    send_push_request (c);
+	  else
 #endif
+	    {
+	      do_up_delay (c);
+	    }
 
 	  event_timeout_clear (&c->c2.wait_for_connect);
 	}
@@ -257,12 +269,13 @@ check_fragment_dowork (struct context *c)
 void
 encrypt_sign (struct context *c, bool comp_frag)
 {
+  struct context_buffers *b = c->c2.buffers;
   if (comp_frag)
     {
 #ifdef USE_LZO
       /* Compress the packet. */
       if (c->options.comp_lzo)
-	lzo_compress (&c->c2.buf, c->c2.lzo_compress_buf, &c->c2.lzo_compwork,
+	lzo_compress (&c->c2.buf, b->lzo_compress_buf, &c->c2.lzo_compwork,
 		      &c->c2.frame, c->c2.current);
 #endif
       if (c->c2.fragment)
@@ -276,16 +289,18 @@ encrypt_sign (struct context *c, bool comp_frag)
    * If TLS mode, get the key we will use to encrypt
    * the packet.
    */
-  mutex_lock (L_TLS);
   if (c->c2.tls_multi)
-    tls_pre_encrypt (c->c2.tls_multi, &c->c2.buf, &c->c2.crypto_options);
+    {
+      //tls_mutex_lock (c->c2.tls_multi);
+      tls_pre_encrypt (c->c2.tls_multi, &c->c2.buf, &c->c2.crypto_options);
+    }
 #endif
 
   /*
    * Encrypt the packet and write an optional
    * HMAC signature.
    */
-  openvpn_encrypt (&c->c2.buf, c->c2.encrypt_buf, &c->c2.crypto_options,
+  openvpn_encrypt (&c->c2.buf, b->encrypt_buf, &c->c2.crypto_options,
 		   &c->c2.frame, c->c2.current);
 #endif
   /*
@@ -303,12 +318,13 @@ encrypt_sign (struct context *c, bool comp_frag)
    * decrypt key to use.
    */
   if (c->c2.tls_multi)
-    tls_post_encrypt (c->c2.tls_multi, &c->c2.buf);
-  mutex_unlock (L_TLS);
+    {
+      tls_post_encrypt (c->c2.tls_multi, &c->c2.buf);
+      //tls_mutex_unlock (c->c2.tls_multi);
+    }
 #endif
 #endif
   c->c2.to_link = c->c2.buf;
-  c->c2.free_to_link = false;
 }
 
 /*
@@ -443,7 +459,7 @@ read_incoming_link (struct context *c)
 
   ASSERT (!c->c2.to_tun.len);
 
-  c->c2.buf = c->c2.read_link_buf;
+  c->c2.buf = c->c2.buffers->read_link_buf;
   ASSERT (buf_init (&c->c2.buf, FRAME_HEADROOM (&c->c2.frame)));
   status = link_socket_read (&c->c2.link_socket, &c->c2.buf, MAX_RW_SIZE_LINK (&c->c2.frame), &c->c2.from);
 
@@ -475,6 +491,7 @@ void
 process_incoming_link (struct context *c)
 {
   struct gc_arena gc = gc_new ();
+  bool decrypt_status;
 
   if (c->c2.buf.len > 0)
     {
@@ -513,9 +530,9 @@ process_incoming_link (struct context *c)
     {
       if (!link_socket_verify_incoming_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from))
 	link_socket_bad_incoming_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from);
+
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
-      mutex_lock (L_TLS);
       if (c->c2.tls_multi)
 	{
 	  /*
@@ -528,26 +545,10 @@ process_incoming_link (struct context *c)
 	   * will load crypto_options with the correct encryption key
 	   * and return false.
 	   */
+	  //tls_mutex_lock (c->c2.tls_multi);
 	  if (tls_pre_decrypt (c->c2.tls_multi, &c->c2.from, &c->c2.buf, &c->c2.crypto_options, c->c2.current))
 	    {
-#ifdef USE_PTHREAD
-	      if (c->options.tls_thread)
-		{
-		  /* tell TLS thread a packet is waiting */
-		  if (tls_thread_process (&c->c2.thread_parms) == -1)
-		    {
-		      msg (M_WARN, "TLS thread is not responding, exiting (1)");
-		      c->sig->signal_received = 0;
-		      c->sig->signal_text = "error";
-		      mutex_unlock (L_TLS);
-		      goto done;
-		    }
-		}
-	      else
-#endif
-		{
-		  interval_action (&c->c2.tmp_int, c->c2.current);
-		}
+	      interval_action (&c->c2.tmp_int, c->c2.current);
 
 	      /* reset packet received timer if TLS packet */
 	      if (c->options.ping_rec_timeout)
@@ -555,29 +556,35 @@ process_incoming_link (struct context *c)
 	    }
 	}
 #endif /* USE_SSL */
+
       /* authenticate and decrypt the incoming packet */
-      if (!openvpn_decrypt (&c->c2.buf, c->c2.decrypt_buf, &c->c2.crypto_options, &c->c2.frame, c->c2.current))
-	{
-	  if (link_socket_connection_oriented (&c->c2.link_socket))
-	    {
-	      /* decryption errors are fatal in TCP mode */
-	      c->sig->signal_received = SIGUSR1;
-	      msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
-	      c->sig->signal_text = "decryption-error";
-	      mutex_unlock (L_TLS);
-	      goto done;
-	    }
-	}
+      decrypt_status = openvpn_decrypt (&c->c2.buf, c->c2.buffers->decrypt_buf, &c->c2.crypto_options, &c->c2.frame, c->c2.current);
+
 #ifdef USE_SSL
-      mutex_unlock (L_TLS);
-#endif /* USE_SSL */
+      if (c->c2.tls_multi)
+	{
+	  //tls_mutex_unlock (c->c2.tls_multi);
+	}
+#endif
+      
+      if (!decrypt_status && link_socket_connection_oriented (&c->c2.link_socket))
+	{
+	  /* decryption errors are fatal in TCP mode */
+	  c->sig->signal_received = SIGUSR1;
+	  msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
+	  c->sig->signal_text = "decryption-error";
+	  goto done;
+	}
+
 #endif /* USE_CRYPTO */
+
       if (c->c2.fragment)
 	fragment_incoming (c->c2.fragment, &c->c2.buf, &c->c2.frame_fragment, c->c2.current);
+
 #ifdef USE_LZO
       /* decompress the incoming packet */
       if (c->options.comp_lzo)
-	lzo_decompress (&c->c2.buf, c->c2.lzo_decompress_buf, &c->c2.lzo_compwork, &c->c2.frame);
+	lzo_decompress (&c->c2.buf, c->c2.buffers->lzo_decompress_buf, &c->c2.lzo_compwork, &c->c2.frame);
 #endif
       /*
        * Set our "official" outgoing address, since
@@ -617,7 +624,7 @@ process_incoming_link (struct context *c)
     }
   else
     {
-      c->c2.to_tun = c->c2.nullbuf;
+      buf_reset (&c->c2.to_tun);
     }
  done:
   gc_free (&gc);
@@ -631,7 +638,7 @@ read_incoming_tun (struct context *c)
    */
   ASSERT (!c->c2.to_link.len);
 
-  c->c2.buf = c->c2.read_tun_buf;
+  c->c2.buf = c->c2.buffers->read_tun_buf;
 #ifdef TUN_PASS_BUFFER
   read_tun_buffered (&c->c1.tuntap, &c->c2.buf, MAX_RW_SIZE_TUN (&c->c2.frame));
 #else
@@ -707,8 +714,7 @@ process_incoming_tun (struct context *c)
     }
   else
     {
-      c->c2.to_link = c->c2.nullbuf;
-      c->c2.free_to_link = false;
+      buf_reset (&c->c2.to_link);
     }
   gc_free (&gc);
 }
@@ -808,17 +814,7 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
 	   EXPANDED_SIZE (&c->c2.frame));
     }
 
-  /*
-   * The free_to_link flag means that we should free the packet buffer
-   * after send.  This flag is usually set when the TLS background
-   * thread generated the packet buffer.
-   */
-  if (c->c2.free_to_link)
-    {
-      c->c2.free_to_link = false;
-      free_buf (&c->c2.to_link);
-    }
-  c->c2.to_link = c->c2.nullbuf;
+  buf_reset (&c->c2.to_link);
 
   gc_free (&gc);
 }
@@ -907,41 +903,10 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
   if (c->options.inactivity_timeout)
     event_timeout_reset (&c->c2.inactivity_interval, c->c2.current);
 
-  c->c2.to_tun = c->c2.nullbuf;
+  buf_reset (&c->c2.to_tun);
 
   gc_free (&gc);
 }
-
-#if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-void
-process_incoming_tls_thread (struct context *c)
-{
-  int s;
-  ASSERT (!c->c2.to_link.len);
-
-  s = tls_thread_rec_buf (&c->c2.thread_parms, &c->c2.tt_ret, true);
-  if (s == 1)
-    {
-      /*
-       * TLS background thread has a control channel
-       * packet to send to remote.
-       */
-      c->c2.to_link = c->c2.tt_ret.to_link;
-      c->c2.to_link_addr = c->c2.tt_ret.to_link_addr;
-      
-      /* tell TCP/UDP packet writer to free buffer after write */
-      c->c2.free_to_link = true;
-    }
-  
-  /* remote died? */
-  else if (s == -1)
-    {
-      msg (M_WARN, "TLS thread is not responding, exiting (2)");
-      c->sig->signal_received = 0;
-      c->sig->signal_text = "error";
-    }
-}
-#endif
 
 void
 pre_select (struct context *c)
@@ -1039,13 +1004,6 @@ single_select (struct context *c)
   else if (!c->c2.fragment || !fragment_outgoing_defined (c->c2.fragment))
     {
       TUNTAP_SET_READ (&c->c2.event_wait, &c->c1.tuntap);
-#if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-      if (c->options.tls_thread)
-	{
-	  TLS_THREAD_SOCKET_SET (c->c2.tls_multi, &c->c2.event_wait,
-				 &c->c2.thread_parms, reads);
-	}
-#endif
     }
 
   /*
@@ -1122,12 +1080,5 @@ process_io (struct context *c)
 	  if (!IS_SIG (c))
 	    process_incoming_tun (c);
 	}
-#if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-      /* Incoming data from TLS background thread */
-      else if (c->options.tls_thread && TLS_THREAD_SOCKET_ISSET (c->c2.tls_multi, &c->c2.event_wait, &c->c2.thread_parms, reads))
-	{
-	  process_incoming_tls_thread (c);
-	}
-#endif
     }
 }

@@ -30,12 +30,18 @@
 
 #include "forward.h"
 
+#define PUSH_MSG_ERROR     0
+#define PUSH_MSG_REQUEST   1
+#define PUSH_MSG_REPLY     2
+
+int process_incoming_push_msg (struct context *c,
+			       struct buffer *buf,
+			       bool honor_received_options);
+
 void push_option (struct options *o, const char *opt);
 
 bool send_push_request (struct context *c);
 bool send_push_reply (struct context *c);
-
-bool process_incoming_push_msg (struct context *c, struct buffer *buf);
 
 #endif
 #endif

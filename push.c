@@ -89,18 +89,22 @@ push_option (struct options *o, const char *opt)
   strcat (o->push_list->options, opt);
 }
 
-bool
-process_incoming_push_msg (struct context *c, struct buffer *buf)
+int
+process_incoming_push_msg (struct context *c,
+			   struct buffer *buf,
+			   bool honor_received_options)
 {
-  bool ret = false;
+  int ret = PUSH_MSG_ERROR;
   if (buf_string_compare_advance (buf, "PUSH_REQUEST"))
     {
-      ret = send_push_reply (c);
+      if (send_push_reply (c))
+	ret = PUSH_MSG_REQUEST;
     }
-  else if (buf_string_compare_advance (buf, "PUSH_REPLY,"))
+  else if (honor_received_options && buf_string_compare_advance (buf, "PUSH_REPLY,"))
     {
-      ret = apply_push_options (&c->options, buf);
-      show_settings (&c->options); // JYFIXME
+      if (apply_push_options (&c->options, buf))
+	ret = PUSH_MSG_REPLY;
+      /* show_settings (&c->options); */
     }
   return ret;
 }

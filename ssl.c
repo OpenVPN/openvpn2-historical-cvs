@@ -371,7 +371,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   subject[sizeof (subject) - 1] = '\0';
   safe_string (subject);
 
-#if 1 // JYFIXME -- print some debugging info
+#if 0 /* print some debugging info */
   msg (D_LOW, "LOCAL OPT: %s", opt->local_options);
   msg (D_LOW, "X509: %s", subject);
 #endif
@@ -492,6 +492,8 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
     char common_name[TLS_CN_LEN];
     if (ctx->error_depth == 0)
       extract_common_name (common_name, TLS_CN_LEN, subject);
+    if (session->common_name)
+      free (session->common_name);
     session->common_name = string_alloc (common_name, NULL);
   }
   
@@ -872,7 +874,7 @@ getbio (BIO_METHOD * type, const char *desc)
  * Write to an OpenSSL BIO in non-blocking mode.
  */
 static int
-bio_write (BIO * bio, struct buffer *buf, const char *desc)
+bio_write (struct tls_multi* multi, BIO *bio, struct buffer *buf, const char *desc)
 {
   int i;
   int ret = 0;
@@ -888,9 +890,9 @@ bio_write (BIO * bio, struct buffer *buf, const char *desc)
 #ifdef BIO_DEBUG
       bio_debug_data ("write", bio, BPTR (buf), BLEN (buf), desc);
 #endif
-      mutex_unlock (L_TLS);
+      mutex_unlock (multi->mutex);
       i = BIO_write (bio, BPTR (buf), BLEN (buf));
-      mutex_lock (L_TLS);
+      mutex_lock (multi->mutex);
       if (i < 0)
 	{
 	  if (BIO_should_retry (bio))
@@ -925,7 +927,7 @@ bio_write (BIO * bio, struct buffer *buf, const char *desc)
  * Read from an OpenSSL BIO in non-blocking mode.
  */
 static int
-bio_read (BIO * bio, struct buffer *buf, int maxlen, const char *desc)
+bio_read (struct tls_multi* multi, BIO *bio, struct buffer *buf, int maxlen, const char *desc)
 {
   int i;
   int ret = 0;
@@ -948,9 +950,9 @@ bio_read (BIO * bio, struct buffer *buf, int maxlen, const char *desc)
        * BIO_read brackets most of the serious RSA
        * key negotiation number crunching.
        */
-      mutex_unlock (L_TLS);
+      mutex_unlock (multi->mutex);
       i = BIO_read (bio, BPTR (buf), len);
-      mutex_lock (L_TLS);
+      mutex_lock (multi->mutex);
 #ifdef BIO_DEBUG
       bio_debug_data ("read", bio, BPTR (buf), i, desc);
 #endif
@@ -988,29 +990,29 @@ bio_read (BIO * bio, struct buffer *buf, int maxlen, const char *desc)
  */
 
 static inline int
-key_state_write_plaintext (struct key_state *ks, struct buffer *buf)
+key_state_write_plaintext (struct tls_multi *multi, struct key_state *ks, struct buffer *buf)
 {
-  return bio_write (ks->ssl_bio, buf, "tls_write_plaintext");
+  return bio_write (multi, ks->ssl_bio, buf, "tls_write_plaintext");
 }
 
 static inline int
-key_state_write_ciphertext (struct key_state *ks, struct buffer *buf)
+key_state_write_ciphertext (struct tls_multi *multi, struct key_state *ks, struct buffer *buf)
 {
-  return bio_write (ks->ct_in, buf, "tls_write_ciphertext");
+  return bio_write (multi, ks->ct_in, buf, "tls_write_ciphertext");
 }
 
 static inline int
-key_state_read_plaintext (struct key_state *ks, struct buffer *buf,
+key_state_read_plaintext (struct tls_multi *multi, struct key_state *ks, struct buffer *buf,
 			  int maxlen)
 {
-  return bio_read (ks->ssl_bio, buf, maxlen, "tls_read_plaintext");
+  return bio_read (multi, ks->ssl_bio, buf, maxlen, "tls_read_plaintext");
 }
 
 static inline int
-key_state_read_ciphertext (struct key_state *ks, struct buffer *buf,
+key_state_read_ciphertext (struct tls_multi *multi, struct key_state *ks, struct buffer *buf,
 			   int maxlen)
 {
-  return bio_read (ks->ct_out, buf, maxlen, "tls_read_ciphertext");
+  return bio_read (multi, ks->ct_out, buf, maxlen, "tls_read_ciphertext");
 }
 
 /*
@@ -1026,8 +1028,6 @@ key_state_init (struct tls_session *session, struct key_state *ks,
    * to/from memory BIOs.
    */
   CLEAR (*ks);
-
-  msg (M_INFO, "CALLED key_state_init"); // JYFIXME
 
   ks->ssl = SSL_new (session->opt->ssl_ctx);
   if (!ks->ssl)
@@ -1917,7 +1917,7 @@ tls_process (struct tls_multi *multi,
 	msg (D_TLS_DEBUG_LOW, "TLS: tls_process: killed expiring key");
   }
 
-  mutex_cycle (L_TLS);
+  mutex_cycle (multi->mutex);
 
   do
     {
@@ -2053,7 +2053,7 @@ tls_process (struct tls_multi *multi,
 	      int status = 0;
 	      if (buf->len)
 		{
-		  status = key_state_write_ciphertext (ks, buf);
+		  status = key_state_write_ciphertext (multi, ks, buf);
 		  if (status == -1)
 		    {
 		      msg (D_TLS_ERRORS,
@@ -2080,7 +2080,7 @@ tls_process (struct tls_multi *multi,
 	      int status;
 
 	      ASSERT (buf_init (buf, 0));
-	      status = key_state_read_plaintext (ks, buf, PLAINTEXT_BUFFER_SIZE);
+	      status = key_state_read_plaintext (multi, ks, buf, PLAINTEXT_BUFFER_SIZE);
 	      current = time (NULL);
 	      if (status == -1)
 		{
@@ -2291,7 +2291,7 @@ tls_process (struct tls_multi *multi,
 	  buf = &ks->plaintext_write_buf;
 	  if (buf->len)
 	    {
-	      int status = key_state_write_plaintext (ks, buf);
+	      int status = key_state_write_plaintext (multi, ks, buf);
 	      if (status == -1)
 		{
 		  msg (D_TLS_ERRORS,
@@ -2311,7 +2311,7 @@ tls_process (struct tls_multi *multi,
 	      buf = reliable_get_buf_output_sequenced (ks->send_reliable);
 	      if (buf)
 		{
-		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE_DYNAMIC (&multi->opt.frame));
+		  int status = key_state_read_ciphertext (multi, ks, buf, PAYLOAD_SIZE_DYNAMIC (&multi->opt.frame));
 		  if (status == -1)
 		    {
 		      msg (D_TLS_ERRORS,
@@ -2328,7 +2328,7 @@ tls_process (struct tls_multi *multi,
 		}
 	    }
 	}
-      mutex_cycle (L_TLS); 
+      mutex_cycle (multi->mutex);
     }
   while (state_change);
 
@@ -2410,8 +2410,6 @@ tls_multi_process (struct tls_multi *multi,
   int i;
   bool active = false;
 
-  mutex_lock (L_TLS);
-
   /*
    * Process each session object having state of S_INITIAL or greater,
    * and which has a defined remote IP addr.
@@ -2460,7 +2458,7 @@ tls_multi_process (struct tls_multi *multi,
 		reset_session (multi, session);
 	    }
 	}
-      mutex_cycle (L_TLS);
+      mutex_cycle (multi->mutex);
     }
 
   current = time (NULL);
@@ -2482,290 +2480,9 @@ tls_multi_process (struct tls_multi *multi,
     msg (D_TLS_DEBUG_LOW, "TLS: tls_multi_process: untrusted session promoted to trusted");
   }
 
-  mutex_unlock (L_TLS);
-
   gc_free (&gc);
   return active;
 }
-
-/*
- * When OpenVPN is built in pthread-mode, thread_func
- * will periodically call tls_multi_process.
- */
-
-#ifdef USE_PTHREAD
-
-/*
- * Main thread <-> TLS thread communication.
- * Errors are fatal if they are of these types.
- */
-static inline bool
-local_sock_fatal (int status)
-{
-  return status < 0 && (errno == ENOTCONN || errno == ECONNREFUSED);
-}
-
-/*
- * This routine is the TLS work thread.
- */
-static void *
-thread_func (void *arg)
-{
-  const struct thread_parms *parm = (struct thread_parms*) arg;
-  struct buffer buf;
-
-#if 0
-  /*
-   * Under Linux, Posix threads appear to inherit mlockall state
-   * from parent.  This is good news, since mlockall will fail
-   * if we restart after having downgraded privileges with
-   * --user or group.
-   */
-  if (parm->mlock) /* should we disable paging? */
-    do_mlockall (true);  
-#endif
-
-  /* change thread priority if requested */
-  set_nice (parm->nice);
-
-  /* buffer used to receive data from SSL/TLS */
-  CLEAR (buf);
-
-  /* event loop */
-  while (true)
-    {
-      int stat, fatal;
-      struct tt_ret ret;
-      fd_set reads, writes;
-      struct timeval tv;
-
-      time_t current = time (NULL);
-      interval_t wakeup = TLS_MULTI_REFRESH;
-
-      msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: thread event loop");
-
-      CLEAR (ret);
-  
-      msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: pre-tls_multi_process"); // JYFIXME
-
-      /* do one SSL/TLS process pass */
-      tls_multi_process (parm->multi, &buf, &ret.to_link_addr,
-			 parm->link_socket, &wakeup, current);
-
-      msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: post-tls_multi_process"); // JYFIXME
-
-      /* determine events to wait for */
-      FD_ZERO (&writes);
-      FD_ZERO (&reads);
-
-      /* did tls_multi_process give us a buffer to forward
-	 to foreground thread, on this or previous event
-	 loop pass? */
-      if (buf.len)
-	FD_SET (parm->sd[TLS_THREAD_WORKER], &writes);
-
-      /* always wait for incoming commands from foreground thread */
-      FD_SET (parm->sd[TLS_THREAD_WORKER], &reads);
-
-      /* set select timeout */
-      tv.tv_sec = wakeup;
-      tv.tv_usec = 0;
-
-      msg (D_SELECT, "THREAD SELECT %s|%s %d/%d",
-	   FD_ISSET (parm->sd[TLS_THREAD_WORKER], &reads) ?   "FR" : "fr", 
-	   FD_ISSET (parm->sd[TLS_THREAD_WORKER], &writes) ?  "FW" : "fw", 
-	   (int)tv.tv_sec,
-	   (int)tv.tv_usec);
-
-      stat = select (parm->sd[TLS_THREAD_WORKER] + 1, &reads, &writes, NULL, &tv);
-      check_status (stat, "thread select", NULL, NULL);
-      if (!stat) /* timeout? */
-	continue;
-
-      /* send buffer to foreground */
-      if (FD_ISSET (parm->sd[TLS_THREAD_WORKER], &writes))
-	{
-	  ASSERT (buf.len);
-
-	  /* make a fresh copy of buf in ret, and release buf */
-	  ret.to_link = clone_buf (&buf);
-	  CLEAR (buf);
-
-	  /* send buffer to foreground where it will be forwarded to remote */
-	  stat = write (parm->sd[TLS_THREAD_WORKER], &ret, sizeof (ret));
-	  fatal = local_sock_fatal (stat);
-	  check_status (stat, "write to foreground", NULL, NULL);
-	  if (stat < 0)
-	    free_buf (&ret.to_link);
-	  if (fatal)
-	    goto exit;
-	}
-
-      /* get command from foreground */
-      if (FD_ISSET (parm->sd[TLS_THREAD_WORKER], &reads))
-	{
-	  do {
-	    struct tt_cmd tc;
-
-	    stat = read (parm->sd[TLS_THREAD_WORKER], &tc, sizeof (tc));
-	    fatal = local_sock_fatal (stat);
-	    check_status (stat, "read from foreground", NULL, NULL);
-	    if (stat == sizeof (tc))
-	      {
-		if (tc.cmd == TTCMD_PROCESS)
-		  {
-		    msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: TTCMD_PROCESS");
-		  }
-		else if (tc.cmd == TTCMD_EXIT)
-		  {
-		    msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: TTCMD_EXIT");
-		    goto exit;
-		  }
-		else
-		  msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: Unknown TTCMD code: %d", tc.cmd);
-	      }
-	    else if (fatal)
-	      goto exit;
-	  } while (stat > 0);
-	}
-    }
-
- exit:
-  msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: exiting");
-  close (parm->sd[TLS_THREAD_WORKER]);
-  return NULL;
-}
-
-/*
- * All tls_thread functions below this point operate in the context of the main
- * thread.
- */
-
-/*
- * Send a command to TLS thread.
- */
-static int
-tls_thread_send_command (struct thread_parms *state, int cmd, bool wait_if_necessary)
-{
-  struct tt_cmd tc;
-  int stat;
-  bool fatal;
-
-  tc.cmd = cmd;
-  while (true)
-    {
-      stat = write (state->sd[TLS_THREAD_MAIN], &tc, sizeof (tc));
-      if (wait_if_necessary && stat < 0 && errno == EAGAIN)
-	{
-	  msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: tls_thread_send_command WAIT");
-	  sleep (1);
-	}
-      else
-	break;
-    }
-  fatal = local_sock_fatal (stat);
-  check_status (stat, "write command to tls thread", NULL, NULL);
-  if (stat == sizeof (tc))
-    return 1;
-  else if (fatal)
-    return -1;
-  else
-    return 0;
-}
-
-/*
- * Create the TLS thread.
- */
-void
-tls_thread_create (struct thread_parms *state,
-		   struct tls_multi *multi,
-		   struct link_socket *link_socket,
-		   int nice, bool mlock)
-{
-  CLEAR (*state);
-  state->multi = multi;
-  state->link_socket = link_socket;
-  state->nice = nice;
-  state->mlock = mlock;
-
-  /*
-   * Make a socket for foreground and background threads
-   * to communicate.  The background thread will set its
-   * end to blocking, while the foreground will set its
-   * end to non-blocking.
-   */
-  if (socketpair (PF_UNIX, SOCK_DGRAM, 0, state->sd) == -1)
-    msg (M_ERR, "TLS: socketpair call failed");
-  set_nonblock (state->sd[TLS_THREAD_MAIN]);
-  set_nonblock (state->sd[TLS_THREAD_WORKER]);
-  set_cloexec (state->sd[TLS_THREAD_MAIN]);
-  set_cloexec (state->sd[TLS_THREAD_WORKER]);
-  multi->work_thread_id = openvpn_thread_create (thread_func, (void*)state);
-}
-
-/*
- * Send a command to TLS thread telling it to cycle
- * through tls_multi_process() as long as there
- * is data to process.
- */
-int
-tls_thread_process (struct thread_parms *state)
-{
-  return tls_thread_send_command (state, TTCMD_PROCESS, false);
-}
-
-/* free any unprocessed buffers sent from background to foreground */
-static void
-tls_thread_flush (struct thread_parms *state)
-{
-  struct tt_ret ttr;
-  while (tls_thread_rec_buf (state, &ttr, false) == 1)
-    {
-      free_buf (&ttr.to_link);
-    }
-}
-
-/*
- * Close the TLS thread
- */
-void
-tls_thread_close (struct thread_parms *state)
-{
-  tls_thread_send_command (state, TTCMD_EXIT, true);
-  openvpn_thread_join (state->multi->work_thread_id);
-  tls_thread_flush (state);
-  close (state->sd[TLS_THREAD_MAIN]);
-}
-
-/*
- * Receive an object from the TLS thread which
- * normally contains a buffer to be sent to
- * the remote peer over the TCP/UDP port.
- *
- * Return:
- *  1 if ok
- *  0 if non-fatal error
- *  -1 if fatal error
- */
-int
-tls_thread_rec_buf (struct thread_parms *state, struct tt_ret* ttr, bool do_check_status)
-{
-  int stat;
-  bool fatal;
-
-  stat = read (state->sd[TLS_THREAD_MAIN], ttr, sizeof (*ttr));
-  fatal = local_sock_fatal (stat);
-  if (do_check_status)
-    check_status (stat, "read buffer from tls thread", NULL, NULL);
-  if (stat == sizeof (*ttr))
-    return 1;
-  else if (fatal)
-    return -1;
-  else
-    return 0;
-}
-
-#endif
 
 /*
  * Send a payload over the TLS control channel.
@@ -2782,8 +2499,6 @@ tls_send_payload (struct tls_multi *multi,
 
   ASSERT (multi);
 
-  mutex_lock (L_TLS);
-
   session = &multi->session[TM_ACTIVE];
   ks = &session->key[KS_PRIMARY];
 
@@ -2793,7 +2508,6 @@ tls_send_payload (struct tls_multi *multi,
 	ret = true;
     }
 
-  mutex_unlock (L_TLS);
   return ret;
 }
 
@@ -2807,8 +2521,6 @@ tls_rec_payload (struct tls_multi *multi,
 
   ASSERT (multi);
 
-  mutex_lock (L_TLS);
-
   session = &multi->session[TM_ACTIVE];
   ks = &session->key[KS_PRIMARY];
 
@@ -2819,7 +2531,6 @@ tls_rec_payload (struct tls_multi *multi,
       ks->plaintext_read_buf.len = 0;
     }
 
-  mutex_unlock (L_TLS);
   return ret;
 }
 

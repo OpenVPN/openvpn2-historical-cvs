@@ -77,6 +77,8 @@ static inline void
 schedule_set_pri (struct schedule_entry *e)
 {
   e->pri = random ();
+  if (e->pri < 1)
+    e->pri = 1;
 }
 
 /* This is the master key comparison routine.  A key is
@@ -88,10 +90,6 @@ static inline int
 schedule_entry_compare (const struct schedule_entry *e1,
 			const struct schedule_entry *e2)
 {
-  /* no two elements should ever have the same treap priority */
-  if (e1->pri == e2->pri)
-    return 0;
-
   if (e1->tv.tv_sec < e2->tv.tv_sec)
     return -1;
   else if (e1->tv.tv_sec > e2->tv.tv_sec)
@@ -106,8 +104,10 @@ schedule_entry_compare (const struct schedule_entry *e1,
 	{
 	  if (e1->pri < e2->pri)
 	    return -1;
-	  else /* e1->pri > e2->pri */
+	  else if (e1->pri > e2->pri)
 	    return 1;
+	  else
+	    return 0;
 	}
     }
 }
@@ -229,13 +229,8 @@ schedule_remove_node (struct schedule *s, struct schedule_entry *e)
 	    {
 	      if (e->lt->pri < e->gt->pri)
 		schedule_rotate_up (s, e->lt);
-	      else if (e->lt->pri > e->gt->pri)
-		schedule_rotate_up (s, e->gt);
 	      else
-		{
-		  /* priority collision */
-		  ASSERT (0);
-		}
+		schedule_rotate_up (s, e->gt);
 	    }
 	  else
 	    schedule_rotate_up (s, e->lt);
@@ -245,6 +240,7 @@ schedule_remove_node (struct schedule *s, struct schedule_entry *e)
     }
 
   schedule_detach_parent (s, e);
+  e->pri = 0;
 }
 
 /*
@@ -299,6 +295,7 @@ schedule_insert (struct schedule *s, struct schedule_entry *e)
 	  ++z.coll;
 #endif
 	  schedule_set_pri (e);
+	  /* msg (M_INFO, "PRI COLLISION pri=%u", e->pri); */
 	  c = s->root;
 	  continue;
 	}
@@ -367,20 +364,24 @@ schedule_init (void)
   struct schedule *s;
 
   ALLOC_OBJ_CLEAR (s, struct schedule);
+  mutex_init (&s->mutex);
   return s;
 }
 
 void
 schedule_free (struct schedule *s)
 {
+  mutex_destroy (&s->mutex);
   free (s);
 }
 
 void
 schedule_remove_entry (struct schedule *s, struct schedule_entry *e)
 {
+  mutex_lock (&s->mutex);
   s->earliest_wakeup = NULL; /* invalidate cache */
   schedule_remove_node (s, e);
+  mutex_unlock (&s->mutex);
 }
 
 /*
@@ -478,8 +479,8 @@ schedule_debug (struct schedule *s, int *count, struct timeval *least)
 void
 tv_randomize (struct timeval *tv)
 {
-  tv->tv_sec += random() % 10;
-  tv->tv_usec = random () % 1000000;
+  tv->tv_sec += random() % 100;
+  tv->tv_usec = random () % 100;
 }
 
 #else
@@ -543,7 +544,13 @@ schedule_randomize_array (struct schedule_entry **array, int size)
   int i;
   for (i = 0; i < size; ++i)
     {
-      array [i] = array [get_random () % size];
+      const int src = get_random () % size;
+      struct schedule_entry *tmp = array [i];
+      if (i != src)
+	{
+	  array [i] = array [src];
+	  array [src] = tmp;
+	}
     }
 }
 
@@ -582,7 +589,7 @@ void
 schedule_test (void)
 {
   struct gc_arena gc = gc_new ();
-  int n = 10000;
+  int n = 1000;
   int n_mod = 25;
 
   int i, j;

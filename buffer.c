@@ -38,13 +38,21 @@
 #include "memdbg.h"
 
 struct buffer
+#ifdef DMALLOC
+alloc_buf_debug (size_t size, const char *file, int line)
+#else
 alloc_buf (size_t size)
+#endif
 {
   struct buffer buf;
   buf.capacity = (int)size;
   buf.offset = 0;
   buf.len = 0;
+#ifdef DMALLOC
+  buf.data = (uint8_t *) openvpn_dmalloc (file, line, size);
+#else
   buf.data = (uint8_t *) malloc (size);
+#endif
   CHECK_MALLOC_RETURN (buf.data);
   if (size)
     *buf.data = 0;
@@ -52,26 +60,42 @@ alloc_buf (size_t size)
 }
 
 struct buffer
+#ifdef DMALLOC
+alloc_buf_gc_debug (size_t size, struct gc_arena *gc, const char *file, int line)
+#else
 alloc_buf_gc (size_t size, struct gc_arena *gc)
+#endif
 {
   struct buffer buf;
   buf.capacity = (int)size;
   buf.offset = 0;
   buf.len = 0;
+#ifdef DMALLOC
+  buf.data = (uint8_t *) gc_malloc_debug (size, false, gc, file, line);
+#else
   buf.data = (uint8_t *) gc_malloc (size, false, gc);
+#endif
   if (size)
     *buf.data = 0;
   return buf;
 }
 
 struct buffer
+#ifdef DMALLOC
+clone_buf_debug (const struct buffer* buf, const char *file, int line)
+#else
 clone_buf (const struct buffer* buf)
+#endif
 {
   struct buffer ret;
   ret.capacity = buf->capacity;
   ret.offset = buf->offset;
   ret.len = buf->len;
+#ifdef DMALLOC
+  ret.data = (uint8_t *) openvpn_dmalloc (file, line, buf->capacity);
+#else
   ret.data = (uint8_t *) malloc (buf->capacity);
+#endif
   CHECK_MALLOC_RETURN (ret.data);
   memcpy (BPTR (&ret), BPTR (buf), BLEN (buf));
   return ret;
@@ -200,20 +224,28 @@ buf_write_string_file (const struct buffer *buf, const char *filename, int fd)
  */
 
 void *
+#ifdef DMALLOC
+gc_malloc_debug (size_t size, bool clear, struct gc_arena *a, const char *file, int line)
+#else
 gc_malloc (size_t size, bool clear, struct gc_arena *a)
+#endif
 {
   struct gc_entry *e;
   void *ret;
 
+#ifdef DMALLOC
+  e = (struct gc_entry *) openvpn_dmalloc (file, line, size + sizeof (struct gc_entry));
+#else
   e = (struct gc_entry *) malloc (size + sizeof (struct gc_entry));
+#endif
   CHECK_MALLOC_RETURN (e);
   ret = (char *) e + sizeof (struct gc_entry);
   if (clear)
     memset (ret, 0, size);
-  mutex_lock (L_GC_MALLOC);
+  mutex_lock_static (L_GC_MALLOC);
   e->next = a->list;
   a->list = e;
-  mutex_unlock (L_GC_MALLOC);
+  mutex_unlock_static (L_GC_MALLOC);
   return ret;
 }
 
@@ -221,10 +253,10 @@ void
 x_gc_free (struct gc_arena *a)
 {
   struct gc_entry *e;
-  mutex_lock (L_GC_MALLOC);
+  mutex_lock_static (L_GC_MALLOC);
   e = a->list;
   a->list = NULL;
-  mutex_unlock (L_GC_MALLOC);
+  mutex_unlock_static (L_GC_MALLOC);
   
   while (e != NULL)
     {
@@ -298,7 +330,11 @@ chomp (char *str)
  * Allocate a string
  */
 char *
+#ifdef DMALLOC
+string_alloc_debug (const char *str, struct gc_arena *gc, const char *file, int line)
+#else
 string_alloc (const char *str, struct gc_arena *gc)
+#endif
 {
   if (str)
     {
@@ -307,11 +343,19 @@ string_alloc (const char *str, struct gc_arena *gc)
 
       if (gc)
 	{
+#ifdef DMALLOC
+	  ret = (char *) gc_malloc_debug (n, false, gc, file, line);
+#else
 	  ret = (char *) gc_malloc (n, false, gc);
+#endif
 	}
       else
 	{
+#ifdef DMALLOC
+	  ret = (char *) openvpn_dmalloc (file, line, n);
+#else
 	  ret = (char *) malloc (n);
+#endif
 	  CHECK_MALLOC_RETURN (ret);
 	}
       memcpy (ret, str, n);

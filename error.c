@@ -150,7 +150,7 @@ void x_msg (unsigned int flags, const char *format, ...)
     e = openvpn_errno ();
 
   if (!(flags & M_NOLOCK))
-    mutex_lock (L_MSG);
+    mutex_lock_static (L_MSG);
 
   /*
    * Apply muting filter.
@@ -163,7 +163,7 @@ void x_msg (unsigned int flags, const char *format, ...)
 	  if (++mute_count > mute_cutoff)
 	    {
 	      if (!(flags & M_NOLOCK))
-		mutex_unlock (L_MSG);
+		mutex_unlock_static (L_MSG);
 	      gc_free (&gc);
 	      return;
 	    }
@@ -262,7 +262,7 @@ void x_msg (unsigned int flags, const char *format, ...)
     msg (M_INFO | M_NOLOCK, "Exiting");
 
   if (!(flags & M_NOLOCK))
-    mutex_unlock (L_MSG);
+    mutex_unlock_static (L_MSG);
   
   if (flags & M_FATAL)
     openvpn_exit (OPENVPN_EXIT_STATUS_ERROR); /* exit point */
@@ -416,7 +416,7 @@ x_check_status (int status,
       /* get possible driver error from TAP-Win32 driver */
       extended_msg = tap_win32_getinfo (tt, &gc);
 #endif
-      if (my_errno != EAGAIN)
+      if (true) // JYFIXME: was: if (my_errno != EAGAIN)
 	{
 	  if (extended_msg)
 	    msg (x_cs_info_level, "%s %s [%s]: %s (code=%d)",

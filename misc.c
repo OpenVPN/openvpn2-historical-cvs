@@ -36,6 +36,7 @@
 #include "tun.h"
 #include "error.h"
 #include "thread.h"
+#include "interval.h"
 
 #include "memdbg.h"
 
@@ -530,9 +531,9 @@ time_string (time_t t, int usec, bool show_usec, struct gc_arena *gc)
 	}
     }
 
-  mutex_lock (L_CTIME);
+  mutex_lock_static (L_CTIME);
   buf_printf (&out, "%s", ctime ((const time_t *)&tv.tv_sec));
-  mutex_unlock (L_CTIME);
+  mutex_unlock_static (L_CTIME);
   buf_rmtail (&out, '\n');
 
   if (show_usec && tv.tv_usec)
@@ -549,9 +550,9 @@ strerror_ts (int errnum, struct gc_arena *gc)
 #ifdef HAVE_STRERROR
   struct buffer out = alloc_buf_gc (256, gc);
 
-  mutex_lock (L_STRERR);
+  mutex_lock_static (L_STRERR);
   buf_printf (&out, "%s", openvpn_strerror (errnum, gc));
-  mutex_unlock (L_STRERR);
+  mutex_unlock_static (L_STRERR);
   return BSTR (&out);
 #else
   return "[error string unavailable]";
@@ -669,9 +670,9 @@ setenv_str (const char *name, const char *value)
    
    buf_printf (&out, "%s=%s", name, value);
    safe_string (str);
-   mutex_lock (L_PUTENV);
+   mutex_lock_static (L_PUTENV);
    status = putenv (str);
-   mutex_unlock (L_PUTENV);
+   mutex_unlock_static (L_PUTENV);
    if (status)
      msg (M_WARN | M_ERRNO, "putenv('%s') failed", str);
    manage_env (str);

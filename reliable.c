@@ -655,7 +655,7 @@ reliable_mark_deleted (struct reliable *rel, struct buffer *buf, bool inc_pid)
   ASSERT (0);
 }
 
-#if 1 // JYFIXME
+#if 0
 
 void
 reliable_ack_debug_print (const struct reliable_ack *ack, char *desc)

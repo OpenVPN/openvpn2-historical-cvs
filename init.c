@@ -382,73 +382,94 @@ do_route (const struct options *options, struct route_list *route_list)
 }
 
 /*
+ * initialize tun/tap device object
+ */
+static void
+do_init_tun (struct context *c)
+{
+  init_tun (&c->c1.tuntap,
+	    c->options.dev,
+	    c->options.dev_type,
+	    c->options.ifconfig_local,
+	    c->options.ifconfig_remote_netmask,
+	    addr_host (&c->c2.link_socket.lsa->local),
+	    addr_host (&c->c2.link_socket.lsa->remote),
+	    &c->c2.frame,
+	    &c->options.tuntap_options);
+}
+
+/*
  * Open tun/tap device, ifconfig, call up script, etc.
  */
 
 bool
-do_open_tun (const struct options *options,
-	     struct frame *frame,
-	     struct link_socket *link_socket,
-	     struct tuntap *tuntap,
-	     struct route_list *route_list)
+do_open_tun (struct context *c)
 {
   struct gc_arena gc = gc_new ();
   bool ret = false;
 
-  if (!tuntap_defined (tuntap))
+  if (!tuntap_defined (&c->c1.tuntap))
     {
+      /* initialize (but do not open) tun/tap object */
+      do_init_tun (c);
+
+      /* allocate route list structure */
+      do_alloc_route_list (c);
+
       /* parse and resolve the route option list */
-      if (route_list)
-	do_init_route_list (options, route_list, link_socket, true);
+      if (c->c1.route_list)
+	do_init_route_list (&c->options, c->c1.route_list, &c->c2.link_socket, true);
 
       /* do ifconfig */
-      if (!options->ifconfig_noexec
+      if (!c->options.ifconfig_noexec
 	  && ifconfig_order () == IFCONFIG_BEFORE_TUN_OPEN)
 	{
 	  /* guess actual tun/tap unit number that will be returned
 	     by open_tun */
-	  const char *guess = guess_tuntap_dev (options->dev,
-						options->dev_type,
-						options->dev_node,
+	  const char *guess = guess_tuntap_dev (c->options.dev,
+						c->options.dev_type,
+						c->options.dev_node,
 						&gc);
-	  do_ifconfig (tuntap, guess, TUN_MTU_SIZE (frame));
+	  do_ifconfig (&c->c1.tuntap, guess, TUN_MTU_SIZE (&c->c2.frame));
 	}
 
       /* open the tun device */
-      open_tun (options->dev, options->dev_type, options->dev_node,
-		options->tun_ipv6, tuntap);
+      open_tun (c->options.dev, c->options.dev_type, c->options.dev_node,
+		c->options.tun_ipv6, &c->c1.tuntap);
 
       /* do ifconfig */
-      if (!options->ifconfig_noexec
+      if (!c->options.ifconfig_noexec
 	  && ifconfig_order () == IFCONFIG_AFTER_TUN_OPEN)
-	do_ifconfig (tuntap, tuntap->actual_name, TUN_MTU_SIZE (frame));
+	{
+	  do_ifconfig (&c->c1.tuntap, c->c1.tuntap.actual_name, TUN_MTU_SIZE (&c->c2.frame));
+	}
 
       /* run the up script */
-      run_script (options->up_script,
-		  tuntap->actual_name,
-		  TUN_MTU_SIZE (frame),
-		  EXPANDED_SIZE (frame),
-		  print_in_addr_t (tuntap->local, true, &gc),
-		  print_in_addr_t (tuntap->remote_netmask, true, &gc),
+      run_script (c->options.up_script,
+		  c->c1.tuntap.actual_name,
+		  TUN_MTU_SIZE (&c->c2.frame),
+		  EXPANDED_SIZE (&c->c2.frame),
+		  print_in_addr_t (c->c1.tuntap.local, true, &gc),
+		  print_in_addr_t (c->c1.tuntap.remote_netmask, true, &gc),
 		  "init", NULL, "up");
 
       /* possibly add routes */
-      if (!options->route_delay_defined && route_list)
-	do_route (options, route_list);
+      if (!c->options.route_delay_defined && c->c1.route_list)
+	do_route (&c->options, c->c1.route_list);
 
       /*
        * Did tun/tap driver give us an MTU?
        */
-      if (tuntap->post_open_mtu)
-	frame_set_mtu_dynamic (frame,
-			       tuntap->post_open_mtu,
+      if (c->c1.tuntap.post_open_mtu)
+	frame_set_mtu_dynamic (&c->c2.frame,
+			       c->c1.tuntap.post_open_mtu,
 			       SET_MTU_TUN | SET_MTU_UPPER_BOUND);
 
       /*
        * On Windows, it is usually wrong if --tun-mtu != 1500.
        */
 #ifdef WIN32
-      if (TUN_MTU_SIZE (frame) != 1500)
+      if (TUN_MTU_SIZE (&c->c2.frame) != 1500)
 	msg (M_WARN,
 	     "WARNING: in general you should use '--tun-mtu 1500 --mssfix 1400' on both sides of the connection if at least one side is running Windows, unless you have explicitly modified the TAP-Win32 driver properties");
 #endif
@@ -458,16 +479,16 @@ do_open_tun (const struct options *options,
   else
     {
       msg (M_INFO, "Preserving previous TUN/TAP instance: %s",
-	   tuntap->actual_name);
+	   c->c1.tuntap.actual_name);
 
       /* run the up script if user specified --up-restart */
-      if (options->up_restart)
-	run_script (options->up_script,
-		    tuntap->actual_name,
-		    TUN_MTU_SIZE (frame),
-		    EXPANDED_SIZE (frame),
-		    print_in_addr_t (tuntap->local, true, &gc),
-		    print_in_addr_t (tuntap->remote_netmask, true, &gc),
+      if (c->options.up_restart)
+	run_script (c->options.up_script,
+		    c->c1.tuntap.actual_name,
+		    TUN_MTU_SIZE (&c->c2.frame),
+		    EXPANDED_SIZE (&c->c2.frame),
+		    print_in_addr_t (c->c1.tuntap.local, true, &gc),
+		    print_in_addr_t (c->c1.tuntap.remote_netmask, true, &gc),
 		    "restart", NULL, "up");
     }
   gc_free (&gc);
@@ -659,7 +680,7 @@ do_init_crypto_tls_c1 (struct context *c)
 }
 
 static void
-do_init_crypto_tls (struct context *c)
+do_init_crypto_tls (struct context *c, bool lite)
 {
   const struct options *options = &c->options;
   struct tls_options to;
@@ -668,7 +689,8 @@ do_init_crypto_tls (struct context *c)
   ASSERT (options->tls_server || options->tls_client);
   ASSERT (!options->test_crypto);
 
-  init_crypto_pre (c);
+  if (!lite)
+    init_crypto_pre (c);
 
   /* Make sure we are either a TLS client or server but not both */
   ASSERT (options->tls_server == !options->tls_client);
@@ -731,7 +753,8 @@ do_init_crypto_tls (struct context *c)
   /*
    * Initialize OpenVPN's master TLS-mode object.
    */
-  c->c2.tls_multi = tls_multi_init (&to);
+  if (!lite)
+    c->c2.tls_multi = tls_multi_init (&to);
 }
 
 static void
@@ -747,16 +770,6 @@ do_init_finalize_tls_frame (struct context *c)
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
 
-static void
-do_init_crypto_tls_lite (struct context *c)
-{
-#if P2MP
-  do_init_crypto_tls_c1 (c);
-#else
-  ASSERT (0);
-#endif
-}
-
 #ifdef USE_CRYPTO
 /*
  * No encryption or authentication.
@@ -771,14 +784,14 @@ do_init_crypto_none (const struct context *c)
 #endif
 
 static void
-do_init_crypto (struct context *c)
+do_init_crypto (struct context *c, bool lite)
 {
 #ifdef USE_CRYPTO
   if (c->options.shared_secret_file)
     do_init_crypto_static (c);
 #ifdef USE_SSL
   else if (c->options.tls_server || c->options.tls_client)
-    do_init_crypto_tls (c);
+    do_init_crypto_tls (c, lite);
 #endif
   else				/* no encryption or authentication. */
     do_init_crypto_none (c);
@@ -860,6 +873,54 @@ do_init_frame_tls (struct context *c)
 #endif
 }
 
+struct context_buffers *
+init_context_buffers (struct frame *frame)
+{
+  struct context_buffers *b;
+
+  ALLOC_OBJ_CLEAR (b, struct context_buffers);
+
+  b->read_link_buf = alloc_buf (BUF_SIZE (frame));
+  b->read_tun_buf = alloc_buf (BUF_SIZE (frame));
+
+  b->aux_buf = alloc_buf (BUF_SIZE (frame));
+
+#ifdef USE_CRYPTO
+  b->encrypt_buf = alloc_buf (BUF_SIZE (frame));
+  b->decrypt_buf = alloc_buf (BUF_SIZE (frame));
+#endif
+
+#ifdef USE_LZO
+  b->lzo_compress_buf = alloc_buf (BUF_SIZE (frame));
+  b->lzo_decompress_buf = alloc_buf (BUF_SIZE (frame));
+#endif
+
+  return b;
+}
+
+void
+free_context_buffers (struct context_buffers *b)
+{
+  if (b)
+    {
+      free_buf (&b->read_link_buf);
+      free_buf (&b->read_tun_buf);
+      free_buf (&b->aux_buf);
+
+#ifdef USE_LZO
+      free_buf (&b->lzo_compress_buf);
+      free_buf (&b->lzo_decompress_buf);
+#endif
+
+#ifdef USE_CRYPTO
+      free_buf (&b->encrypt_buf);
+      free_buf (&b->decrypt_buf);
+#endif
+
+      free (b);
+    }
+}
+
 /*
  * Now that we know all frame parameters, initialize
  * our buffers.
@@ -867,51 +928,8 @@ do_init_frame_tls (struct context *c)
 static void
 do_init_buffers (struct context *c)
 {
-  /* CM_CHILD inherits buffers from CM_TOP */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
-    {
-      c->c2.buffers_owned = true;
-      c->c2.read_link_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-      c->c2.read_tun_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-
-      c->c2.aux_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-
-#ifdef USE_CRYPTO
-      c->c2.encrypt_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-      c->c2.decrypt_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-#endif
-
-#ifdef USE_LZO
-      if (c->options.comp_lzo)
-	{
-	  c->c2.lzo_compress_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-	  c->c2.lzo_decompress_buf = alloc_buf (BUF_SIZE (&c->c2.frame));
-	}
-#endif
-    }
-}
-
-void
-inherit_buffers (struct context *dest, const struct context *src)
-{
-  dest->c2.buffers_owned = false;
-  dest->c2.read_link_buf = src->c2.read_link_buf;
-  dest->c2.read_tun_buf = src->c2.read_tun_buf;
-  
-  dest->c2.aux_buf = src->c2.aux_buf;
-
-#ifdef USE_CRYPTO
-  dest->c2.encrypt_buf = src->c2.encrypt_buf;
-  dest->c2.decrypt_buf = src->c2.decrypt_buf;
-#endif
-
-#ifdef USE_LZO
-  if (dest->options.comp_lzo)
-    {
-      dest->c2.lzo_compress_buf = src->c2.lzo_compress_buf;
-      dest->c2.lzo_decompress_buf = src->c2.lzo_decompress_buf;
-    }
-#endif
+  c->c2.buffers = init_context_buffers (&c->c2.frame);
+  c->c2.buffers_owned = true;
 }
 
 /*
@@ -989,23 +1007,6 @@ do_init_socket_2 (struct context *c)
 }
 
 /*
- * initialize tun/tap device object
- */
-static void
-do_init_tun (struct context *c)
-{
-  init_tun (&c->c1.tuntap,
-	    c->options.dev,
-	    c->options.dev_type,
-	    c->options.ifconfig_local,
-	    c->options.ifconfig_remote_netmask,
-	    addr_host (&c->c2.link_socket.lsa->local),
-	    addr_host (&c->c2.link_socket.lsa->remote),
-	    &c->c2.frame,
-	    &c->options.tuntap_options);
-}
-
-/*
  * Print MTU INFO
  */
 static void
@@ -1036,11 +1037,11 @@ do_compute_occ_strings (struct context *c)
 
 #ifdef USE_CRYPTO
   msg (D_SHOW_OCC_HASH, "Local Options hash (VER=%s): '%s'",
-       options_string_version (c->c2.options_string_local),
+       options_string_version (c->c2.options_string_local, &gc),
        md5sum (c->c2.options_string_local,
 	       strlen (c->c2.options_string_local), 9, &gc));
   msg (D_SHOW_OCC_HASH, "Expected Remote Options hash (VER=%s): '%s'",
-       options_string_version (c->c2.options_string_remote),
+       options_string_version (c->c2.options_string_remote, &gc),
        md5sum (c->c2.options_string_remote,
 	       strlen (c->c2.options_string_remote), 9, &gc));
 #endif
@@ -1122,25 +1123,6 @@ do_init_first_time_2 (struct context *c)
 }
 
 /*
- * Start the TLS thread
- */
-static void
-do_start_tls_thread (struct context *c)
-{
-#if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-  if (c->c2.tls_multi && c->options.tls_thread)
-    {
-      if (c->first_time)
-	openvpn_thread_init ();
-      tls_thread_create (&c->c2.thread_parms, c->c2.tls_multi,
-			 &c->c2.link_socket, c->options.nice_work,
-			 c->options.mlock);
-      c->c2.thread_opened = true;
-    }
-#endif
-}
-
-/*
  * set maximum fd + 1 for select()
  */
 static void
@@ -1148,14 +1130,6 @@ do_init_maxfd (struct context *c)
 {
   SOCKET_SETMAXFD (&c->c2.event_wait, &c->c2.link_socket);
   TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
-
-#if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-  if (c->options.tls_thread)
-    {
-      TLS_THREAD_SOCKET_SETMAXFD (c->c2.tls_multi, &c->c2.event_wait,
-				  &c->c2.thread_parms);
-    }
-#endif
 }
 
 /*
@@ -1203,9 +1177,6 @@ do_init_timers (struct context *c)
 #endif
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
-#ifdef USE_PTHREAD
-  if (!c->options.tls_thread)
-#endif
     /* initialize tmp_int optimization that limits the number of times we call
        tls_multi_process in the main event loop */
     interval_init (&c->c2.tmp_int, TLS_MULTI_HORIZON, TLS_MULTI_REFRESH);
@@ -1230,44 +1201,15 @@ do_close_check_if_restart_permitted (struct context *c)
 }
 
 /*
- * close TLS thread
- */
-static void
-do_close_tls_thread (struct context *c)
-{
-#if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
-  if (c->c2.thread_opened)
-    tls_thread_close (&c->c2.thread_parms);
-#endif
-}
-
-/*
  * free buffers
  */
 static void
 do_close_free_buf (struct context *c)
 {
-  if (c->c2.free_to_link)
-    free_buf (&c->c2.to_link);
-
   if (c->c2.buffers_owned)
     {
-      free_buf (&c->c2.read_link_buf);
-      free_buf (&c->c2.read_tun_buf);
-      free_buf (&c->c2.aux_buf);
-
-#ifdef USE_LZO
-      if (c->options.comp_lzo)
-	{
-	  free_buf (&c->c2.lzo_compress_buf);
-	  free_buf (&c->c2.lzo_decompress_buf);
-	}
-#endif
-
-#ifdef USE_CRYPTO
-      free_buf (&c->c2.encrypt_buf);
-      free_buf (&c->c2.decrypt_buf);
-#endif
+      free_context_buffers (c->c2.buffers);
+      c->c2.buffers = NULL;
     }
 }
 
@@ -1293,10 +1235,10 @@ do_close_tls (struct context *c)
  * Free key schedules
  */
 static void
-do_close_free_key_schedule (struct context *c)
+do_close_free_key_schedule (struct context *c, bool free_ssl_ctx)
 {
   if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_key))
-    key_schedule_free (&c->c1.ks, (c->mode == CM_P2P || c->mode == CM_TOP));
+    key_schedule_free (&c->c1.ks, free_ssl_ctx);
 }
 
 /*
@@ -1421,7 +1363,7 @@ do_close_syslog (struct context *c)
  * Initialize a tunnel instance.
  */
 void
-init_instance (struct context *c)
+init_instance (struct context *c, bool init_buffers)
 {
   const struct options *options = &c->options;
 
@@ -1448,7 +1390,7 @@ init_instance (struct context *c)
 		  && !check_debug_level (D_LOG_RW + 1));
   
   /* possible sleep if restart */
-  if (!c->first_time)
+  if ((c->mode == CM_P2P || c->mode == CM_TOP) && !c->first_time)
     socket_restart_pause (options->proto, options->http_proxy_server != NULL,
 			  options->socks_proxy_server != NULL);
 
@@ -1467,10 +1409,7 @@ init_instance (struct context *c)
     c->c2.fragment = fragment_init (&c->c2.frame);
 
   /* init crypto layer */
-  if (c->mode == CM_TOP)
-    do_init_crypto_tls_lite (c);
-  else
-    do_init_crypto (c);
+    do_init_crypto (c, c->mode == CM_TOP);
 
 #ifdef USE_LZO
   /* initialize LZO compression library. */
@@ -1486,7 +1425,8 @@ init_instance (struct context *c)
     do_init_frame_tls (c);
 
   /* init workspace buffers whose size is derived from frame size */
-  do_init_buffers (c);
+  if (init_buffers)
+    do_init_buffers (c);
 
   /* initialize internal fragmentation capability with known frame size */
   if (options->fragment && (c->mode == CM_P2P || c->mode == CM_CHILD))
@@ -1499,22 +1439,11 @@ init_instance (struct context *c)
   if (c->mode == CM_P2P || c->mode == CM_TOP)
     do_init_socket_1 (c);
 
-  /* initialize tun/tap device object */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
-    {
-      do_init_tun (c);
-
-      /* open tun/tap device, ifconfig, run up script, etc. */
-      if (!options->up_delay || c->mode == CM_TOP)
-	{
-	  do_alloc_route_list (c);
-	  c->c2.did_open_tun = do_open_tun (options,
-					    &c->c2.frame,
-					    &c->c2.link_socket,
-					    &c->c1.tuntap,
-					    c->c1.route_list);
-	}
-    }
+  /* initialize tun/tap device object,
+     open tun/tap device, ifconfig, run up script, etc. */
+  if (!options->up_delay && (c->mode == CM_P2P || c->mode == CM_TOP))
+    c->c2.did_open_tun = do_open_tun (c);
+  c->c2.enable_up_delay = options->up_delay;
 
   /* print MTU info */
   do_print_data_channel_mtu_parms (c);
@@ -1550,10 +1479,6 @@ init_instance (struct context *c)
 	}
     }
 
-  /* start the TLS thread */
-  if (c->mode == CM_P2P) /* JYFIXME -- for efficiency multi-client modes should use tls thread */
-    do_start_tls_thread (c);
-
   /* set maximum fd + 1 for select() */
   do_init_maxfd (c);
 
@@ -1571,9 +1496,6 @@ close_instance (struct context *c)
   /* if xinetd/inetd mode, don't allow restart */
   do_close_check_if_restart_permitted (c);
 
-  /* close TLS thread */
-  do_close_tls_thread (c);
-
 #ifdef USE_LZO
   if (c->options.comp_lzo)
     lzo_compress_uninit (&c->c2.lzo_compwork);
@@ -1586,7 +1508,7 @@ close_instance (struct context *c)
   do_close_tls (c);
 
   /* free key schedules */
-  do_close_free_key_schedule (c);
+  do_close_free_key_schedule (c, (c->mode == CM_P2P || c->mode == CM_TOP));
 
   /* close TCP/UDP connection */
   do_close_link_socket (c);
@@ -1612,6 +1534,23 @@ close_instance (struct context *c)
 
 #ifdef USE_CRYPTO
 
+static void
+test_malloc (void)
+{
+  int i, j;
+  msg (M_INFO, "Multithreaded malloc test...");
+  for (i = 0; i < 25; ++i)
+    {
+      struct gc_arena gc = gc_new ();
+      const int limit = get_random () & 0x03FF;
+      for (j = 0; j < limit; ++j)
+	{
+	  gc_malloc (get_random () & 0x03FF, false, &gc);
+	}
+      gc_free (&gc);
+    }
+}
+
 /*
  * Do a loopback test
  * on the crypto subsystem.
@@ -1621,7 +1560,7 @@ test_crypto_thread (void *arg)
 {
   struct context *c = (struct context *) arg;
   const struct options *options = &c->options;
-#if defined(USE_PTHREAD) && defined(USE_SSL)
+#if defined(USE_PTHREAD)
   struct context *child = NULL;
   openvpn_thread_t child_id = 0;
 #endif
@@ -1630,10 +1569,12 @@ test_crypto_thread (void *arg)
   context_init_1 (c);
   init_crypto_pre (c);
 
-#if defined(USE_PTHREAD) && defined(USE_SSL)
+#if defined(USE_PTHREAD)
   {
-    if (c->first_time && options->tls_thread)
+    if (c->first_time && options->n_threads > 1)
       {
+	if (options->n_threads > 2)
+	  msg (M_FATAL, "ERROR: --test-crypto option only works with --threads set to 1 or 2");
 	openvpn_thread_init ();
 	ALLOC_OBJ (child, struct context);
 	context_clear (child);
@@ -1646,11 +1587,16 @@ test_crypto_thread (void *arg)
 #endif
   frame_finalize_options (&c->c2.frame, options);
 
+#if defined(USE_PTHREAD)
+  if (options->n_threads == 2)
+    test_malloc ();
+#endif
+
   test_crypto (&c->c2.crypto_options, &c->c2.frame);
   key_schedule_free (&c->c1.ks, true);
 
-#if defined(USE_PTHREAD) && defined(USE_SSL)
-  if (c->first_time && options->tls_thread)
+#if defined(USE_PTHREAD)
+  if (c->first_time && options->n_threads > 1)
     openvpn_thread_join (child_id);
   if (child)
     free (child);

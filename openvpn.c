@@ -44,7 +44,7 @@ tunnel_point_to_point (struct context *c)
   context_clear_2 (c);
 
   /* initialize tunnel instance */
-  init_instance (c);
+  init_instance (c, true);
   if (IS_SIG (c))
     return;
 
@@ -113,15 +113,11 @@ tunnel_nonforking_udp_server (struct context *top)
   ASSERT (top->options.proto == PROTO_UDPv4);
   ASSERT (top->options.mode == MODE_NONFORKING_UDP_SERVER);
 
-#ifdef USE_PTHREAD
-  top->options.tls_thread = false;
-#endif
-
   multi_init (&multi, top);
   context_clear_2 (top);
 
   /* initialize tunnel instance */
-  init_instance (top);
+  init_instance (top, true);
   if (IS_SIG (top))
     return;
 
@@ -136,12 +132,13 @@ tunnel_nonforking_udp_server (struct context *top)
       if (!top->c2.select_status)
 	{
 	  multi_process_timeout (&multi, top);
-	  continue;
 	}
-
-      /* process the I/O which triggered select */
-      multi_process_io (&multi, top);
-      TNUS_SIG ();
+      else
+	{
+	  /* process the I/O which triggered select */
+	  multi_process_io (&multi, top);
+	  TNUS_SIG ();
+	}
     }
 
   /* tear down tunnel instance (unless --persist-tun) */
@@ -185,7 +182,7 @@ main (int argc, char *argv[])
 	  init_options (&c.options);
 
 	  /* parse command line options, and read configuration file */
-	  parse_argv (&c.options, argc, argv);
+	  parse_argv (&c.options, argc, argv, M_USAGE, OPT_P_ALL);
 
 	  /* init verbosity and mute levels */
 	  init_verb_mute (&c.options);

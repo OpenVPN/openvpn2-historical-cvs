@@ -163,9 +163,6 @@ struct options
 
   bool log;
   int nice;
-#ifdef USE_PTHREAD
-  int nice_work;
-#endif
   int verbosity;
   int mute;
   bool gremlin;
@@ -198,12 +195,19 @@ struct options
   /* Enable options consistency check between peers */
   bool occ;
 
+#ifdef USE_PTHREAD
+  int n_threads;
+  int nice_work;
+#endif
+
 #if P2MP
   struct push_list *push_list;
   bool pull; /* client pull of config options from server */
   bool ifconfig_pool_defined;
   in_addr_t ifconfig_pool_start;
   in_addr_t ifconfig_pool_end;
+  int real_hash_size;
+  int virtual_hash_size;
 #endif
 
 #ifdef USE_CRYPTO
@@ -258,16 +262,29 @@ struct options
 
   /* Allow only one session */
   bool single_session;
-
-#ifdef USE_PTHREAD
-  bool tls_thread;
-#endif
-
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
 };
 
 #define streq(x, y) (!strcmp((x), (y)))
+
+/*
+ * Permission flags.
+ */
+#define OPT_P_GENERAL   (1<<0)
+#define OPT_P_IFCONFIG  (1<<1)
+#define OPT_P_ROUTE     (1<<2)
+#define OPT_P_IPWIN32   (1<<3)
+#define OPT_P_SCRIPT    (1<<4)
+#define OPT_P_SETENV    (1<<5)
+
+#define OPT_P_ALL       (~0)
+
+void parse_argv (struct options* options,
+		 int argc,
+		 char *argv[],
+		 int msglevel,
+		 unsigned int permission_mask);
 
 void notnull (const char *arg, const char *description);
 
@@ -279,11 +296,9 @@ void uninit_options (struct options *o);
 void setenv_settings (const struct options *o);
 void show_settings (const struct options *o);
 
-void parse_argv (struct options* options, int argc, char *argv[]);
-
 bool string_defined_equal (const char *s1, const char *s2);
 
-const char *options_string_version (const char* s);
+const char *options_string_version (const char* s, struct gc_arena *gc);
 
 char *options_string (const struct options *o,
 		      const struct frame *frame,

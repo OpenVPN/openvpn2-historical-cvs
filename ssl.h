@@ -40,6 +40,7 @@
 #include "reliable.h"
 #include "socket.h"
 #include "mtu.h"
+#include "thread.h"
 
 /*
  * Openvpn Protocol.
@@ -371,6 +372,9 @@ struct tls_session
  */
 struct tls_multi
 {
+  /* used to coordinate access between main thread and TLS thread */
+  MUTEX_PTR_DEFINE (mutex);
+
   /* const options and config info */
   struct tls_options opt;
 
@@ -405,10 +409,6 @@ struct tls_multi
    * Our session objects.
    */
   struct tls_session session[TM_SIZE];
-  
-#ifdef USE_PTHREAD
-  openvpn_thread_t work_thread_id;
-#endif
 };
 
 void init_ssl_lib (void);
@@ -489,59 +489,6 @@ tls_test_payload_len (const struct tls_multi *multi)
     }
   return 0;
 }
-
-/*
- * TLS thread mode
- */
-#ifdef USE_PTHREAD
-
-#define TTCMD_PROCESS 0
-#define TTCMD_EXIT    1
-
-struct tt_cmd
-{
-  int cmd;
-};
-
-struct tt_ret
-{
-  struct buffer to_link;
-  struct sockaddr_in to_link_addr;
-};
-
-struct thread_parms
-{
-# define TLS_THREAD_MAIN   0
-# define TLS_THREAD_WORKER 1
-# define TLS_THREAD_SOCKET(x) ((x)->sd[TLS_THREAD_MAIN])
-
-  /* these macros are called in the context of the openvpn() function */
-# define TLS_THREAD_SOCKET_ISSET(tm, w, tp, set) ((tm) && FD_ISSET (TLS_THREAD_SOCKET (tp), &((w)->set)))
-# define TLS_THREAD_SOCKET_SET(tm, w, tp, set) { if (tm) FD_SET (TLS_THREAD_SOCKET (tp), &((w)->set)); }
-# define TLS_THREAD_SOCKET_SETMAXFD(tm, w, tp) { if (tm) wait_update_maxfd ((w), TLS_THREAD_SOCKET (tp)); }
-
-  int sd[2];
-
-  struct tls_multi *multi;
-  struct link_socket *link_socket;
-  int nice;
-  bool mlock;
-};
-
-void tls_thread_create (struct thread_parms *state,
-			struct tls_multi *multi,
-			struct link_socket *link_socket,
-			int nice, bool mlock);
-
-int tls_thread_process (struct thread_parms *state);
-
-void tls_thread_close (struct thread_parms *state);
-
-int tls_thread_rec_buf (struct thread_parms *state,
-			struct tt_ret* ttr,
-			bool do_check_status);
-
-#endif
 
 /*
  * protocol_dump() flags

@@ -407,8 +407,9 @@ link_socket_get_outgoing_addr (struct buffer *buf,
   if (buf->len > 0)
     {
       struct link_socket_addr *lsa = sock->lsa;
-      if (sock->set_outgoing_initial && addr_defined (&lsa->actual))
+      if (addr_defined (&lsa->actual))
 	{
+	  addr->sin_family = lsa->actual.sin_family;
 	  addr->sin_addr.s_addr = lsa->actual.sin_addr.s_addr;
 	  addr->sin_port = lsa->actual.sin_port;
 	}
@@ -430,13 +431,13 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
       struct link_socket_addr *lsa = sock->lsa;
       if (
 	  /* new or changed address? */
-	  ((!sock->set_outgoing_initial)
+	  (!sock->set_outgoing_initial
 	   || !addr_match_proto (addr, &lsa->actual, sock->proto))
 	  /* address undef or address == remote or --float */
 	  && (sock->remote_float
 	      || !addr_defined (&lsa->remote)
 	      || addr_match_proto (addr, &lsa->remote, sock->proto))
-	 )
+	  )
 	{
 	  link_socket_connection_initiated (buf, sock, addr);
 	}

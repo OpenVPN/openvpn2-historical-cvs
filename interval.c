@@ -33,6 +33,7 @@
 
 #include "interval.h"
 #include "misc.h"
+#include "thread.h"
 
 #include "memdbg.h"
 
@@ -62,3 +63,30 @@ tv_string_abs (const struct timeval *tv, struct gc_arena *gc)
 		      true,
 		      gc);
 }
+
+#ifdef WIN32
+
+static time_t boot_time;         /* GLOBAL */
+static DWORD prev_ms_since_boot; /* GLOBAL */
+
+int
+gettimeofday (struct timeval *tv, void *tz)
+{
+  const DWORD ms_since_boot = timeGetTime ();
+
+  mutex_lock_static (L_GETTIMEOFDAY);
+
+  if (!boot_time || ms_since_boot < prev_ms_since_boot)
+    boot_time = time (NULL) - ms_since_boot / 1000;
+
+  tv->tv_sec = boot_time + ms_since_boot / 1000;
+  tv->tv_usec = (ms_since_boot % 1000) * 1000;
+
+  prev_ms_since_boot = ms_since_boot;
+
+  mutex_lock_static (L_GETTIMEOFDAY);
+
+  return 0;
+}
+
+#endif

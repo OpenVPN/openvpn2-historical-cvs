@@ -79,7 +79,7 @@ check_ping_restart_dowork (struct context *c)
 void
 check_ping_send_dowork (struct context *c)
 {
-  c->c2.buf = c->c2.aux_buf;
+  c->c2.buf = c->c2.buffers->aux_buf;
   ASSERT (buf_init (&c->c2.buf, FRAME_HEADROOM (&c->c2.frame)));
   ASSERT (buf_safe (&c->c2.buf, MAX_RW_SIZE_TUN (&c->c2.frame)));
   ASSERT (buf_write (&c->c2.buf, ping_string, sizeof (ping_string)));

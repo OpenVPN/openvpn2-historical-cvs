@@ -1092,9 +1092,9 @@ print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* sep
   struct buffer out = alloc_buf_gc (64, gc);
   const int port = ntohs (addr->sin_port);
 
-  mutex_lock (L_INET_NTOA);
+  mutex_lock_static (L_INET_NTOA);
   buf_printf (&out, "%s", (addr_defined (addr) ? inet_ntoa (addr->sin_addr) : "[undef]"));
-  mutex_unlock (L_INET_NTOA);
+  mutex_unlock_static (L_INET_NTOA);
 
   if (do_port && port)
     {
@@ -1121,9 +1121,9 @@ print_in_addr_t (in_addr_t addr, bool empty_if_undef, struct gc_arena *gc)
       CLEAR (ia);
       ia.s_addr = htonl (addr);
 
-      mutex_lock (L_INET_NTOA);
+      mutex_lock_static (L_INET_NTOA);
       buf_printf (&out, "%s", inet_ntoa (ia));
-      mutex_unlock (L_INET_NTOA);
+      mutex_unlock_static (L_INET_NTOA);
     }
   return BSTR (&out);
 }
@@ -1135,9 +1135,9 @@ setenv_sockaddr (const char *name_prefix, const struct sockaddr_in *addr)
   char name_buf[256];
 
   openvpn_snprintf (name_buf, sizeof (name_buf), "%s_ip", name_prefix);
-  mutex_lock (L_INET_NTOA);
+  mutex_lock_static (L_INET_NTOA);
   setenv_str (name_buf, inet_ntoa (addr->sin_addr));
-  mutex_unlock (L_INET_NTOA);
+  mutex_unlock_static (L_INET_NTOA);
 
   openvpn_snprintf (name_buf, sizeof (name_buf), "%s_port", name_prefix);
   setenv_int (name_buf, ntohs (addr->sin_port));

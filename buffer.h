@@ -59,15 +59,45 @@ struct gc_arena
 #define BSTR(buf)  ((char *)BPTR(buf))
 #define BCAP(buf)  (buf_forward_capacity (buf))
 
-struct buffer alloc_buf (size_t size);
-struct buffer clone_buf (const struct buffer* buf);
-struct buffer alloc_buf_gc (size_t size, struct gc_arena *gc); /* allocate buffer with garbage collection */
 struct buffer clear_buf (void);
 void free_buf (struct buffer *buf);
 
+/* for dmalloc debugging */
+
+#ifdef DMALLOC
+
+#define alloc_buf(size)               alloc_buf_debug (size, __FILE__, __LINE__)
+#define alloc_buf_gc(size, gc)        alloc_buf_gc_debug (size, gc, __FILE__, __LINE__);
+#define clone_buf(buf)                clone_buf_debug (buf, __FILE__, __LINE__);
+#define gc_malloc(size, clear, arena) gc_malloc_debug (size, clear, arena, __FILE__, __LINE__)
+#define string_alloc(str, gc)         string_alloc_debug (str, gc, __FILE__, __LINE__)
+
+struct buffer alloc_buf_debug (size_t size, const char *file, int line);
+struct buffer alloc_buf_gc_debug (size_t size, struct gc_arena *gc, const char *file, int line);
+struct buffer clone_buf_debug (const struct buffer* buf, const char *file, int line);
+void *gc_malloc_debug (size_t size, bool clear, struct gc_arena *a, const char *file, int line);
+char *string_alloc_debug (const char *str, struct gc_arena *gc, const char *file, int line);
+
+#else
+
+struct buffer alloc_buf (size_t size);
+struct buffer alloc_buf_gc (size_t size, struct gc_arena *gc); /* allocate buffer with garbage collection */
+struct buffer clone_buf (const struct buffer* buf);
+void *gc_malloc (size_t size, bool clear, struct gc_arena *a);
 char *string_alloc (const char *str, struct gc_arena *gc);
 
+#endif
+
 /* inline functions */
+
+static inline void
+buf_reset (struct buffer *buf)
+{
+  buf->capacity = 0;
+  buf->offset = 0;
+  buf->len = 0;
+  buf->data = NULL;
+}
 
 static inline bool
 buf_init (struct buffer *buf, int offset)
@@ -470,7 +500,6 @@ xor (uint8_t *dest, const uint8_t *src, int len)
  * char ptrs to malloced strings.
  */
 
-void *gc_malloc (size_t size, bool clear, struct gc_arena *a);
 void x_gc_free (struct gc_arena *a);
 
 static inline void

@@ -50,14 +50,11 @@ bool do_persist_tuntap (const struct options *options);
 
 void pre_setup (const struct options *options);
 
-void init_instance (struct context *c);
+void init_instance (struct context *c, bool init_buffers);
 
 void do_route (const struct options *options, struct route_list *route_list);
 
-bool do_open_tun (const struct options *options,
-		  struct frame *frame,
-		  struct link_socket *link_socket,
-		  struct tuntap *tuntap, struct route_list *route_list);
+bool do_open_tun (struct context *c);
 
 void close_instance (struct context *c);
 
@@ -65,7 +62,5 @@ bool do_test_crypto (const struct options *o);
 
 void context_gc_detach (struct context *c, bool options_only);
 void context_gc_free (struct context *c);
-
-void inherit_buffers (struct context *dest, const struct context *src);
 
 #endif

@@ -26,12 +26,22 @@
 #ifndef LIST_H
 #define LIST_H
 
+/*
+ * This code is a fairly straightforward hash
+ * table implementation using Bob Jenkins'
+ * hash function.
+ *
+ * Hash tables are used in OpenVPN to keep track of
+ * client instances over various key spaces.
+ */
+
 #if P2MP
 
 /* define this to enable special list test mode */
 /*#define LIST_TEST*/
 
 #include "basic.h"
+#include "thread.h"
 
 #define hashsize(n) ((uint32_t)1<<(n))
 #define hashmask(n) (hashsize(n)-1)
@@ -51,6 +61,7 @@ struct hash_bucket
 
 struct hash
 {
+  MUTEX_DEFINE (mutex);
   int n_buckets;
   int n_elements;
   bool auto_grow; /* not implemented yet */
@@ -74,7 +85,7 @@ struct hash *hash_init (int n_buckets,
 
 void hash_free (struct hash *hash);
 
-void *hash_lookup_fast (struct hash *hash, const void *key, uint32_t hv);
+void *hash_lookup_dowork (struct hash *hash, const void *key, uint32_t hv);
 bool hash_remove (struct hash *hash, const void *key);
 bool hash_add (struct hash *hash, const void *key, void *value);
 
@@ -100,9 +111,19 @@ hash_value (const struct hash *hash, const void *key)
 }
 
 static inline void *
+hash_lookup_lock (struct hash *hash, const void *key, uint32_t hv)
+{
+  void *ret;
+  mutex_lock (&hash->mutex);
+  ret = hash_lookup_dowork (hash, key, hv);
+  mutex_unlock (&hash->mutex);
+  return ret;
+}
+
+static inline void *
 hash_lookup (struct hash *hash, const void *key)
 {
-  return hash_lookup_fast (hash, key, hash_value (hash, key));
+  return hash_lookup_lock (hash, key, hash_value (hash, key));
 }
 
 #endif /* P2MP */

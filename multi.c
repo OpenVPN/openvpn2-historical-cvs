@@ -40,20 +40,26 @@
 
 #include "memdbg.h"
 
+#define MULTI_DEBUG // JYFIXME
+
 static bool multi_process_post (struct multi_context *m, struct multi_instance *mi);
 
 void
 multi_init (struct multi_context *m, struct context *t)
 {
+  msg (D_MULTI_DEBUG, "MULTI: multi_init called, r=%d v=%d",
+       t->options.real_hash_size,
+       t->options.virtual_hash_size);
+
   CLEAR (*m);
   t->mode = CM_TOP;
 
-  m->hash = hash_init (256,
+  m->hash = hash_init (t->options.real_hash_size,
 		       false,
 		       mroute_addr_hash_function,
 		       mroute_addr_compare_function);
 
-  m->vhash = hash_init (256,
+  m->vhash = hash_init (t->options.virtual_hash_size,
 			false,
 			mroute_addr_hash_function,
 			mroute_addr_compare_function);
@@ -72,14 +78,35 @@ multi_get_instance_by_real_addr (struct multi_context *m, const struct sockaddr_
   struct mroute_addr ma;
   struct multi_instance *ret = NULL;
   if (mroute_extract_sockaddr_in (&ma, addr, true))
-    ret = (struct multi_instance *) hash_lookup (m->hash, &ma);
+    {
+      ret = (struct multi_instance *) hash_lookup (m->hash, &ma);
+#ifdef MULTI_DEBUG
+      {
+	struct gc_arena gc = gc_new ();
+	msg (D_MULTI_DEBUG, "GET INST BY REAL: %s %s",
+	     mroute_addr_print (&ma, &gc),
+	     ret ? "[succeeded]" : "[failed]");
+	gc_free (&gc);
+#endif
+      }
+    }
   return ret;
 }
 
 static inline struct multi_instance *
 multi_get_instance_by_virtual_addr (struct multi_context *m, const struct mroute_addr *addr)
 {
-  return (struct multi_instance *) hash_lookup (m->vhash, addr);
+  struct multi_instance *ret = (struct multi_instance *) hash_lookup (m->vhash, addr);
+#ifdef MULTI_DEBUG
+  {
+    struct gc_arena gc = gc_new ();
+    msg (D_MULTI_DEBUG, "GET INST BY VIRT: %s %s",
+	 mroute_addr_print (addr, &gc),
+	 ret ? "[succeeded]" : "[failed]");
+    gc_free (&gc);
+  }
+#endif
+  return ret;
 }
 
 static inline void
@@ -94,11 +121,8 @@ multi_close_context (struct context *c)
 static inline void
 multi_close_instance (struct multi_context *m, struct multi_instance *mi)
 {
-  if (mi->did_routes)
-    {
-      mroute_list_free (&mi->real);
-      mroute_list_free (&mi->virtual);
-    }
+  msg (D_MULTI_DEBUG, "MULTI: multi_close_instance called");
+
   if (mi->did_open_context)
     {
       multi_close_context (&mi->context);
@@ -114,6 +138,11 @@ multi_close_instance (struct multi_context *m, struct multi_instance *mi)
   if (mi->did_ifconfig)
     {
       ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle);
+    }
+  if (mi->did_routes)
+    {
+      mroute_list_free (&mi->real);
+      mroute_list_free (&mi->virtual);
     }
   free (mi);
 }
@@ -164,17 +193,13 @@ multi_inherit_context (struct context *dest, const struct context *src)
   dest->options = src->options;
   context_gc_detach (dest, true);
 
-#ifdef USE_PTHREAD
-  dest->options.tls_thread = false; // JYFIXME -- point-to-multipoint doesn't support a threaded control channel yet
-#endif
-  
   /* context init */
-  init_instance (dest);
+  init_instance (dest, false);
   if (IS_SIG (dest))
     return;
 
   /* all instances use top-level parent buffers */
-  inherit_buffers (dest, src);
+  dest->c2.buffers = src->c2.buffers;
 
   /* inherit parent link_socket and tuntap */
   link_socket_inherit_passive (&dest->c2.link_socket, &src->c2.link_socket, &dest->c1.link_socket_addr);
@@ -184,19 +209,31 @@ multi_inherit_context (struct context *dest, const struct context *src)
 static struct multi_instance *
 multi_open_instance (struct multi_context *m, struct context *t)
 {
+  struct gc_arena gc = gc_new ();
   struct multi_instance *mi;
 
   ALLOC_OBJ_CLEAR (mi, struct multi_instance);
 
-  msg (M_INFO, "DEBUG: multi_open_instance called");
+  msg (D_MULTI_DEBUG, "MULTI: multi_open_instance called");
 
   mroute_list_init (&mi->real);
   mroute_list_init (&mi->virtual);
   mi->did_routes = true;
 
   /* remember source address for subsequent references to this instance */
-  mroute_extract_sockaddr_in (&mi->real.addr, &t->c2.from, true);
-  ASSERT (hash_add (m->hash, &mi->real.addr, mi));
+  if (!mroute_extract_sockaddr_in (&mi->real.addr, &t->c2.from, true))
+    {
+      msg (D_MULTI_DEBUG, "MULTI: unable to parse source address from incoming packet");
+      goto err;
+    }
+  msg (D_MULTI_DEBUG, "MULTI: real address: %s", mroute_addr_print (&mi->real.addr, &gc));
+
+  if (!hash_add (m->hash, &mi->real.addr, mi))
+    {
+      msg (D_MULTI_DEBUG, "MULTI: unable to add real address [%s] to global hash table",
+	   mroute_addr_print (&mi->real.addr, &gc));
+      goto err;
+    }
   mi->did_real_hash = true;
 
   /* get a free /30 subnet from pool */
@@ -205,7 +242,11 @@ multi_open_instance (struct multi_context *m, struct context *t)
     struct sockaddr_in remote_si;
 
     if (ifconfig_pool_acquire_30_net (m->ifconfig_pool, &local, &remote) < 0)
-      goto err;
+      {
+	msg (D_MULTI_ERROR, "MULTI: client connection rejected because no free --ifconfig-pool addresses are available");
+	goto err;
+      }
+
     mi->did_ifconfig = true;
 
     mi->context.c2.push_ifconfig_local = remote;
@@ -216,7 +257,14 @@ multi_open_instance (struct multi_context *m, struct context *t)
     remote_si.sin_addr.s_addr = htonl (remote);
 
     ASSERT (mroute_extract_sockaddr_in (&mi->virtual.addr, &remote_si, false));
-    ASSERT (hash_add (m->hash, &mi->real.addr, mi));
+    msg (D_MULTI_DEBUG, "MULTI: virtual address: %s", mroute_addr_print (&mi->virtual.addr, &gc));
+
+    if (!hash_add (m->vhash, &mi->virtual.addr, mi))
+      {
+	msg (D_MULTI_ERROR, "MULTI: unable to add virtual address [%s] to global hash table",
+	     mroute_addr_print (&mi->virtual.addr, &gc));
+	goto err;
+      }
     mi->did_virtual_hash = true;
   }
   
@@ -224,12 +272,17 @@ multi_open_instance (struct multi_context *m, struct context *t)
   mi->did_open_context = true;
 
   if (!multi_process_post (m, mi))
-    goto err;
+    {
+      msg (D_MULTI_ERROR, "MULTI: signal occurred during client instance initialization");
+      goto err;
+    }
 
+  gc_free (&gc);
   return mi;
 
  err:
   multi_close_instance (m, mi);
+  gc_free (&gc);
   return NULL;
 }
 
@@ -262,6 +315,8 @@ multi_get_timeout (struct multi_context *m, struct timeval *dest)
 void
 multi_select (struct multi_context *m, struct context *t)
 {
+  // LOCK -- global read lock
+
   /*
    * Set up for select call.
    *
@@ -325,6 +380,7 @@ multi_select (struct multi_context *m, struct context *t)
 void
 multi_print_status (struct multi_context *m, struct context *t)
 {
+  // JYFIXME -- code me
 }
 
 /*
@@ -372,15 +428,18 @@ multi_process_post (struct multi_context *m, struct multi_instance *mi)
 	 to_link packets (such as ping or TLS control) */
       pre_select (&mi->context);
 
-      /* calculate an absolute wakeup time */
-      ASSERT (!gettimeofday (&mi->wakeup, NULL));
-      tv_add (&mi->wakeup, &mi->context.c2.timeval);
+      if (!IS_SIG (&mi->context))
+	{
+	  /* calculate an absolute wakeup time */
+	  ASSERT (!gettimeofday (&mi->wakeup, NULL));
+	  tv_add (&mi->wakeup, &mi->context.c2.timeval);
 
-      /* tell scheduler to wake us up at some point in the future */
-      schedule_add_entry (m->schedule,
-			  (struct schedule_entry *) mi,
-			  &mi->wakeup,
-			  compute_wakeup_sigma (&mi->context.c2.timeval));
+	  /* tell scheduler to wake us up at some point in the future */
+	  schedule_add_entry (m->schedule,
+			      (struct schedule_entry *) mi,
+			      &mi->wakeup,
+			      compute_wakeup_sigma (&mi->context.c2.timeval));
+	}
     }
   if (IS_SIG (&mi->context))
     {
@@ -442,6 +501,8 @@ multi_process_incoming_link (struct multi_context *m, struct context *t)
       /* get instance context */
       c = &m->tun_out->context;
 
+      // LOCK -- instance lock
+
       /* transfer packet pointer from top-level context buffer to instance */
       c->c2.buf = t->c2.buf;
 
@@ -480,6 +541,8 @@ multi_process_incoming_tun (struct multi_context *m, struct context *t)
 
       /* get instance context */
       c = &m->link_out->context;
+
+      // LOCK -- instance lock
 
       /* transfer packet pointer from top-level context buffer to instance */
       c->c2.buf = t->c2.buf;
@@ -531,6 +594,7 @@ multi_process_io (struct multi_context *m, struct context *t)
       else if (SOCKET_ISSET (&t->c2.event_wait, &t->c2.link_socket, reads))
 	{
 	  read_incoming_link (t);
+	  // LOCK -- global read unlock
 	  if (!IS_SIG (t))
 	    multi_process_incoming_link (m, t);
 	}
@@ -538,6 +602,7 @@ multi_process_io (struct multi_context *m, struct context *t)
       else if (TUNTAP_ISSET (&t->c2.event_wait, &t->c1.tuntap, reads))
 	{
 	  read_incoming_tun (t);
+	  // LOCK -- global read unlock
 	  if (!IS_SIG (t))
 	    multi_process_incoming_tun (m, t);
 	}
@@ -547,6 +612,8 @@ multi_process_io (struct multi_context *m, struct context *t)
 void
 multi_process_timeout (struct multi_context *m, struct context *t)
 {
+  // LOCK -- global read unlock
+
   /* instance marked for wakeup in multi_get_timeout? */
   if (m->earliest_wakeup)
     {

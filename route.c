@@ -51,13 +51,17 @@ static bool get_default_gateway (in_addr_t *ret);
 struct route_option_list *
 new_route_option_list (struct gc_arena *a)
 {
-  return (struct route_option_list *) gc_malloc (sizeof (struct route_option_list), true, a);
+  struct route_option_list *ret;
+  ALLOC_OBJ_CLEAR_GC (ret, struct route_option_list, a);
+  return ret;
 }
 
 struct route_list *
 new_route_list (struct gc_arena *a)
 {
-  return (struct route_list *) gc_malloc (sizeof (struct route_option_list), true, a);
+  struct route_list *ret;
+  ALLOC_OBJ_CLEAR_GC (ret, struct route_list, a);
+  return ret;
 }
 
 static const char *
@@ -766,7 +770,7 @@ get_default_gateway (in_addr_t *ret)
 	  const in_addr_t mask = ntohl (row->dwForwardMask);
 	  const in_addr_t gw = ntohl (row->dwForwardNextHop);
 
-#if 1 // JYFIXME
+#if 0
 	  msg (M_INFO, "route[%d] %s %s %s",
 	       i,
 	       print_in_addr_t ((in_addr_t) net, false, &gc),
@@ -815,7 +819,7 @@ get_default_gateway (in_addr_t *ret)
 		  const in_addr_t net = ntohl (net_x);
 		  const in_addr_t mask = ntohl (mask_x);
 		  const in_addr_t gw = ntohl (gw_x);
-#if 1 // JYFIXME
+#if 0
 		  msg (M_INFO, "route %s %s %s",
 		       print_in_addr_t ((in_addr_t) net, false, &gc),
 		       print_in_addr_t ((in_addr_t) mask, false, &gc),

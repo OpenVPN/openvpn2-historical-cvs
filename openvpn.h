@@ -85,6 +85,34 @@ packet_id_persist_init (struct packet_id_persist *p)
 #endif
 
 /*
+ * Packet processing buffers.
+ */
+struct context_buffers
+{
+  /* miscellaneous buffer, used by ping, occ, etc. */
+  struct buffer aux_buf;
+
+  /* workspace buffers used by crypto routines */
+#ifdef USE_CRYPTO
+  struct buffer encrypt_buf;
+  struct buffer decrypt_buf;
+#endif
+
+  /* workspace buffers for LZO compression */
+#ifdef USE_LZO
+  struct buffer lzo_compress_buf;
+  struct buffer lzo_decompress_buf;
+#endif
+
+  /*
+   * Buffers used to read from TUN device
+   * and TCP/UDP port.
+   */
+  struct buffer read_link_buf;
+  struct buffer read_tun_buf;
+};
+
+/*
  * Contains the persist-across-restart OpenVPN tunnel instance state.
  * Reset only for SIGHUP restarts.
  */
@@ -116,16 +144,6 @@ struct context_2
   uint8_t ptos;
   bool ptos_defined;
 #endif
-
-  /* declare various buffers */
-  struct buffer to_tun;
-  struct buffer to_link;
-  struct buffer buf;
-  struct buffer aux_buf;
-  struct buffer nullbuf;
-
-  /* tells us to free to_link buffer after it has been written to TCP/UDP port */
-  bool free_to_link;
 
   struct link_socket link_socket;	/* socket used for TCP/UDP connection to remote */
   struct sockaddr_in to_link_addr;	/* IP address of remote */
@@ -198,28 +216,10 @@ struct context_2
   /* master OpenVPN SSL/TLS object */
   struct tls_multi *tls_multi;
 
-#ifdef USE_PTHREAD
-
-  /* object containing TLS thread state */
-  struct thread_parms thread_parms;
-
-  /* object sent to us by TLS thread */
-  struct tt_ret tt_ret;
-
-  /* did we open TLS thread? */
-  bool thread_opened;
-
-#endif /* USE_PTHREAD */
-
-  /* used to optimize calls to tls_multi_process
-     in single-threaded mode */
+  /* used to optimize calls to tls_multi_process */
   struct interval tmp_int;
 
 #endif /* USE_SSL */
-
-  /* workspace buffers used by crypto routines */
-  struct buffer encrypt_buf;
-  struct buffer decrypt_buf;
 
   /* passed to encrypt or decrypt, contains all
      crypto-related command line options related
@@ -233,25 +233,26 @@ struct context_2
 #endif /* USE_CRYPTO */
 
   /*
-   * LZO compression library objects.
+   * LZO compression library workspace.
    */
 #ifdef USE_LZO
-  struct buffer lzo_compress_buf;
-  struct buffer lzo_decompress_buf;
   struct lzo_compress_workspace lzo_compwork;
 #endif
 
   /*
-   * Buffers used to read from TUN device
-   * and TCP/UDP port.
+   * Buffers used for packet processing.
    */
-  struct buffer read_link_buf;
-  struct buffer read_tun_buf;
+  struct context_buffers *buffers;
+  bool buffers_owned; /* if true, we should free all buffers on close */
 
   /*
-   * If true, we should free all buffers on close.
+   * These buffers don't actually allocate storage, they are used
+   * as pointers to the allocated buffers in
+   * struct context_buffers.
    */
-  bool buffers_owned;
+  struct buffer buf;
+  struct buffer to_tun;
+  struct buffer to_link;
 
   /*
    * IPv4 TUN device?
@@ -298,9 +299,15 @@ struct context_2
   /* return from main event loop select (or windows equivalent) */
   int select_status;
 
+  bool enable_up_delay;
+
+#if P2MP
+
   /* --ifconfig endpoints to be pushed to client */
   in_addr_t push_ifconfig_local;
   in_addr_t push_ifconfig_remote;
+
+#endif
 };
 
 /*

@@ -45,7 +45,9 @@ hash_init (int n_buckets,
 	   bool (*compare_function)(const void *key1, const void *key2))
 {
   struct hash *h;
+  ASSERT (n_buckets > 0);
   ALLOC_OBJ_CLEAR (h, struct hash);
+  mutex_init (&h->mutex);
   h->n_buckets = n_buckets;
   h->auto_grow = auto_grow;
   h->hash_function = hash_function;
@@ -69,15 +71,22 @@ hash_free (struct hash *hash)
 	  he = next;
 	}
     }
+  mutex_destroy (&hash->mutex);
+  free (hash->buckets);
   free (hash);
 }
 
+/* mutex must be held by caller */
 void *
-hash_lookup_fast (struct hash *hash, const void *key, uint32_t hv)
+hash_lookup_dowork (struct hash *hash, const void *key, uint32_t hv)
 {
-  struct hash_bucket *bucket = &hash->buckets[hv % hash->n_buckets];
-  struct hash_element *he = bucket->list;
+  struct hash_bucket *bucket;
+  struct hash_element *he;
   struct hash_element *prev = NULL;
+
+  bucket = &hash->buckets[hv % hash->n_buckets];
+  he = bucket->list;
+
   while (he)
     {
       if (hv == he->hash_value && (*hash->compare_function)(key, he->key))
@@ -94,16 +103,24 @@ hash_lookup_fast (struct hash *hash, const void *key, uint32_t hv)
       prev = he;
       he = he->next;
     }
+
   return NULL;
 }
 
 bool
 hash_remove (struct hash *hash, const void *key)
 {
-  const uint32_t hv = hash_value (hash, key);
-  struct hash_bucket *bucket = &hash->buckets[hv % hash->n_buckets];
-  struct hash_element *he = bucket->list;
+  uint32_t hv;
+  struct hash_bucket *bucket;
+  struct hash_element *he;
   struct hash_element *prev = NULL;
+
+  hv = hash_value (hash, key);
+
+  mutex_lock (&hash->mutex);
+
+  bucket = &hash->buckets[hv % hash->n_buckets];
+  he = bucket->list;
 
   while (he)
     {
@@ -115,23 +132,34 @@ hash_remove (struct hash *hash, const void *key)
 	    bucket->list = he->next;
 	  free (he);
 	  --hash->n_elements;
+	  mutex_unlock (&hash->mutex);
 	  return true;
 	}
       prev = he;
       he = he->next;
     }
+  mutex_unlock (&hash->mutex);
   return false;
 }
 
 bool
 hash_add (struct hash *hash, const void *key, void *value)
 {
-  const uint32_t hv = hash_value (hash, key);
-  struct hash_bucket *bucket = &hash->buckets[hv % hash->n_buckets];
+  uint32_t hv;
+  struct hash_bucket *bucket;
   struct hash_element *he;
 
-  if (hash_lookup_fast (hash, key, hv)) /* already exists? */
-    return false;
+  hv = hash_value (hash, key);
+
+  mutex_lock (&hash->mutex);
+
+  if (hash_lookup_dowork (hash, key, hv)) /* already exists? */
+    {
+      mutex_unlock (&hash->mutex);
+      return false;
+    }
+
+  bucket = &hash->buckets[hv % hash->n_buckets];
 
   ALLOC_OBJ (he, struct hash_element);
   he->value = value;
@@ -140,6 +168,8 @@ hash_add (struct hash *hash, const void *key, void *value)
   he->next = bucket->list;
   bucket->list = he;
   ++hash->n_elements;
+
+  mutex_unlock (&hash->mutex);
 
   return true;
 }
@@ -152,6 +182,7 @@ hash_iterator_init (struct hash *hash, struct hash_iterator *hi)
   hi->elem = NULL;
 }
 
+/* not thread safe */
 void *
 hash_iterator_next (struct hash_iterator *hi)
 {

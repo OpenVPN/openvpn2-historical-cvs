@@ -55,6 +55,9 @@ typedef unsigned int ssize_t;
 #define TAP_WIN32_MIN_MAJOR 6
 #define TAP_WIN32_MIN_MINOR 7
 
+/* gettimeofday() is implemented in misc.c for Windows */
+#define HAVE_GETTIMEOFDAY 1
+
 /* Define to 1 if you have the `chdir' function. */
 #define HAVE_CHDIR 1
 

@@ -26,12 +26,25 @@
 #ifndef SCHEDULE_H
 #define SCHEDULE_H
 
+/*
+ * This code implements an efficient scheduler using
+ * a random treap binary tree.
+ *
+ * The scheduler is used by the server executive to
+ * keep track of which instances need service at a
+ * known time in the future.  Instances need to
+ * schedule events for things such as sending
+ * a ping or scheduling a TLS renegotiation.
+ */
+
 #if P2MP
 
 /* define to enable a special test mode */
 /*#define SCHEDULE_TEST*/
 
 #include "interval.h"
+#include "thread.h"
+#include "error.h"
 
 struct schedule_entry
 {
@@ -44,6 +57,7 @@ struct schedule_entry
 
 struct schedule
 {
+  MUTEX_DEFINE (mutex);
   struct schedule_entry *earliest_wakeup; /* cached earliest wakeup */
   struct schedule_entry *root;            /* the root of the treap (btree) */
 };
@@ -61,7 +75,7 @@ void schedule_test (void);
 /* Private Functions */
 
 /* is node already in tree? */
-#define IN_TREE(e) ((e)->parent || (e)->lt || (e)->gt)
+#define IN_TREE(e) ((e)->pri)
 
 struct schedule_entry *schedule_find_least (struct schedule_entry *e);
 void schedule_add_modify (struct schedule *s, struct schedule_entry *e);
@@ -87,12 +101,14 @@ schedule_add_entry (struct schedule *s,
 		    const struct timeval *tv,
 		    unsigned int sigma)
 {
+  mutex_lock (&s->mutex);
   if (!IN_TREE (e) || !sigma || !tv_within_sigma (tv, &e->tv, sigma))
     {
       e->tv = *tv;
       schedule_add_modify (s, e);
       s->earliest_wakeup = NULL; /* invalidate cache */
     }
+  mutex_unlock (&s->mutex);
 }
 
 /*
@@ -105,11 +121,20 @@ static inline struct schedule_entry *
 schedule_get_earliest_wakeup (struct schedule *s,
 			      struct timeval *wakeup)
 {
+  struct schedule_entry *ret;
+
+  mutex_lock (&s->mutex);
+
   /* cache result */
   if (!s->earliest_wakeup)
     s->earliest_wakeup = schedule_find_least (s->root);
-  *wakeup = s->earliest_wakeup->tv;
-  return s->earliest_wakeup;
+  ret = s->earliest_wakeup;
+  if (ret)
+    *wakeup = ret->tv;
+
+  mutex_unlock (&s->mutex);
+
+  return ret;
 }
 
 #endif

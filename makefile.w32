@@ -31,7 +31,7 @@ CC = gcc -g -O2 -Wall -Wno-unused-function -Wno-unused-variable -mno-cygwin
 
 INCLUDE_DIRS = -I${OPENSSL}/include -I${LZO}/include
 
-LIBS = -llzo -lws2_32 -lgdi32 -liphlpapi
+LIBS = -llzo -lws2_32 -lgdi32 -liphlpapi -lwinmm
 
 LIB_DIRS = -L${OPENSSL}/out -L${LZO}/src/.libs
 
@@ -50,7 +50,7 @@ HEADERS = basic.h buffer.h circ_list.h common.h \
 OBJS =  buffer.o crypto.o error.o fdmisc.o forward.o \
         fragment.o gremlin.o inet_aton.o init.o interval.o io.o \
         list.o lzo.o misc.o mroute.o mss.o mtu.o multi.o occ.o openvpn.o \
-        options.o packet_id.o ping.o pool.o proxy.o push.c reliable.o \
+        options.o packet_id.o ping.o pool.o proxy.o push.o reliable.o \
         route.o schedule.o session_id.o shaper.o sig.o socket.o \
         socks.o ssl.o thread.o tun.o win32.o
 

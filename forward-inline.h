@@ -38,11 +38,7 @@ check_tls (struct context *c)
 {
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   void check_tls_dowork (struct context *c);
-  if (c->c2.tls_multi
-#if defined(USE_PTHREAD)
-      && !c->options.tls_thread
-#endif
-    )
+  if (c->c2.tls_multi)
     check_tls_dowork (c);
 #endif
 }

@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "21 October 2003"
+.TH openvpn 8 "29 October 2003"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -124,6 +124,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-inetd\fR\ ]
 [\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-key\fR\ \fIfile\fR\ ]
+[\ \fB\-\-key\-method\fR\ \fIm\fR\ ]
 [\ \fB\-\-keysize\fR\ \fIn\fR\ ]
 [\ \fB\-\-link\-mtu\fR\ \fIn\fR\ ]
 [\ \fB\-\-local\fR\ \fIhost\fR\ ]
@@ -171,6 +172,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-tls\-auth\fR\ \fIf\fR\ ]
 [\ \fB\-\-tls\-cipher\fR\ \fIl\fR\ ]
 [\ \fB\-\-tls\-client\fR\ ]
+[\ \fB\-\-tls\-remote\fR\ \fIx509name\fR\ ]
 [\ \fB\-\-tls\-server\fR\ ]
 [\ \fB\-\-tls\-timeout\fR\ \fIn\fR\ ]
 [\ \fB\-\-tls\-verify\fR\ \fIcmd\fR\ ]
@@ -1970,10 +1972,29 @@ when you built your peer's certificate (see
 .B -cert file
 above).
 .TP
+.B --key-method m
+Use data channel key negotiation method
+.B m.
+The key method must match on both sides of the connection.
+
+After OpenVPN negotiates a TLS session, a new set of keys
+for protecting the tunnel data channel is generated and
+exchanged over the TLS session.
+
+In method 1 (the default), both sides generate
+random encrypt and HMAC-send keys which are forwarded to
+the other host over the TLS channel.
+
+In method 2, the client generates a random key.  Both client
+and server also generate some random seed material.  All key source
+material is exchanged over the TLS channel. The actual
+keys are generated using the TLS PRF function, taking source
+entropy from both client and server.  Method 2 is designed to
+closely parallel the key generation process used by TLS 1.0.
+.TP
 .B --tls-cipher l
-A list l of allowable TLS ciphers separated by
-.B |
-(optional).  If you require a high level of security,
+A list l of allowable TLS ciphers delimited by a colon (":").
+If you require a high level of security,
 you may want to set this parameter manually, to prevent a
 version rollback attack where a man-in-the-middle attacker tries
 to force two peers to negotiate to the lowest level
@@ -2194,6 +2215,20 @@ not it should be accepted.  For a simple perl script which will test
 the common name field on the certificate, see the file
 .B verify-cn
 in the OpenVPN distribution.
+.TP
+.B --tls-remote x509name
+Accept connections only from a host with X509 name
+.B x509name.
+The remote host must also pass all other tests
+of verification.
+
+This is an useful replacement for the
+.B --tls-verify
+option to verify the remote host, because
+.B --tls-remote
+works in a
+.B --chroot
+environment too.
 .TP
 .B --crl-verify crl
 Check peer certificate against the file

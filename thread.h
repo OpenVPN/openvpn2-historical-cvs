@@ -55,8 +55,8 @@ extern bool x_lock_cs_init;
 
 #define MUTEX_DEFINE_STATIC(lock)  static pthread_mutex_t lock
 #define MUTEX_DEFINE(lock)         pthread_mutex_t lock
-#define MUTEX_INIT(lock)           pthread_mutex_init(&lock, NULL)
-#define MUTEX_DESTROY(lock)        pthread_mutex_destroy(&lock)
+#define MUTEX_INIT(lock)           pthread_mutex_init (&lock, NULL)
+#define MUTEX_DESTROY(lock)        pthread_mutex_destroy (&lock)
 #define MUTEX_LOCK(lock)           pthread_mutex_lock (&lock)
 #define MUTEX_UNLOCK(lock)         pthread_mutex_unlock (&lock)
 

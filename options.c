@@ -36,7 +36,7 @@
 #include "openvpn.h"
 #include "common.h"
 #include "shaper.h"
-#include "crypto.h"
+#include "ssl.h"
 #include "options.h"
 #include "openvpn.h"
 #include "misc.h"
@@ -242,6 +242,8 @@ static const char usage_message[] =
   "(These options are meaningful only for TLS-mode)\n"
   "--tls-server    : Enable TLS and assume server role during TLS handshake.\n"
   "--tls-client    : Enable TLS and assume client role during TLS handshake.\n"
+  "--key-method m  : Data channel key exchange method.  m should be a method\n"
+  "                  number, such as 1 (default), 2, etc.\n"
   "--ca file       : Certificate authority file in .pem format containing\n"
   "                  root certificate.\n"
   "--dh file       : File containing Diffie Hellman parameters\n"
@@ -250,7 +252,7 @@ static const char usage_message[] =
   "--cert file     : Local certificate in .pem format -- must be signed\n"
   "                  by a Certificate Authority in --ca file.\n"
   "--key file      : Local private key in .pem format.\n"
-  "--tls-cipher l  : A list l of allowable TLS ciphers separated by | (optional).\n"
+  "--tls-cipher l  : A list l of allowable TLS ciphers separated by : (optional).\n"
   "                : Use --show-tls to see a list of supported TLS ciphers.\n"
   "--tls-timeout n : Packet retransmit timeout on TLS control channel\n"
   "                  if no ACK from remote within n seconds (default=%d).\n"
@@ -274,6 +276,9 @@ static const char usage_message[] =
   "                  tests of certification.  cmd should return 0 to allow\n"
   "                  TLS handshake to proceed, or 1 to fail.  (cmd is\n"
   "                  executed as 'cmd certificate_depth X509_NAME_oneline')\n"
+  "--tls-remote x509name: Accept connections only from a host with X509 name\n"
+  "                  x509name. The remote host must also pass all other tests\n"
+  "                  of verification.\n"
 #endif				/* USE_SSL */
   "\n"
   "SSL Library information:\n"
@@ -347,6 +352,7 @@ init_options (struct options *o)
   o->use_iv = true;
   o->key_direction = KEY_DIRECTION_BIDIRECTIONAL;
 #ifdef USE_SSL
+  o->key_method = 1;
   o->tls_timeout = 2;
   o->renegotiate_seconds = 3600;
   o->handshake_window = 60;
@@ -498,12 +504,14 @@ show_settings (const struct options *o)
 #ifdef USE_SSL
   SHOW_BOOL (tls_server);
   SHOW_BOOL (tls_client);
+  SHOW_INT (key_method);
   SHOW_STR (ca_file);
   SHOW_STR (dh_file);
   SHOW_STR (cert_file);
   SHOW_STR (priv_key_file);
   SHOW_STR (cipher_list);
   SHOW_STR (tls_verify);
+  SHOW_STR (tls_remote);
   SHOW_STR (crl_file);
 
   SHOW_INT (tls_timeout);
@@ -658,7 +666,10 @@ options_string (const struct options *o,
    */
   {
     if (o->tls_auth_file)
-	buf_printf (&out, ",tls-auth");
+      buf_printf (&out, ",tls-auth");
+
+    if (o->key_method > 1)
+      buf_printf (&out, ",key-method %d", o->key_method);
 
     if (remote)
       {
@@ -1587,6 +1598,11 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       options->tls_verify = comma_to_space (p[1]);
     }
+  else if (streq (p[0], "tls-remote") && p[1])
+    {
+      ++i;
+      options->tls_remote = p[1];
+    }
   else if (streq (p[0], "tls_timeout") && p[1])
     {
       ++i;
@@ -1626,6 +1642,16 @@ add_option (struct options *options, int i, char *p[],
 	  options->key_direction = ascii2keydirection (p[2]);
 	  ++i;
 	}
+    }
+  else if (streq (p[0], "key-method") && p[1])
+    {
+      ++i;
+      options->key_method = atoi (p[1]);
+      if (options->key_method < KEY_METHOD_MIN || options->key_method > KEY_METHOD_MAX)
+	msg (M_USAGE, "key_method parameter (%d) must be >= %d and <= %d",
+	     options->key_method,
+	     KEY_METHOD_MIN,
+	     KEY_METHOD_MAX);
     }
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */

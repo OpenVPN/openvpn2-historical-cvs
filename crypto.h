@@ -50,15 +50,17 @@
 
 /* Workaround: EVP_CIPHER_mode is defined wrong in OpenSSL 0.9.6 but is fixed in 0.9.7 */
 #undef EVP_CIPHER_mode
-#define EVP_CIPHER_mode(e)  (((e)->flags) & EVP_CIPH_MODE)
+#define EVP_CIPHER_mode(e)                (((e)->flags) & EVP_CIPH_MODE)
 
-#define DES_cblock              des_cblock
-#define DES_is_weak_key         des_is_weak_key
-#define DES_check_key_parity    des_check_key_parity
-#define DES_set_odd_parity      des_set_odd_parity
+#define DES_cblock                        des_cblock
+#define DES_is_weak_key                   des_is_weak_key
+#define DES_check_key_parity              des_check_key_parity
+#define DES_set_odd_parity                des_set_odd_parity
 
-#define HMAC_CTX_cleanup        HMAC_cleanup
-#define EVP_MD_CTX_cleanup(md)  CLEAR (*md)
+#define HMAC_CTX_init(ctx)                CLEAR (*ctx)
+#define HMAC_Init_ex(ctx,sec,len,md,impl) HMAC_Init(ctx, sec, len, md) 
+#define HMAC_CTX_cleanup(ctx)             HMAC_cleanup(ctx)
+#define EVP_MD_CTX_cleanup(md)            CLEAR (*md)
 
 #define INFO_CALLBACK_SSL_CONST
 
@@ -327,6 +329,11 @@ int ascii2keydirection (const char *str);
 
 const char *keydirection2ascii (int kd, bool remote);
 
+/* print keys */
+void key2_print (const struct key2* k,
+		 const struct key_type *kt,
+		 const char* prefix0,
+		 const char* prefix1);
 
 #ifdef USE_SSL
 

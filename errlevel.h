@@ -70,7 +70,8 @@
 
 #define D_LINK_RW            LOGLEV(6, 60, M_DEBUG)  /* show TCP/UDP reads/writes (terse) */
 
-#define D_SHOW_KEYS          LOGLEV(7, 70, M_DEBUG)  /* show data channel encryption keys */
+#define D_SHOW_KEYS          LOGLEV(4, 70, M_DEBUG)  /* show data channel encryption keys (JYFIXME) */
+#define D_SHOW_KEY_SOURCE    LOGLEV(7, 70, M_DEBUG)  /* show data channel key source entropy */
 #define D_REL_LOW            LOGLEV(7, 70, M_DEBUG)  /* show low frequency info from reliable layer */
 #define D_FRAG_DEBUG         LOGLEV(7, 70, M_DEBUG)  /* show fragment debugging info */
 #define D_WIN32_IO_LOW       LOGLEV(7, 70, M_DEBUG)  /* low freq win32 I/O debugging info */

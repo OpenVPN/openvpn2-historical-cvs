@@ -835,6 +835,9 @@ openvpn (const struct options *options,
 
       /* Let user specify a script to verify the incoming certificate */
       tls_set_verify_command (options->tls_verify);
+      
+      /* Verify the X509 name of the incoming host */
+      tls_set_verify_x509name (options->tls_remote);
 
       /* Let user specify a certificate revocation list to
 	 check the incoming certificate */
@@ -891,6 +894,7 @@ openvpn (const struct options *options,
       to.ssl_ctx = ks->ssl_ctx;
       to.key_type = ks->key_type;
       to.server = options->tls_server;
+      to.key_method = options->key_method;
       to.replay = options->replay;
       to.packet_id_long_form = packet_id_long_form;
       to.replay_window = options->replay_window;
@@ -1645,14 +1649,14 @@ openvpn (const struct options *options,
 	  if (options->shaper)
 	    delay = max_int (delay, shaper_delay (&shaper));
 
-	  if (delay >= 1000)
+	  if (delay < 1000)
 	    {
-	      shaper_soonest_event (&timeval, delay);
-	      tv = &timeval;
+	      SOCKET_SET_WRITE (link_socket);
 	    }
 	  else
 	    {
-	      SOCKET_SET_WRITE (link_socket);
+	      shaper_soonest_event (&timeval, delay);
+	      tv = &timeval;
 	    }
 #else /* HAVE_GETTIMEOFDAY */
 	  SOCKET_SET_WRITE (link_socket);
@@ -2746,6 +2750,7 @@ main (int argc, char *argv[])
 	  MUST_BE_UNDEF (priv_key_file);
 	  MUST_BE_UNDEF (cipher_list);
 	  MUST_BE_UNDEF (tls_verify);
+	  MUST_BE_UNDEF (tls_remote);
 	  MUST_BE_UNDEF (tls_timeout);
 	  MUST_BE_UNDEF (renegotiate_bytes);
 	  MUST_BE_UNDEF (renegotiate_packets);
@@ -2755,6 +2760,7 @@ main (int argc, char *argv[])
 	  MUST_BE_UNDEF (tls_auth_file);
 	  MUST_BE_UNDEF (single_session);
 	  MUST_BE_UNDEF (crl_file);
+	  MUST_BE_UNDEF (key_method);
 	}
 #undef MUST_BE_UNDEF
 #endif /* USE_CRYPTO */

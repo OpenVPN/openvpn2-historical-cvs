@@ -186,7 +186,11 @@ struct options
   const char *priv_key_file;
   const char *cipher_list;
   const char *tls_verify;
+  const char *tls_remote;
   const char *crl_file;
+
+  /* data channel key exchange method */
+  int key_method;
 
   /* Per-packet timeout on control channel */
   int tls_timeout;

@@ -1,7 +1,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.21 2003/10/21 11:29:28 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.22 2003/10/29 09:57:53 jimyonan Exp $
 
 2003.10.xx -- Version 1.5-beta13
 
@@ -18,6 +18,12 @@ $Id: ChangeLog,v 1.86.2.21 2003/10/21 11:29:28 jimyonan Exp $
   send-HMAC, encrypt, receive-HMAC, and decrypt.  Key file forward
   and backward compatibility is maintained.  See --secret option
   documentation on the man page for more info.
+* Added --tls-remote option (Teemu Kiviniemi).
+* Fixed --tls-cipher documention regarding correct delimiter
+  usage (Teemu Kiviniemi).
+* Added --key-method option for selecting alternative data
+  channel key negotiation methods.  Method 1 is the default.
+  Method 2 has been added (see man page for more info).
 
 2003.10.12 -- Version 1.5-beta12
 

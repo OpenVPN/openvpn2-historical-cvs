@@ -312,6 +312,13 @@ buf_write_u16 (struct buffer *dest, int data)
 }
 
 static inline bool
+buf_write_u32 (struct buffer *dest, int data)
+{
+  uint32_t u32 = htonl ((uint32_t) data);
+  return buf_write (dest, &u32, sizeof (uint32_t));
+}
+
+static inline bool
 buf_copy (struct buffer *dest, const struct buffer *src)
 {
   return buf_write (dest, BPTR (src), BLEN (src));
@@ -429,6 +436,16 @@ buf_string_match_head (struct buffer *src, const void *match, int size)
   if (size < 0 || size > src->len)
     return false;
   return memcmp (BPTR (src), match, size) == 0;
+}
+
+/*
+ * Bitwise operations
+ */
+static inline void
+xor (uint8_t *dest, const uint8_t *src, int len)
+{
+  while (len-- > 0)
+    *dest++ ^= *src++;
 }
 
 /*

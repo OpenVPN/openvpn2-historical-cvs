@@ -183,7 +183,7 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	  int hmac_len;
 	  uint8_t *output;
 
-	  HMAC_Init (ctx->hmac, NULL, 0, NULL);
+	  HMAC_Init_ex (ctx->hmac, NULL, 0, NULL, NULL);
 	  HMAC_Update (ctx->hmac, BPTR (&work), BLEN (&work));
 	  output = buf_prepend (&work, HMAC_size (ctx->hmac));
 	  ASSERT (output);
@@ -220,7 +220,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	  uint8_t local_hmac[MAX_HMAC_KEY_LENGTH]; /* HMAC of ciphertext computed locally */
 	  int in_hmac_len;
 
-	  HMAC_Init (ctx->hmac, NULL, 0, NULL);
+	  HMAC_Init_ex (ctx->hmac, NULL, 0, NULL, NULL);
 
 	  /* Assume the length of the input HMAC */
 	  hmac_len = HMAC_size (ctx->hmac);
@@ -408,7 +408,7 @@ get_md (const char *digest)
 }
 
 static void
-init_cipher (EVP_CIPHER_CTX * ctx, const EVP_CIPHER * cipher,
+init_cipher (EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
 	     struct key *key, const struct key_type *kt, int enc,
 	     const char *prefix)
 {
@@ -439,10 +439,11 @@ init_cipher (EVP_CIPHER_CTX * ctx, const EVP_CIPHER * cipher,
 }
 
 static void
-init_hmac (HMAC_CTX * ctx, const EVP_MD * digest,
+init_hmac (HMAC_CTX *ctx, const EVP_MD *digest,
 	   struct key *key, const struct key_type *kt, const char *prefix)
 {
-  HMAC_Init (ctx, key->hmac, kt->hmac_length, digest);
+  HMAC_CTX_init (ctx);
+  HMAC_Init_ex (ctx, key->hmac, kt->hmac_length, digest, NULL);
   msg (D_HANDSHAKE,
        "%s: Using %d bit message hash '%s' for HMAC authentication",
        prefix, HMAC_size (ctx) * 8, OBJ_nid2sn (EVP_MD_type (digest)));
@@ -750,9 +751,37 @@ generate_key_random (struct key *key, const struct key_type *kt)
       }
     ASSERT (RAND_bytes (key->cipher, cipher_len));
     ASSERT (RAND_bytes (key->hmac, hmac_len));
+
+    msg (D_SHOW_KEY_SOURCE, "Cipher source entropy: %s", format_hex (key->cipher, cipher_len, 0));
+    msg (D_SHOW_KEY_SOURCE, "HMAC source entropy: %s", format_hex (key->hmac, hmac_len, 0));
+
     if (kt)
       fixup_key (key, kt);
   } while (kt && !check_key (key, kt));
+}
+
+/*
+ * Print key material
+ */
+void
+key2_print (const struct key2* k,
+	    const struct key_type *kt,
+	    const char* prefix0,
+	    const char* prefix1)
+{
+  ASSERT (k->n == 2);
+  msg (D_SHOW_KEY_SOURCE, "%s (cipher): %s",
+       prefix0,
+       format_hex (k->keys[0].cipher, kt->cipher_length, 0));
+  msg (D_SHOW_KEY_SOURCE, "%s (hmac): %s",
+       prefix0,
+       format_hex (k->keys[0].hmac, kt->hmac_length, 0));
+  msg (D_SHOW_KEY_SOURCE, "%s (cipher): %s",
+       prefix1,
+       format_hex (k->keys[1].cipher, kt->cipher_length, 0));
+  msg (D_SHOW_KEY_SOURCE, "%s (hmac): %s",
+       prefix1,
+       format_hex (k->keys[1].hmac, kt->hmac_length, 0));
 }
 
 void

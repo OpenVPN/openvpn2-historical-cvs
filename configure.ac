@@ -4,7 +4,7 @@ dnl             session authentication and key exchange,
 dnl             packet encryption, packet authentication, and
 dnl             packet compression.
 dnl
-dnl  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+dnl  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 dnl
 dnl  This program is free software; you can redistribute it and/or modify
 dnl  it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [2.0_test1], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [2.0_test2], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -100,6 +100,14 @@ AC_ARG_WITH(ifconfig-path,
 )
 AC_DEFINE_UNQUOTED(IFCONFIG_PATH, "$IFCONFIG", [Path to ifconfig tool])
 
+AC_ARG_WITH(iproute-path,
+   [  --with-iproute-path=PATH    Path to iproute tool],
+   [IPROUTE="$withval"],
+   [AC_PATH_PROG([IPROUTE], [ip], [ip], [$PATH:/usr/local/sbin:/usr/sbin:/sbin])]
+)
+AC_DEFINE_UNQUOTED(IPROUTE_PATH, "$IPROUTE", [Path to iproute tool])
+
+
 AC_ARG_WITH(route-path,
    [  --with-route-path=PATH  Path to route tool],
    [ROUTE="$withval"],
@@ -111,6 +119,13 @@ AC_ARG_WITH(leak-check,
    [  --with-leak-check=TYPE  Build with memory leak checking, TYPE = dmalloc or ssl],
    [LEAK="$withval"]
 )
+
+AC_ARG_ENABLE(iproute2,
+   [  --enable-iproute2       Enable support for iproute2],
+   AC_DEFINE(CONFIG_FEATURE_IPROUTE, 1, [enable iproute2 support])
+   
+)
+
 
 dnl Guess host type.
 AC_CANONICAL_HOST
@@ -275,7 +290,7 @@ AC_FUNC_FORK
 AC_CHECK_FUNCS(daemon chroot getpwnam setuid nice system getpid dup dup2 dnl
 	       getpass strerror syslog openlog mlockall getgrnam setgid dnl
 	       setgroups stat flock readv writev setsockopt getsockopt dnl
-	       setsid chdir gettimeofday putenv)
+	       setsid chdir gettimeofday putenv getpeername)
 AC_REPLACE_FUNCS(inet_aton)
 AC_CACHE_SAVE
 

@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -32,6 +32,7 @@
 #include "mtu.h"
 #include "io.h"
 #include "proxy.h"
+#include "socks.h"
 
 /* 
  * packet_size_type is used communicate packet size
@@ -82,32 +83,33 @@ struct stream_buf
 struct link_socket
 {
   /* if true, indicates a stream protocol returned more than one encapsulated packet */
-# define SOCKET_READ_RESIDUAL(sock) (sock.stream_buf.residual_fully_formed)
+# define SOCKET_READ_RESIDUAL(s) ((s)->stream_buf.residual_fully_formed)
 
 #ifdef WIN32
   /* these macros are called in the context of the openvpn() function */
-# define SOCKET_SET_READ(sock) { if (stream_buf_read_setup (&sock)) { \
-                                   wait_add (&event_wait, sock.reads.overlapped.hEvent); \
-                                   socket_recv_queue (&sock, 0); }}
-# define SOCKET_SET_WRITE(sock) { wait_add (&event_wait, sock.writes.overlapped.hEvent); }
-# define SOCKET_ISSET(sock, set) ( wait_trigger (&event_wait, sock.set.overlapped.hEvent))
-# define SOCKET_SETMAXFD(sock)
-# define SOCKET_READ_STAT(sock)  (overlapped_io_state_ascii (&sock.reads,  "sr"))
-# define SOCKET_WRITE_STAT(sock) (overlapped_io_state_ascii (&sock.writes, "sw"))
+# define SOCKET_SET_READ(w, s) { if (stream_buf_read_setup (s)) { \
+                                   wait_add ((w), (s)->reads.overlapped.hEvent); \
+                                   socket_recv_queue ((s), 0); }}
+# define SOCKET_SET_WRITE(w, s)  { wait_add ((w), (s)->writes.overlapped.hEvent); }
+# define SOCKET_ISSET(w, s, set) ( wait_trigger ((w), (s)->set.overlapped.hEvent))
+# define SOCKET_SETMAXFD(w, s)
+# define SOCKET_READ_STAT(w, s)  (overlapped_io_state_ascii (&((s)->reads),  "sr"))
+# define SOCKET_WRITE_STAT(w, s) (overlapped_io_state_ascii (&((s)->writes), "sw"))
   struct overlapped_io reads;
   struct overlapped_io writes;
 #else
   /* these macros are called in the context of the openvpn() function */
-# define SOCKET_SET_READ(sock) {  if (stream_buf_read_setup (&sock)) \
-                                    FD_SET (sock.sd, &event_wait.reads); }
-# define SOCKET_SET_WRITE(sock) { FD_SET (sock.sd, &event_wait.writes); }
-# define SOCKET_ISSET(sock, set) (FD_ISSET (sock.sd, &event_wait.set))
-# define SOCKET_SETMAXFD(sock) { wait_update_maxfd (&event_wait, sock.sd); }
-# define SOCKET_READ_STAT(sock)  (SOCKET_ISSET (sock, reads) ?  "SR" : "sr")
-# define SOCKET_WRITE_STAT(sock) (SOCKET_ISSET (sock, writes) ? "SW" : "sw")
+# define SOCKET_SET_READ(w, s)  { if (stream_buf_read_setup (s)) \
+                                   FD_SET   ((s)->sd, &((w)->reads)); }
+# define SOCKET_SET_WRITE(w, s) {  FD_SET   ((s)->sd, &((w)->writes)); }
+# define SOCKET_ISSET(w, s, set)   (FD_ISSET ((s)->sd, &((w)->set)))
+# define SOCKET_SETMAXFD(w, s)  {  wait_update_maxfd ((w), (s)->sd); }
+# define SOCKET_READ_STAT(w, s)    (SOCKET_ISSET ((w), (s), reads) ?  "SR" : "sr")
+# define SOCKET_WRITE_STAT(w, s)   (SOCKET_ISSET ((w), (s), writes) ? "SW" : "sw")
 #endif
 
   socket_descriptor_t sd;
+  socket_descriptor_t ctrl_sd;  /* only used for UDP over Socks */
 
   /* set on initial call to init phase 1 */
   const char *local_host;
@@ -117,10 +119,16 @@ struct link_socket
   int proto;                    /* Protocol (PROTO_x defined below) */
   bool bind_local;
   bool remote_float;
-  bool inetd;
+
+# define INETD_NONE   0
+# define INETD_WAIT   1
+# define INETD_NOWAIT 2
+  int inetd;
+
   struct link_socket_addr *lsa;
   const char *ipchange_command;
   int resolve_retry_seconds;
+  int connect_retry_seconds;
   int mtu_discover_type;
 
   int mtu;                      /* OS discovered MTU, or 0 if unknown */
@@ -138,6 +146,10 @@ struct link_socket
 
   /* HTTP proxy */
   struct http_proxy_info *http_proxy;
+
+  /* Socks proxy */
+  struct socks_proxy_info *socks_proxy;
+  struct sockaddr_in socks_relay; /* Socks UDP relay address */
 
   /* The OpenVPN server we will use the proxy to connect to */
   const char *proxy_dest_host;
@@ -177,6 +189,14 @@ int socket_finalize (
 
 #endif
 
+int link_socket_read_socks_udp (struct link_socket *sock,
+				struct buffer *buf,
+				struct sockaddr_in *from);
+
+int link_socket_write_socks_udp (struct link_socket *sock,
+				 struct buffer *buf,
+				 struct sockaddr_in *to);
+
 void link_socket_reset (struct link_socket *sock);
 
 void link_socket_init_phase1 (struct link_socket *sock,
@@ -185,13 +205,15 @@ void link_socket_init_phase1 (struct link_socket *sock,
 			      int local_port,
 			      int remote_port,
 			      int proto,
-			      struct http_proxy_info *proxy_info,
+			      struct http_proxy_info *http_proxy,
+			      struct socks_proxy_info *socks_proxy,
 			      bool bind_local,
 			      bool remote_float,
-			      bool inetd,
+			      int inetd,
 			      struct link_socket_addr *lsa,
 			      const char *ipchange_command,
 			      int resolve_retry_seconds,
+			      int connect_retry_seconds,
 			      int mtu_discover_type);
 
 
@@ -418,11 +440,23 @@ link_socket_read (struct link_socket *sock,
 {
   if (sock->proto == PROTO_UDPv4)
     {
+      int res;
+
+      if (sock->socks_proxy)
+	maxsize += 10;
+
 #ifdef WIN32
-      return link_socket_read_udp_win32 (sock, buf, from);
+      res = link_socket_read_udp_win32 (sock, buf, from);
 #else
-      return link_socket_read_udp_posix (sock, buf, maxsize, from);
+      res = link_socket_read_udp_posix (sock, buf, maxsize, from);
 #endif
+
+      if (res > 0 && sock->socks_proxy)
+        {
+	  res = link_socket_read_socks_udp (sock, buf, from);
+	}
+
+      return res;
     }
   else if (sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT)
     {
@@ -496,11 +530,18 @@ link_socket_write_udp (struct link_socket *sock,
 		       struct buffer *buf,
 		       struct sockaddr_in *to)
 {
+  if (sock->socks_proxy)
+    {
+      return link_socket_write_socks_udp (sock, buf, to);
+    }
+  else
+    {
 #ifdef WIN32
-  return link_socket_write_win32 (sock, buf, to);
+      return link_socket_write_win32 (sock, buf, to);
 #else
-  return link_socket_write_udp_posix (sock, buf, to);
+      return link_socket_write_udp_posix (sock, buf, to);
 #endif
+    }
 }
 
 static inline int

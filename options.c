@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -23,6 +23,11 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+/*
+ * 2004-01-28: Added Socks5 proxy support
+ *   (Christof Meerwald, http://cmeerw.org)
+ */
+
 #ifdef WIN32
 #include "config-win32.h"
 #else
@@ -33,13 +38,11 @@
 
 #include "buffer.h"
 #include "error.h"
-#include "openvpn.h"
 #include "common.h"
 #include "shaper.h"
 #include "crypto.h"
 #include "ssl.h"
 #include "options.h"
-#include "openvpn.h"
 #include "misc.h"
 #include "socket.h"
 #include "packet_id.h"
@@ -79,12 +82,18 @@ static const char usage_message[] =
   "--remote host   : Remote host name or ip address.\n"
   "--proto p       : Use protocol p for communicating with peer.\n"
   "                  p = udp (default), tcp-server, or tcp-client\n"
+  "--connect-retry n : For --proto tcp-client, number of seconds to wait\n"
+  "                  between connection retries (default=%d).\n"
   "--http-proxy s p [up]: Connect to remote host through an HTTP proxy at address\n"
   "                  s and port p.  If proxy authentication is required, up is a\n"
   "                  file containing username/password on 2 lines.\n"
   "--http-proxy-retry : Retry indefinitely on HTTP proxy errors.\n"
+  "--socks-proxy s [p]: Connect to remote host through a Socks5 proxy at address\n"
+  "                  s and port p (default port = 1080).\n"
+  "--socks-proxy-retry : Retry indefinitely on Socks proxy errors.\n"
   "--resolv-retry n: If hostname resolve fails for --remote, retry\n"
   "                  resolve for n seconds before failing (disabled by default).\n"
+  "                  Set n=\"infinite\" to retry indefinitely.\n"
   "--float         : Allow remote to change its IP address/port, such as through\n"
   "                  DHCP (this is the default if --remote is not used).\n"
   "--ipchange cmd  : Execute shell command cmd on remote ip address initial\n"
@@ -177,8 +186,8 @@ static const char usage_message[] =
   "--daemon [name] : Become a daemon after initialization.\n"
   "                  The optional 'name' parameter will be passed\n"
   "                  as the program name to the system logger.\n"
-  "--inetd [name]  : Run as an inetd or xinetd server.  See --daemon\n"
-  "                  above for a description of the 'name' parameter.\n"
+  "--inetd [name] ['wait'|'nowait'] : Run as an inetd or xinetd server.\n"
+  "                  See --daemon above for a description of the 'name' parm.\n"
   "--log file      : Output log to file which is created/truncated on open.\n"
   "--log-append file : Append log to file, or create file if nonexistent.\n"
   "--writepid file : Write main process ID to file.\n"
@@ -247,9 +256,6 @@ static const char usage_message[] =
   "(These options are meaningful only for TLS-mode)\n"
   "--tls-server    : Enable TLS and assume server role during TLS handshake.\n"
   "--tls-client    : Enable TLS and assume client role during TLS handshake.\n"
-  "--dynamic       : When used on a server, enter dynamic forking server mode.\n"
-  "                  When used on a client, indicates that we will be connecting\n"
-  "                  to a dynamic forking server.\n"
   "--key-method m  : Data channel key exchange method.  m should be a method\n"
   "                  number, such as 1 (default), 2, etc.\n"
   "--ca file       : Certificate authority file in .pem format containing\n"
@@ -302,6 +308,15 @@ static const char usage_message[] =
   "--ip-win32 method : When using --ifconfig on Windows, set TAP-Win32 adapter\n"
   "                    IP address using method = manual, netsh, ipapi, or\n"
   "                    dynamic (default = ipapi).\n"
+  "                    Dynamic method allows two optional parameters:\n"
+  "                    offset: DHCP server address offset (> -256 and < 256).\n"
+  "                            If 0, use network address, if >0, take nth\n"
+  "                            address forward from network address, if <0,\n"
+  "                            take nth address backward from broadcast\n"
+  "                            address.\n"
+  "                            Default is 0.\n"
+  "                    lease-time: 'short' (60 seconds) or 'long' (1 month).\n"
+  "                                Default is 'long'.\n"
   "--tap-sleep n   : Sleep for n seconds after TAP adapter open before\n"
   "                  attempting to set adapter properties.\n"
   "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n" 
@@ -333,6 +348,7 @@ init_options (struct options *o)
 {
   CLEAR (*o);
   o->proto = PROTO_UDPv4;
+  o->connect_retry_seconds = 5;
 #ifdef TUNSETPERSIST
   o->persist_mode = 1;
 #endif
@@ -347,7 +363,7 @@ init_options (struct options *o)
   o->comp_lzo_adaptive = true;
 #endif
 #ifdef WIN32
-  o->tuntap_flags = (IP_SET_IPAPI & IP_SET_MASK);
+  o->tuntap_flags = (IPW32_SET_IPAPI & IPW32_SET_MASK);
 #endif
 #ifdef USE_CRYPTO
   o->ciphername = "BF-CBC";
@@ -360,11 +376,18 @@ init_options (struct options *o)
   o->use_iv = true;
   o->key_direction = KEY_DIRECTION_BIDIRECTIONAL;
 #ifdef USE_SSL
+#ifdef KEY_METHOD_DEFAULT_2
+  o->key_method = 2;
+#else
   o->key_method = 1;
+#endif
   o->tls_timeout = 2;
   o->renegotiate_seconds = 3600;
   o->handshake_window = 60;
   o->transition_window = 3600;
+#ifdef USE_PTHREAD
+  o->tls_thread = true;
+#endif
 #endif
 #endif
 }
@@ -460,6 +483,7 @@ show_settings (const struct options *o)
 #endif
 
   SHOW_INT (resolve_retry_seconds);
+  SHOW_INT (connect_retry_seconds);
 
   SHOW_STR (username);
   SHOW_STR (groupname);
@@ -470,7 +494,7 @@ show_settings (const struct options *o)
   SHOW_STR (down_script);
   SHOW_BOOL (up_restart);
   SHOW_BOOL (daemon);
-  SHOW_BOOL (inetd);
+  SHOW_INT (inetd);
   SHOW_BOOL (log);
   SHOW_INT (nice);
   SHOW_INT (verbosity);
@@ -485,6 +509,10 @@ show_settings (const struct options *o)
   SHOW_STR (http_proxy_auth_method);
   SHOW_STR (http_proxy_auth_file);
   SHOW_BOOL (http_proxy_retry);
+
+  SHOW_STR (socks_proxy_server);
+  SHOW_INT (socks_proxy_port);
+  SHOW_BOOL (socks_proxy_retry);
 
 #ifdef USE_LZO
   SHOW_BOOL (comp_lzo);
@@ -514,7 +542,6 @@ show_settings (const struct options *o)
   SHOW_BOOL (test_crypto);
 
 #ifdef USE_SSL
-  SHOW_BOOL (dynamic);
   SHOW_BOOL (tls_server);
   SHOW_BOOL (tls_client);
   SHOW_INT (key_method);
@@ -547,6 +574,228 @@ show_settings (const struct options *o)
 #undef SHOW_STR
 #undef SHOW_INT
 #undef SHOW_BOOL
+
+/*
+ * Sanity check on options.
+ * Also set some options based on other
+ * options.
+ */
+void
+options_postprocess (struct options *options, bool first_time)
+{
+  struct options defaults;
+  int dev = DEV_TYPE_UNDEF;
+
+  init_options (&defaults);
+
+#ifdef USE_CRYPTO
+  if (options->test_crypto)
+    {
+      notnull (options->shared_secret_file, "key file (--secret)");
+    }
+  else
+#endif
+    notnull (options->dev, "TUN/TAP device (--dev)");
+
+  /*
+   * Get tun/tap/null device type
+   */
+  dev = dev_type_enum (options->dev, options->dev_type);
+
+  /*
+   * Sanity check on daemon/inetd modes
+   */
+
+  if (options->daemon && options->inetd)
+    msg (M_USAGE, "Options error: only one of --daemon or --inetd may be specified");
+
+  if (options->inetd && (options->local || options->remote))
+    msg (M_USAGE, "Options error: --local or --remote cannot be used with --inetd");
+
+  if (options->inetd && options->proto == PROTO_TCPv4_CLIENT)
+    msg (M_USAGE, "Options error: --proto tcp-client cannot be used with --inetd");
+
+  if (options->inetd == INETD_NOWAIT && options->proto != PROTO_TCPv4_SERVER)
+    msg (M_USAGE, "Options error: --inetd nowait can only be used with --proto tcp-server");
+
+  if (options->inetd == INETD_NOWAIT
+#if defined(USE_CRYPTO) && defined(USE_SSL)
+      && !(options->tls_server || options->tls_client)
+#endif
+      )
+    msg (M_USAGE, "Options error: --inetd nowait can only be used in TLS mode");
+
+  if (options->inetd == INETD_NOWAIT && dev != DEV_TYPE_TAP)
+    msg (M_USAGE, "Options error: --inetd nowait only makes sense in --dev tap mode");
+
+  /*
+   * In forking TCP server mode, you don't need to ifconfig
+   * the tap device (the assumption is that it will be bridged).
+   */
+  if (options->inetd == INETD_NOWAIT)
+    options->ifconfig_noexec = true;
+
+  /*
+   * Sanity check on TCP mode options
+   */
+
+  if (options->connect_retry_defined && options->proto != PROTO_TCPv4_CLIENT)
+    msg (M_USAGE, "Options error: --connect-retry doesn't make sense unless also used with --proto tcp-client");
+
+  /*
+   * Sanity check on MTU parameters
+   */
+  if (options->tun_mtu_defined && options->link_mtu_defined)
+    msg (M_USAGE, "Options error: only one of --tun-mtu or --link-mtu may be defined (note that --ifconfig implies --link-mtu %d)", LINK_MTU_DEFAULT);
+
+  if (options->proto != PROTO_UDPv4 && options->mtu_test)
+    msg (M_USAGE, "Options error: --mtu-test only makes sense with --proto udp");
+
+  /*
+   * Set MTU defaults
+   */
+  {
+    if (!options->tun_mtu_defined && !options->link_mtu_defined)
+      {
+	if ((dev == DEV_TYPE_TAP) || WIN32_0_1)
+	  {
+	    options->tun_mtu_defined = true;
+	    options->tun_mtu = TAP_MTU_DEFAULT;
+	  }
+	else
+	  {
+	    if (options->ifconfig_local || options->ifconfig_remote_netmask)
+	      options->link_mtu_defined = true;
+	    else
+	      options->tun_mtu_defined = true;
+	  }
+      }
+    if ((dev == DEV_TYPE_TAP) && !options->tun_mtu_extra_defined)
+      {
+	options->tun_mtu_extra_defined = true;
+	options->tun_mtu_extra = TAP_MTU_EXTRA_DEFAULT;
+      }
+  }
+
+  /*
+   * Sanity check on --local, --remote, and ifconfig
+   */
+  if (string_defined_equal (options->local, options->remote)
+      && options->local_port == options->remote_port)
+    msg (M_USAGE, "Options error: --remote and --local addresses are the same");
+	
+  if (string_defined_equal (options->local, options->ifconfig_local)
+      || string_defined_equal (options->local, options->ifconfig_remote_netmask)
+      || string_defined_equal (options->remote, options->ifconfig_local)
+      || string_defined_equal (options->remote, options->ifconfig_remote_netmask))
+    msg (M_USAGE, "Options error: --local and --remote addresses must be distinct from --ifconfig addresses");
+
+  if (string_defined_equal (options->ifconfig_local, options->ifconfig_remote_netmask))
+    msg (M_USAGE, "Options error: local and remote/netmask --ifconfig addresses must be different");
+
+#ifdef WIN32
+  if (dev == DEV_TYPE_TUN && !(options->ifconfig_local && options->ifconfig_remote_netmask))
+    msg (M_USAGE, "Options error: On Windows, --ifconfig is required when --dev tun is used");
+  if ((options->tuntap_flags & IPW32_DEFINED)
+      && !(options->ifconfig_local && options->ifconfig_remote_netmask))
+    msg (M_USAGE, "Options error: On Windows, --ip-win32 doesn't make sense unless --ifconfig is also used");
+  if (options->ifconfig_noexec)
+    {
+      options->tuntap_flags &= ~IPW32_SET_MASK;
+      options->tuntap_flags |= IPW32_SET_MANUAL;
+      options->ifconfig_noexec = false;
+    }
+#endif
+
+  /*
+   * Check that protocol options make sense.
+   */
+
+  if (options->proto != PROTO_UDPv4 && options->fragment)
+    msg (M_USAGE, "Options error: --fragment can only be used with --proto udp");
+
+  if (!options->remote && options->proto == PROTO_TCPv4_CLIENT)
+    msg (M_USAGE, "Options error: --remote MUST be used in TCP Client mode");
+
+  if (options->http_proxy_server && options->proto != PROTO_TCPv4_CLIENT)
+    msg (M_USAGE, "Options error: --http-proxy MUST be used in TCP Client mode (i.e. --proto tcp-client)");
+
+  if (options->http_proxy_server && options->socks_proxy_server)
+    msg (M_USAGE, "Options error: --http-proxy can not be used together with --socks-proxy");
+
+  if (options->socks_proxy_server && options->proto == PROTO_TCPv4_SERVER)
+    msg (M_USAGE, "Options error: --socks-proxy can not be used in TCP Server mode");
+
+#ifdef USE_CRYPTO
+
+  /*
+   * Check consistency of replay options
+   */
+  if ((options->proto != PROTO_UDPv4)
+      && (options->replay_window != defaults.replay_window
+	  || options->replay_time != defaults.replay_time))
+    msg (M_USAGE, "Options error: --replay-window only makes sense with --proto udp");
+
+  if (!options->replay
+      && (options->replay_window != defaults.replay_window
+	  || options->replay_time != defaults.replay_time))
+    msg (M_USAGE, "Options error: --replay-window doesn't make sense when replay protection is disabled with --no-replay");
+
+  /* Don't use replay window for TCP mode (i.e. require that packets
+     be strictly in sequence). */
+  if (link_socket_proto_connection_oriented (options->proto))
+    options->replay_window = options->replay_time = 0;
+
+#ifdef USE_SSL
+  if (options->tls_server + options->tls_client +
+      (options->shared_secret_file != NULL) > 1)
+    msg (M_USAGE, "specify only one of --tls-server, --tls-client, or --secret");
+
+  if (options->tls_server)
+    {
+      notnull (options->dh_file, "DH file (--dh)");
+    }
+  if (options->tls_server || options->tls_client)
+    {
+      notnull (options->ca_file, "CA file (--ca)");
+      notnull (options->cert_file, "certificate file (--cert)");
+      notnull (options->priv_key_file, "private key file (--key)");
+      if (first_time && options->askpass)
+	pem_password_callback (NULL, 0, 0, NULL);
+    }
+  else
+    {
+      /*
+       * Make sure user doesn't specify any TLS options
+       * when in non-TLS mode.
+       */
+
+#define MUST_BE_UNDEF(parm) if (options->parm != defaults.parm) msg (M_USAGE, err, #parm);
+
+      const char err[] = "Parameter %s can only be specified in TLS-mode, i.e. where --tls-server or --tls-client is also specified.";
+
+      MUST_BE_UNDEF (ca_file);
+      MUST_BE_UNDEF (dh_file);
+      MUST_BE_UNDEF (cert_file);
+      MUST_BE_UNDEF (priv_key_file);
+      MUST_BE_UNDEF (cipher_list);
+      MUST_BE_UNDEF (tls_verify);
+      MUST_BE_UNDEF (tls_remote);
+      MUST_BE_UNDEF (tls_timeout);
+      MUST_BE_UNDEF (renegotiate_bytes);
+      MUST_BE_UNDEF (renegotiate_packets);
+      MUST_BE_UNDEF (renegotiate_seconds);
+      MUST_BE_UNDEF (handshake_window);
+      MUST_BE_UNDEF (transition_window);
+      MUST_BE_UNDEF (tls_auth_file);
+      MUST_BE_UNDEF (single_session);
+      MUST_BE_UNDEF (crl_file);
+      MUST_BE_UNDEF (key_method);
+    }
+#undef MUST_BE_UNDEF
+#endif /* USE_CRYPTO */
+#endif /* USE_SSL */
+}
 
 /*
  * Build an options string to represent data channel encryption options.
@@ -676,9 +925,6 @@ options_string (const struct options *o,
    * SSL Options
    */
   {
-    if (o->dynamic)
-      buf_printf (&out, ",dynamic");
-
     if (o->tls_auth_file)
       buf_printf (&out, ",tls-auth");
 
@@ -725,7 +971,7 @@ options_cmp_equal (char *actual, const char *expected, size_t actual_n)
 #ifndef STRICT_OPTIONS_CHECK
       if (strncmp (actual, expected, 2))
 	{
-	  msg (D_SHOW_OCC, "NOTE: failed to perform options consistency check between peers because of OpenVPN version differences -- you can disable the options consistency check with --disable-occ (Required for TLS connections between OpenVPN 1.3.x and later versions).  Actual Remote Options: '%s'.  Expected Remote Options: '%s'", actual, expected);
+	  msg (D_SHOW_OCC, "NOTE: failed to perform options consistency check between peers because of " PACKAGE_NAME " version differences -- you can disable the options consistency check with --disable-occ (Required for TLS connections between " PACKAGE_NAME " 1.3.x and later versions).  Actual Remote Options: '%s'.  Expected Remote Options: '%s'", actual, expected);
 	  return true;
 	}
       else
@@ -785,7 +1031,9 @@ usage (void)
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   fprintf (fp, usage_message,
-	   title_string, o.local_port, o.remote_port,
+	   title_string,
+	   o.connect_retry_seconds,
+	   o.local_port, o.remote_port,
 	   TAP_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT, LINK_MTU_DEFAULT,
 	   o.verbosity,
 	   o.authname, o.ciphername,
@@ -794,14 +1042,18 @@ usage (void)
 	   o.handshake_window, o.transition_window);
 #elif defined(USE_CRYPTO)
   fprintf (fp, usage_message,
-	   title_string, o.local_port, o.remote_port,
+	   title_string,
+	   o.connect_retry_seconds,
+	   o.local_port, o.remote_port,
 	   TAP_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT, LINK_MTU_DEFAULT,
 	   o.verbosity,
 	   o.authname, o.ciphername,
            o.replay_window, o.replay_time);
 #else
   fprintf (fp, usage_message,
-	   title_string, o.local_port, o.remote_port,
+	   title_string,
+	   o.connect_retry_seconds,
+	   o.local_port, o.remote_port,
 	   TAP_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT, LINK_MTU_DEFAULT,
 	   o.verbosity);
 #endif
@@ -821,7 +1073,7 @@ static void
 usage_version (void)
 {
   msg (M_INFO|M_NOPREFIX, "%s", title_string);
-  msg (M_INFO|M_NOPREFIX, "Copyright (C) 2002-2003 James Yonan <jim@yonan.net>");
+  msg (M_INFO|M_NOPREFIX, "Copyright (C) 2002-2004 James Yonan <jim@yonan.net>");
   openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
 }
 
@@ -862,75 +1114,101 @@ space (char c)
 static int
 parse_line (char *line, char *p[], int n, const char *file, int line_num)
 {
+  const int STATE_INITIAL = 0;
+  const int STATE_READING_QUOTED_PARM = 1;
+  const int STATE_READING_UNQUOTED_PARM = 2;
+  const int STATE_DONE = 3;
+
   int ret = 0;
   char *c = line;
-  char *start = NULL;
+  int state = STATE_INITIAL;
+  bool backslash = false;
+  char in, out;
 
-  /*
-   * Parse states:
-   * 0 -- Initial
-   * 1 -- Reading non-quoted parm
-   * 2 -- Leading quote
-   * 3 -- Reading quoted parm
-   * 4 -- First char after parm
-   */
-  int state = 0;
+  char parm[256];
+  unsigned int parm_len = 0;
 
   do
     {
-      if (state == 0)
+      in = *c;
+      out = 0;
+
+      if (!backslash && in == '\\')
 	{
-	  if (!space (*c))
+	  backslash = true;
+	}
+      else
+	{
+	  if (state == STATE_INITIAL)
 	    {
-	      if (*c == ';' || *c == '#') /* comment */
-		break;
-	      if (*c == '\"')
-		state = 2;
-	      else
+	      if (!space (in))
 		{
-		  start = c;
-		  state = 1;
+		  if (in == ';' || in == '#') /* comment */
+		    break;
+		  if (!backslash && in == '\"')
+		    state = STATE_READING_QUOTED_PARM;
+		  else
+		    {
+		      out = in;
+		      state = STATE_READING_UNQUOTED_PARM;
+		    }
 		}
 	    }
+	  else if (state == STATE_READING_UNQUOTED_PARM)
+	    {
+	      if (!backslash && space (in))
+		state = STATE_DONE;
+	      else
+		out = in;
+	    }
+	  else if (state == STATE_READING_QUOTED_PARM)
+	    {
+	      if (!backslash && in == '\"')
+		state = STATE_DONE;
+	      else
+		out = in;
+	    }
+	  if (state == STATE_DONE)
+	    {
+	      ASSERT (parm_len > 0);
+	      p[ret] = gc_malloc (parm_len + 1);
+	      memcpy (p[ret], parm, parm_len);
+	      p[ret][parm_len] = '\0';
+	      state = 0;
+	      parm_len = 0;
+	      ++ret;
+	    }
+	  backslash = false;
 	}
-      else if (state == 1)
+
+      /* store parameter character */
+      if (out)
 	{
-	  if (space (*c))
-	    state = 4;
+	  if (parm_len >= SIZE (parm))
+	    {
+	      parm[SIZE (parm) - 1] = 0;
+	      msg (M_USAGE, "Parameter at %s:%d is too long (%d chars max): %s",
+		   file, line_num, (int) SIZE (parm), parm);
+	    }
+	  parm[parm_len++] = out;
 	}
-      else if (state == 2)
-	{
-	  start = c;
-	  state = 3;
-	}
-      else if (state == 3)
-	{
-	  if (*c == '\"')
-	    state = 4;
-	}
-      if (state == 4)
-	{
-	  const int len = (int) (c - start);
-	  ASSERT (len > 0);
-	  p[ret] = gc_malloc (len + 1);
-	  memcpy (p[ret], start, len);
-	  p[ret][len] = '\0';
-	  state = 0;
-	  if (++ret >= n)
-	    break;
-	}
+
+      /* avoid overflow if too many parms in one config file line */
+      if (ret >= n)
+	break;
+
     } while (*c++ != '\0');
 
-  if (state == 2 || state == 3)
+  if (state == STATE_READING_QUOTED_PARM)
 	msg (M_FATAL, "No closing quotation (\") in %s:%d", file, line_num);
-  if (state)
+  if (state != STATE_INITIAL)
 	msg (M_FATAL, "Residual parse state (%d) in %s:%d", state, file, line_num);
 #if 0
   {
     int i;
     for (i = 0; i < ret; ++i)
       {
-	msg (M_INFO, "%s:%d ARG[%d] '%s'", file, line_num, i, p[i]);
+	msg (M_INFO|M_NOPREFIX, "%s:%d ARG[%d] '%s'", file, line_num, i, p[i]);
       }
   }
 #endif
@@ -1083,7 +1361,16 @@ add_option (struct options *options, int i, char *p[],
   else if (streq (p[0], "resolv-retry") && p[1])
     {
       ++i;
-      options->resolve_retry_seconds = positive (atoi (p[1]));
+      if (streq (p[1], "infinite"))
+	options->resolve_retry_seconds = 1000000000;
+      else
+	options->resolve_retry_seconds = positive (atoi (p[1]));
+    }
+  else if (streq (p[0], "connect-retry") && p[1])
+    {
+      ++i;
+      options->connect_retry_seconds = positive (atoi (p[1]));
+      options->connect_retry_defined = true;
     }
   else if (streq (p[0], "ipchange") && p[1])
     {
@@ -1156,11 +1443,46 @@ add_option (struct options *options, int i, char *p[],
     {
       if (!options->inetd)
 	{
-	  options->inetd = true;
+	  int z;
+	  const char *name = NULL;
+	  const char *opterr = "Options Error: when --inetd is used with two parameters, one of them must be 'wait' or 'nowait' and the other must be a daemon name to use for system logging";
+
+	  options->inetd = -1;
+
+	  for (z = 1; z <= 2; ++z)
+	    {
+	      if (p[z])
+		{
+		  ++i;
+		  if (streq (p[z], "wait"))
+		    {
+		      if (options->inetd != -1)
+			msg (M_USAGE, opterr);
+		      else
+			options->inetd = INETD_WAIT;
+		    }
+		  else if (streq (p[z], "nowait"))
+		    {
+		      if (options->inetd != -1)
+			msg (M_USAGE, opterr);
+		      else
+			options->inetd = INETD_NOWAIT;
+		    }
+		  else
+		    {
+		      if (name != NULL)
+			msg (M_USAGE, opterr);
+		      name = p[z];
+		    }
+		}
+	    }
+
+	  /* default */
+	  if (options->inetd == -1)
+	    options->inetd = INETD_WAIT;
+
 	  save_inetd_socket_descriptor ();
-	  open_syslog (p[1]);
-	  if (p[1])
-	    ++i;
+	  open_syslog (name);
 	}
     }
   else if (streq (p[0], "log") && p[1])
@@ -1313,6 +1635,27 @@ add_option (struct options *options, int i, char *p[],
     {
       options->http_proxy_retry = true;
     }
+  else if (streq (p[0], "socks-proxy") && p[1])
+    {
+      ++i;
+      options->socks_proxy_server = p[1];
+
+      if (p[2])
+	{
+	  ++i;
+          options->socks_proxy_port = atoi (p[2]);
+          if (options->socks_proxy_port <= 0)
+	    msg (M_USAGE, "Bad socks-proxy port number: %s", p[2]);
+	}
+      else
+	{
+	  options->socks_proxy_port = 1080;
+	}
+    }
+  else if (streq (p[0], "socks-proxy-retry"))
+    {
+      options->socks_proxy_retry = true;
+    }
   else if (streq (p[0], "ping") && p[1])
     {
       ++i;
@@ -1419,19 +1762,49 @@ add_option (struct options *options, int i, char *p[],
     {
       const int index = ascii2ipset (p[1]);
       ++i;
+
+      options->tuntap_flags &= ~(
+	  IPW32_SET_MASK
+	| IPW32_DHCP_MASQ_HIOFF
+	| IPW32_DHCP_MASQ_LEASE_TIME_SHORT
+	| IPW32_DHCP_MASQ_OFFSET_MASK << IPW32_DHCP_MASQ_OFFSET_SHIFT);
+
+      options->tuntap_flags |= IPW32_DEFINED;
+
       if (index < 0)
 	msg (M_USAGE,
 	     "Bad --ip-win32 method: '%s'.  Allowed methods: %s",
 	     p[1],
 	     ipset2ascii_all());
 
-#if 1
-      if (index == IP_SET_DHCP)
-	msg (M_FATAL|M_NOPREFIX, "Sorry but '--ip-win32 dynamic' has not been implemented yet -- try one of the other three methods.");
-#endif
+      options->tuntap_flags |= (index & IPW32_SET_MASK);
 
-      options->tuntap_flags &= ~IP_SET_MASK;
-      options->tuntap_flags |= (index & IP_SET_MASK);
+      if ((options->tuntap_flags & IPW32_SET_MASK) == IPW32_SET_DHCP_MASQ)
+	{
+	  if (p[2])
+	    {
+	      int offset = atoi (p[2]);
+	      ++i;
+	      if (!(offset > -256 && offset < 256))
+		msg (M_USAGE, "--ip-win32 dynamic [offset] ['short'|'long']: offset (%d) must be > -256 and < 256", offset);
+	      if (offset < 0)
+		{
+		  options->tuntap_flags |= IPW32_DHCP_MASQ_HIOFF;
+		  offset = -offset;
+		}
+	      options->tuntap_flags |= ((offset & IPW32_DHCP_MASQ_OFFSET_MASK) << IPW32_DHCP_MASQ_OFFSET_SHIFT);
+	      if (p[3])
+		{
+		  ++i;
+		  if (streq (p[3], "short"))
+		    options->tuntap_flags |= IPW32_DHCP_MASQ_LEASE_TIME_SHORT;
+		  else if (streq (p[3], "long"))
+		    ;
+		  else
+		    msg (M_USAGE, "--ip-win32 dynamic [offset] ['short'|'long']: lease time parameter must be 'short' or 'long'");
+		}
+	    }
+	}
     }
   else if (streq (p[0], "show-adapters"))
     {
@@ -1582,10 +1955,6 @@ add_option (struct options *options, int i, char *p[],
     }
 #endif
 #ifdef USE_SSL
-  else if (streq (p[0], "dynamic"))
-    {
-      options->dynamic = true;
-    }
   else if (streq (p[0], "show-tls"))
     {
       options->show_tls_ciphers = true;

@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -60,7 +60,7 @@ void alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tun
  * If we are being run as a win32 service,
  * use this event as our exit trigger.
  */
-#define EXIT_EVENT_NAME "openvpn_exit"
+#define EXIT_EVENT_NAME PACKAGE "_exit"
 
 struct win32_signal {
   /*
@@ -74,7 +74,7 @@ struct win32_signal {
   HANDLE in;
 };
 
-extern struct win32_signal win32_signal;
+extern struct win32_signal win32_signal; /* static/global */
 
 void win32_signal_init (void); 
 void win32_signal_close (void);
@@ -139,19 +139,19 @@ struct event_wait {
   HANDLE trigger;  /* handle that satisfied the most recent wait */
 };
 
-#define SELECT() my_select (&event_wait, tv)
+#define SELECT(w, t) my_select ((w), (t))
 
-#define WAIT_SIGNAL(ew) \
+#define WAIT_SIGNAL(w) \
   { if (win32_signal.in != INVALID_HANDLE_VALUE) \
-    wait_add ((ew), win32_signal.in); }
+    wait_add ((w), win32_signal.in); }
 
 #define GET_SIGNAL(sig) \
   { (sig) = win32_signal_get (&win32_signal); }
 
-#define SELECT_SIGNAL_RECEIVED() \
+#define SELECT_SIGNAL_RECEIVED(w, sig) \
   { if (win32_signal.in != INVALID_HANDLE_VALUE \
-       && wait_trigger (&event_wait, win32_signal.in)) \
-         GET_SIGNAL (signal_received); }
+       && wait_trigger ((w), win32_signal.in)) \
+         GET_SIGNAL (sig); }
 
 static inline int
 my_select (struct event_wait *ew, const struct timeval *tv)
@@ -255,14 +255,14 @@ struct event_wait {
 
 #ifdef ENABLE_PROFILING
 int profile_select(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
-#define SELECT() profile_select (event_wait.max_fd_plus_one, &event_wait.reads, &event_wait.writes, NULL, tv)
+#define SELECT(w, t) profile_select ((w)->max_fd_plus_one, &((w)->reads), &((w)->writes), NULL, (t))
 #else
-#define SELECT() select (event_wait.max_fd_plus_one, &event_wait.reads, &event_wait.writes, NULL, tv)
+#define SELECT(w, t) select ((w)->max_fd_plus_one, &((w)->reads), &((w)->writes), NULL, (t))
 #endif
 
-#define SELECT_SIGNAL_RECEIVED()
+#define SELECT_SIGNAL_RECEIVED(w, sig)
 #define GET_SIGNAL(sig)
-#define WAIT_SIGNAL(ew)
+#define WAIT_SIGNAL(w)
 
 static inline void
 wait_init (struct event_wait *ew)

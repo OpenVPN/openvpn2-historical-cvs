@@ -8,7 +8,7 @@
  *  Copyright (C) Damion K. Wilson, 2003, and is released under the
  *  GPL version 2 (see below).
  *
- *  All other source code is Copyright (C) James Yonan, 2003,
+ *  All other source code is Copyright (C) James Yonan, 2003-2004,
  *  and is released under the GPL version 2 (see below).
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -39,13 +39,29 @@
 
 #if DBG
 
+typedef struct {
+  unsigned int in;
+  unsigned int out;
+  unsigned int capacity;
+  char *text;
+  BOOLEAN error;
+  LONG use;
+} DebugOutput;
+
+VOID MyDebugPrint (const unsigned char* format, ...);
+
 VOID MyAssert (const unsigned char *file, int line);
 
-VOID DebugPacket (const char *prefix,
-		  const unsigned char *data,
-		  int len);
+VOID DumpPacket (const char *prefix,
+		 const unsigned char *data,
+		 unsigned int len);
 
-#define DEBUGP(fmt) { DbgPrint fmt; }
+VOID DumpPacket2 (const char *prefix,
+		  const ETH_HEADER *eth,
+		  const unsigned char *data,
+		  unsigned int len);
+
+#define DEBUGP(fmt) { MyDebugPrint fmt; }
 
 #define MYASSERT(exp) \
 { \
@@ -55,11 +71,17 @@ VOID DebugPacket (const char *prefix,
     } \
 }
 
-#define DEBUG_PACKET(prefix, data, len) \
-  DebugPacket (prefix, data, len)
+#define DUMP_PACKET(prefix, data, len) \
+  DumpPacket (prefix, data, len)
+
+#define DUMP_PACKET2(prefix, eth, data, len) \
+  DumpPacket2 (prefix, eth, data, len)
 
 #else 
+
 #define DEBUGP(fmt)
 #define MYASSERT(exp)
-#define DEBUG_PACKET(prefix, data, len)
+#define DUMP_PACKET(prefix, data, len)
+#define DUMP_PACKET2(prefix, eth, data, len)
+
 #endif

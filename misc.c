@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -35,7 +35,6 @@
 #include "misc.h"
 #include "tun.h"
 #include "error.h"
-#include "openvpn.h"
 #include "thread.h"
 
 #include "memdbg.h"
@@ -139,7 +138,9 @@ set_nice (int niceval)
   if (niceval)
     {
 #ifdef HAVE_NICE
-      if (nice (niceval) < 0)
+      errno = 0;
+      nice (niceval);
+      if (errno != 0)
 	msg (M_WARN | M_ERRNO, "WARNING: nice %d failed", niceval);
       else
 	msg (M_INFO, "nice %d succeeded", niceval);
@@ -185,7 +186,9 @@ run_script (const char *command,
 
       openvpn_snprintf (command_line, sizeof (command_line),
 			"%s %s %d %d %s %s %s",
-			command, arg, tun_mtu, link_mtu,
+			command,
+			arg,
+			tun_mtu, link_mtu,
 			ifconfig_local, ifconfig_remote,
 			context);
       msg (M_INFO, "%s", command_line);
@@ -606,7 +609,7 @@ add_env (char *str)
 	  return;
 	}
     }
-  msg (M_FATAL, "OpenVPN environmental variable cache is full (a maximum of %d variables is allowed) -- try increasing MAX_ENV_STRINGS size in misc.h", MAX_ENV_STRINGS);
+  msg (M_FATAL, PACKAGE_NAME " environmental variable cache is full (a maximum of %d variables is allowed) -- try increasing MAX_ENV_STRINGS size in misc.h", MAX_ENV_STRINGS);
 }
 
 static void
@@ -688,4 +691,31 @@ safe_string (char *cp)
 	*cp = '.';
       ++cp;
     }
+}
+
+
+/*
+ * taken from busybox networking/ifupdown.c
+ */
+unsigned int
+count_bits(unsigned int a)
+{
+  unsigned int result;
+  result = (a & 0x55) + ((a >> 1) & 0x55);
+  result = (result & 0x33) + ((result >> 2) & 0x33);
+  return((result & 0x0F) + ((result >> 4) & 0x0F));
+}
+
+int
+count_netmask_bits(const char *dotted_quad)
+{
+  unsigned int result, a, b, c, d;
+  /* Found a netmask...  Check if it is dotted quad */
+  if (sscanf(dotted_quad, "%u.%u.%u.%u", &a, &b, &c, &d) != 4)
+    return -1;
+  result = count_bits(a);
+  result += count_bits(b);
+  result += count_bits(c);
+  result += count_bits(d);
+  return ((int)result);
 }

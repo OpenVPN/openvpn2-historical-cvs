@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -416,7 +416,7 @@ buf_read_u32 (struct buffer *buf, bool *good)
 }
 
 static inline bool
-buf_string_match (struct buffer *src, const void *match, int size)
+buf_string_match (const struct buffer *src, const void *match, int size)
 {
   if (size != src->len)
     return false;
@@ -424,7 +424,7 @@ buf_string_match (struct buffer *src, const void *match, int size)
 }
 
 static inline bool
-buf_string_match_head (struct buffer *src, const void *match, int size)
+buf_string_match_head (const struct buffer *src, const void *match, int size)
 {
   if (size < 0 || size > src->len)
     return false;

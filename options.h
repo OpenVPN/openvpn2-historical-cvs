@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -21,6 +21,11 @@
  *  along with this program (see the file COPYING included with this
  *  distribution); if not, write to the Free Software Foundation, Inc.,
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ */
+
+/*
+ * 2004-01-28: Added Socks5 proxy support
+ *   (Christof Meerwald, http://cmeerw.org)
  */
 
 #ifndef OPTIONS_H
@@ -86,6 +91,8 @@ struct options
 
   /* Protocol type (PROTO_UDP or PROTO_TCP) */
   int proto;
+  int connect_retry_seconds;
+  bool connect_retry_defined;
 
   /* Advanced MTU negotiation and datagram fragmentation options */
   int mtu_discover_type; /* used if OS supports setting Path MTU discovery options on socket */
@@ -132,7 +139,10 @@ struct options
   bool up_delay;
   bool up_restart;
   bool daemon;
-  bool inetd;
+
+  /* inetd modes defined in socket.h */
+  int inetd;
+
   bool log;
   int nice;
 #ifdef USE_PTHREAD
@@ -162,6 +172,11 @@ struct options
   const char *http_proxy_auth_file;
   bool http_proxy_retry;
 
+  /* socks proxy */
+  const char *socks_proxy_server;
+  int socks_proxy_port;
+  bool socks_proxy_retry;
+
   /* Enable options consistency check between peers */
   bool occ;
 
@@ -182,9 +197,6 @@ struct options
   bool test_crypto;
 
 #ifdef USE_SSL
-  /* dynamic forking server mode */
-  bool dynamic;
-
   /* TLS (control channel) parms */
   bool tls_server;
   bool tls_client;
@@ -253,5 +265,7 @@ char *options_string (const struct options *o,
 int options_cmp_equal (char *actual, const char *expected, size_t actual_n);
 
 void options_warning (char *actual, const char *expected, size_t actual_n);
+
+void options_postprocess (struct options *options, bool first_time);
 
 #endif

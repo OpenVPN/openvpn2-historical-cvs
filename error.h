@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,9 +26,35 @@
 #ifndef ERROR_H
 #define ERROR_H
 
-/* String and Error functions */
-
 #include "basic.h"
+
+/*
+ * Where should messages be printed before syslog is opened?
+ * Not used if OPENVPN_DEBUG_COMMAND_LINE is defined.
+ */
+#define OPENVPN_MSG_FP stdout
+
+/*
+ * Exit status codes
+ */
+
+#define OPENVPN_EXIT_STATUS_GOOD                    0
+#define OPENVPN_EXIT_STATUS_ERROR                   1
+#define OPENVPN_EXIT_STATUS_USAGE                   1
+#define OPENVPN_EXIT_STATUS_CANNOT_OPEN_DEBUG_FILE  1
+
+/*
+ * Special command line debugging mode.
+ * If OPENVPN_DEBUG_COMMAND_LINE
+ * is defined, contents of argc/argv will
+ * be dumped to OPENVPN_DEBUG_FILE as well
+ * as all other OpenVPN messages.
+ */
+
+/* #define OPENVPN_DEBUG_COMMAND_LINE */
+#define OPENVPN_DEBUG_FILE PACKAGE ".log"
+
+/* String and Error functions */
 
 #ifdef WIN32
 # define openvpn_errno()         GetLastError()

@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -81,7 +81,8 @@ packet_id_free (struct packet_id *p)
 {
   ASSERT (p);
   msg (D_PID_DEBUG_LOW, "PID packet_id_free");
-  free (p->rec.seq_list);
+  if (p->rec.seq_list)
+    free (p->rec.seq_list);
   CLEAR (*p);
 }
 

@@ -5,7 +5,7 @@
 #             packet encryption, packet authentication, and
 #             packet compression.
 #
-#  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+#  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 #
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -28,25 +28,53 @@
 AUTOMAKE_OPTIONS = foreign
 
 sbin_PROGRAMS = openvpn
+
 nodist_openvpn_SOURCES = config.h
-openvpn_SOURCES = basic.h buffer.c buffer.h circ_list.h common.h \
-                  crypto.c crypto.h encrypt_sign.h \
-		  errlevel.h error.c error.h \
-                  fdmisc.c fdmisc.h fragment.c \
-                  fragment.h gremlin.c gremlin.h \
-                  integer.h interval.h \
-                  io.c io.h lzo.c lzo.h memdbg.h misc.c misc.h \
-                  mss.c mss.h mtu.c mtu.h openvpn.c \
-                  openvpn.h options.c options.h \
-		  packet_id.c packet_id.h proto.h \
-		  proxy.c proxy.h \
-                  reliable.c reliable.h \
-                  route.c route.h session_id.c \
-                  session_id.h shaper.c shaper.h socket.c socket.h \
-                  ssl.c ssl.h syshead.h thread.c thread.h tun.c tun.h
+
+openvpn_SOURCES = \
+	basic.h \
+	buffer.c buffer.h \
+	circ_list.h \
+	common.h \
+	crypto.c crypto.h \
+	errlevel.h \
+	error.c error.h \
+	fdmisc.c fdmisc.h \
+        forward.c forward.h forward-inline.h \
+	fragment.c fragment.h \
+	gremlin.c gremlin.h \
+	init.c init.h \
+	integer.h \
+        interval.h \
+	io.c io.h \
+	lzo.c lzo.h \
+        memdbg.h \
+	misc.c misc.h \
+	mss.c mss.h \
+	mtu.c mtu.h \
+	occ.c occ.h occ-inline.h \
+	openvpn.c openvpn.h \
+	options.c options.h \
+	packet_id.c packet_id.h \
+	ping.c ping.h ping-inline.h \
+	proto.h \
+	proxy.c proxy.h \
+	reliable.c reliable.h \
+	route.c route.h \
+	session_id.c session_id.h \
+	shaper.c shaper.h \
+	sig.c sig.h \
+	socket.c socket.h \
+	socks.c socks.h \
+	ssl.c ssl.h \
+	syshead.h \
+	thread.c thread.h \
+	tun.c tun.h
+
 LDADD = @LIBOBJS@
 
 man_MANS = openvpn.8
+
 EXTRA_DIST = $(man_MANS) \
 	     COPYRIGHT.GPL PORTS openvpn.spec \
 	     easy-rsa sample-config-files sample-keys \
@@ -58,7 +86,8 @@ EXTRA_DIST = $(man_MANS) \
 	     INSTALL-win32.txt \
 	     tap-win32 \
 	     install-win32 \
-	     service-win32
+	     service-win32 \
+	     contrib
 
 dist-hook:
 	cd $(distdir) && for i in $(EXTRA_DIST) ; do find $$i -name CVS -type d -prune -exec rm -r '{}' ';' ; rm -f `find $$i -type f | grep -E '(^|\/)\.?\#|\~$$'` ; done

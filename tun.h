@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,7 +28,7 @@
 
 #ifdef WIN32
 #include <winioctl.h>
-#include "tap-win32/constants.h"
+#include "tap-win32/common.h"
 #endif
 
 #include "buffer.h"
@@ -90,37 +90,37 @@ struct tuntap
 
 #ifdef WIN32
 
-#define TUNTAP_SET_READ(tt)  \
-  { if (tt->hand != NULL) { \
-      wait_add (&event_wait, tt->reads.overlapped.hEvent); \
-      tun_read_queue (tt, 0); }}
+#define TUNTAP_SET_READ(w, tt)  \
+  { if ((tt)->hand != NULL) { \
+      wait_add ((w), (tt)->reads.overlapped.hEvent); \
+      tun_read_queue ((tt), 0); }}
 
-#define TUNTAP_SET_WRITE(tt) \
-  { if (tt->hand != NULL) \
-      wait_add (&event_wait, tt->writes.overlapped.hEvent); }
+#define TUNTAP_SET_WRITE(w, tt) \
+  { if ((tt)->hand != NULL) \
+      wait_add ((w), (tt)->writes.overlapped.hEvent); }
 
-#define TUNTAP_ISSET(tt, set) \
-  (tt->hand != NULL \
-  && wait_trigger (&event_wait, tt->set.overlapped.hEvent))
+#define TUNTAP_ISSET(w, tt, set) \
+  ((tt)->hand != NULL \
+  && wait_trigger ((w), (tt)->set.overlapped.hEvent))
 
-#define TUNTAP_SETMAXFD(tt)
+#define TUNTAP_SETMAXFD(w, tt)
 
-#define TUNTAP_READ_STAT(tt) \
-   (tt->hand != NULL \
-   ? overlapped_io_state_ascii (&tt->reads,  "tr") : "trX")
+#define TUNTAP_READ_STAT(w, tt) \
+   ((tt)->hand != NULL \
+   ? overlapped_io_state_ascii (&((tt)->reads),  "tr") : "trX")
 
-#define TUNTAP_WRITE_STAT(tt) \
-   (tt->hand != NULL \
-   ? overlapped_io_state_ascii (&tt->writes, "tw") : "twX")
+#define TUNTAP_WRITE_STAT(w, tt) \
+   ((tt)->hand != NULL \
+   ? overlapped_io_state_ascii (&((tt)->writes), "tw") : "twX")
 
 #else
 
-#define TUNTAP_SET_READ(tt)   { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.reads); }
-#define TUNTAP_SET_WRITE(tt)  { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.writes); }
-#define TUNTAP_ISSET(tt, set)      (tt->fd >= 0 && FD_ISSET (tt->fd, &event_wait.set))
-#define TUNTAP_SETMAXFD(tt)   { if (tt->fd >= 0)   wait_update_maxfd (&event_wait, tt->fd); }
-#define TUNTAP_READ_STAT(tt)  (TUNTAP_ISSET (tt, reads) ?  "TR" : "tr")
-#define TUNTAP_WRITE_STAT(tt) (TUNTAP_ISSET (tt, writes) ? "TW" : "tw")
+#define TUNTAP_SET_READ(w, tt)   { if ((tt)->fd >= 0)   FD_SET   ((tt)->fd, &((w)->reads)); }
+#define TUNTAP_SET_WRITE(w, tt)  { if ((tt)->fd >= 0)   FD_SET   ((tt)->fd, &((w)->writes)); }
+#define TUNTAP_ISSET(w, tt, set)      ((tt)->fd >= 0 && FD_ISSET ((tt)->fd, &((w)->set)))
+#define TUNTAP_SETMAXFD(w, tt)   { if ((tt)->fd >= 0)   wait_update_maxfd ((w), (tt)->fd); }
+#define TUNTAP_READ_STAT(w, tt)  (TUNTAP_ISSET ((w), (tt), reads) ?  "TR" : "tr")
+#define TUNTAP_WRITE_STAT(w, tt) (TUNTAP_ISSET ((w), (tt), writes) ? "TW" : "tw")
 
 #endif
 
@@ -224,16 +224,25 @@ ifconfig_order(void)
 
 /* --ip-win32 constants */
 
-#define IP_SET_MANUAL      0  /* "manual" */
-#define IP_SET_NETSH       1  /* "netsh" */
-#define IP_SET_IPAPI       2  /* "ipapi" */
-#define IP_SET_DHCP        3  /* "dhcp" */
+#define IPW32_SET_MANUAL       0  /* "manual" */
+#define IPW32_SET_NETSH        1  /* "netsh" */
+#define IPW32_SET_IPAPI        2  /* "ipapi" */
+#define IPW32_SET_DHCP_MASQ    3  /* "dynamic" */
 
-#define IP_SET_N           4
-#define IP_SET_MASK        3
+#define IPW32_SET_N            4
+#define IPW32_SET_MASK         3
 
-#define TUNTAP_SLEEP_SHIFT    2
-#define TUNTAP_SLEEP_MASK  0xFF
+#define IPW32_DEFINED                     0x04 /* if true, --ip-win32 parameter was used */
+#define IPW32_DHCP_MASQ_HIOFF             0x08 /* if false, low offset; if true, high offset */
+#define IPW32_DHCP_MASQ_LEASE_TIME_SHORT  0x10 /* if true, short lease time, if false, long lease time */
+
+#define IPW32_DHCP_MASQ_OFFSET_SHIFT    5
+#define IPW32_DHCP_MASQ_OFFSET_MASK  0xFF
+
+/* --tap-sleep parameter */
+
+#define TUNTAP_SLEEP_SHIFT     13
+#define TUNTAP_SLEEP_MASK    0xFF
 
 int ascii2ipset (const char* name);
 const char *ipset2ascii (int index);
@@ -255,7 +264,8 @@ void verify_255_255_255_252 (in_addr_t local, in_addr_t remote);
 
 void show_tap_win32_adapters (void);
 void show_valid_win32_tun_subnets (void);
-const char *tap_win32_getinfo (struct tuntap *tt);
+const char *tap_win32_getinfo (const struct tuntap *tt);
+void tun_show_debug (struct tuntap *tt);
 
 int tun_read_queue (struct tuntap *tt, int maxsize);
 int tun_write_queue (struct tuntap *tt, struct buffer *buf);

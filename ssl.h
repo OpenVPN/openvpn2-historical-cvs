@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -463,10 +463,9 @@ struct thread_parms
 # define TLS_THREAD_SOCKET(x) ((x)->sd[TLS_THREAD_MAIN])
 
   /* these macros are called in the context of the openvpn() function */
-# define TLS_THREAD_SOCKET_ISSET(tp, set) (tls_multi && FD_ISSET (TLS_THREAD_SOCKET (&tp), &event_wait.set))
-# define TLS_THREAD_SOCKET_SET(tp, set) { if (tls_multi) FD_SET (TLS_THREAD_SOCKET (&tp), &event_wait.set); }
-# define TLS_THREAD_SOCKET_SETMAXFD(tp) \
-  { if (tls_multi) wait_update_maxfd (&event_wait, TLS_THREAD_SOCKET (&tp)); }
+# define TLS_THREAD_SOCKET_ISSET(tm, w, tp, set) ((tm) && FD_ISSET (TLS_THREAD_SOCKET (tp), &((w)->set)))
+# define TLS_THREAD_SOCKET_SET(tm, w, tp, set) { if (tm) FD_SET (TLS_THREAD_SOCKET (tp), &((w)->set)); }
+# define TLS_THREAD_SOCKET_SETMAXFD(tm, w, tp) { if (tm) wait_update_maxfd ((w), TLS_THREAD_SOCKET (tp)); }
 
   int sd[2];
 

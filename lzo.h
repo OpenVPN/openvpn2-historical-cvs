@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -102,6 +102,6 @@ void lzo_decompress (struct buffer *buf, struct buffer work,
 		     struct lzo_compress_workspace *lzowork,
 		     const struct frame* frame);
 
-void lzo_print_stats (struct lzo_compress_workspace *lzo_compwork);
+void lzo_print_stats (const struct lzo_compress_workspace *lzo_compwork);
 
 #endif /* USE_LZO */

@@ -5,7 +5,7 @@
  *             packet encryption, packet authentication, and
  *             packet compression.
  *
- *  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+ *  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -451,7 +451,46 @@ do_ifconfig (struct tuntap *tt,
 	ifconfig_broadcast = print_in_addr_t (tt->broadcast, false);
 
 #if defined(TARGET_LINUX)
+#ifdef CONFIG_FEATURE_IPROUTE
+	/*
+	 * Set the MTU for the device
+	 */
+	openvpn_snprintf (command_line, sizeof (command_line),
+			  IPROUTE_PATH " link set dev %s up mtu %d",
+			  actual,
+			  tun_mtu
+			  );
+	  msg (M_INFO, "%s", command_line);
+	  system_check (command_line, "Linux ip link set failed", true);
 
+
+	if (tun) {
+
+		/*
+		 * Set the address for the device
+		 */
+		openvpn_snprintf (command_line, sizeof (command_line),
+				  IPROUTE_PATH " addr add dev %s local %s peer %s",
+				  actual,
+				  ifconfig_local,
+				  ifconfig_remote_netmask
+				  );
+		  msg (M_INFO, "%s", command_line);
+		  system_check (command_line, "Linux ip addr add failed", true);
+	} else {
+		openvpn_snprintf (command_line, sizeof (command_line),
+				  IPROUTE_PATH " addr add dev %s %s/%d broadcast %s",
+				  actual,
+				  ifconfig_local,
+				  count_netmask_bits(ifconfig_remote_netmask),
+				  ifconfig_broadcast
+				  );
+		  msg (M_INFO, "%s", command_line);
+		  system_check (command_line, "Linux ip addr add failed", true);
+
+	}
+	tt->did_ifconfig = true;
+#else
       if (tun)
 	openvpn_snprintf (command_line, sizeof (command_line),
 			  IFCONFIG_PATH " %s %s pointopoint %s mtu %d",
@@ -472,7 +511,7 @@ do_ifconfig (struct tuntap *tt,
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "Linux ifconfig failed", true);
       tt->did_ifconfig = true;
-
+#endif /*CONFIG_FEATURE_IPROUTE*/
 #elif defined(TARGET_SOLARIS)
 
       /* example: ifconfig tun2 10.2.0.2 10.2.0.1 mtu 1450 netmask 255.255.255.255 up */
@@ -625,15 +664,15 @@ do_ifconfig (struct tuntap *tt,
 			  ifconfig_local,
 			  netmask);
 	
-	switch (tt->flags & IP_SET_MASK)
+	switch (tt->flags & IPW32_SET_MASK)
 	  {
-	  case IP_SET_MANUAL:
+	  case IPW32_SET_MANUAL:
 	    msg (M_INFO, "******** NOTE:  Please manually set the IP/netmask of '%s' to %s/%s (if it is not already set)",
 		 actual,
 		 ifconfig_local,
 		 netmask);
 	    break;
-	  case IP_SET_NETSH:
+	  case IPW32_SET_NETSH:
 	    netcmd_semaphore_lock ();
 	    msg (M_INFO, "%s", command_line);
 	    system_check (command_line, "ERROR: netsh command failed", true);
@@ -1188,12 +1227,66 @@ read_tun (struct tuntap* tt, uint8_t *buf, int len)
     return read (tt->fd, buf, len);
 }
 
-#elif defined(TARGET_FREEBSD)
+#elif defined(TARGET_NETBSD)
+
+/*
+ * NetBSD does not support IPv6 on tun out of the box,
+ * but there exists a patch. When this patch is applied,
+ * only two things are left to openvpn:
+ * 1. Activate multicasting (this has already been done
+ *    before by the kernel, but we make sure that nobody
+ *    has deactivated multicasting inbetween.
+ * 2. Deactivate "link layer mode" (otherwise NetBSD 
+ *    prepends the address family to the packet, and we
+ *    would run into the same trouble as with OpenBSD.
+ */
 
 void
 open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
 {
-  open_tun_generic (dev, dev_type, dev_node, ipv6, false, true, tt);
+    open_tun_generic (dev, dev_type, dev_node, ipv6, true, true, tt);
+    if (tt->fd >= 0)
+      {
+        int i = IFF_POINTOPOINT|IFF_MULTICAST;
+        ioctl (tt->fd, TUNSIFMODE, &i);  /* multicast on */
+        i = 0;
+        ioctl (tt->fd, TUNSLMODE, &i);   /* link layer mode off */
+      }
+}
+
+void
+close_tun (struct tuntap* tt)
+{
+  close_tun_generic (tt);
+}
+
+int
+write_tun (struct tuntap* tt, uint8_t *buf, int len)
+{
+    return write (tt->fd, buf, len);
+}
+
+int
+read_tun (struct tuntap* tt, uint8_t *buf, int len)
+{
+    return read (tt->fd, buf, len);
+}
+
+#elif defined(TARGET_FREEBSD)
+
+static inline int
+freebsd_modify_read_write_return (int len)
+{
+  if (len > 0)
+    return len > sizeof (u_int32_t) ? len - sizeof (u_int32_t) : 0;
+  else
+    return len;
+}
+
+void
+open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
+{
+  open_tun_generic (dev, dev_type, dev_node, ipv6, true, true, tt);
 
   if (tt->fd >= 0)
     {
@@ -1201,6 +1294,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 
       /* Disable extended modes */
       ioctl (tt->fd, TUNSLMODE, &i);
+      i = 1;
       ioctl (tt->fd, TUNSIFHEAD, &i);
     }
 }
@@ -1214,13 +1308,38 @@ close_tun (struct tuntap* tt)
 int
 write_tun (struct tuntap* tt, uint8_t *buf, int len)
 {
-  return write (tt->fd, buf, len);
+  struct iovec iv[2];
+  u_int32_t type;
+  struct ip *iph;
+
+  iph = (struct ip *)buf;
+
+  if(tt->ipv6 && iph->ip_v == 6)
+     type = htonl(AF_INET6);
+   else
+     type = htonl(AF_INET);
+
+  iv[0].iov_base = &type;
+  iv[0].iov_len = sizeof (type);
+  iv[1].iov_base = buf;
+  iv[1].iov_len = len;
+
+  return freebsd_modify_read_write_return (writev (tt->fd, iv, 2));
 }
 
 int
 read_tun (struct tuntap* tt, uint8_t *buf, int len)
 {
-  return read (tt->fd, buf, len);
+  u_int32_t type;
+  struct iovec iv[2];
+
+  iv[0].iov_base = &type;
+  iv[0].iov_len = sizeof (type);
+  iv[1].iov_base = buf;
+  iv[1].iov_len = len;
+
+
+  return freebsd_modify_read_write_return (readv (tt->fd, iv, 2));
 }
 
 #elif defined(WIN32)
@@ -1679,7 +1798,7 @@ get_device_guid (const char *name,
     msg (M_FATAL|M_NOPREFIX, "TAP-Win32 adapter '%s' not found -- run with --show-adapters to show a list of TAP-WIN32 adapters on this system", name);
 
   if (!dev_count)
-    msg (M_FATAL|M_NOPREFIX, "There are no TAP-Win32 adapters on this system.  You should be able to create a TAP-Win32 adapter by going to Start -> All Programs -> OpenVPN -> Add a new TAP-Win32 virtual ethernet adapter.");
+    msg (M_FATAL|M_NOPREFIX, "There are no TAP-Win32 adapters on this system.  You should be able to create a TAP-Win32 adapter by going to Start -> All Programs -> " PACKAGE_NAME " -> Add a new TAP-Win32 virtual ethernet adapter.");
 
   ASSERT (dev_count == 1);
  
@@ -1717,7 +1836,7 @@ verify_255_255_255_252 (in_addr_t local, in_addr_t remote)
   return;
 
  error:
-  msg (M_FATAL, "There is a problem in your selection of --ifconfig endpoints [local=%s, remote=%s].  The local and remote VPN endpoints %s.  Try 'openvpn --show-valid-subnets' option for more info.",
+  msg (M_FATAL, "There is a problem in your selection of --ifconfig endpoints [local=%s, remote=%s].  The local and remote VPN endpoints %s.  Try '" PACKAGE " --show-valid-subnets' option for more info.",
        print_in_addr_t (local, false),
        print_in_addr_t (remote, false),
        err);
@@ -1959,8 +2078,9 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	     (info[2] ? "(DEBUG)" : ""));
 
       }
-    if ( !(info[0] > TAP_WIN32_MIN_MAJOR || (info[0] == TAP_WIN32_MIN_MAJOR && info[1] >= TAP_WIN32_MIN_MINOR)) )
-      msg (M_FATAL, "ERROR:  This version of OpenVPN requires a TAP-Win32 driver that is at least version %d.%d -- If you recently upgraded your OpenVPN distribution, a reboot is probably required at this point to get Windows to see the new driver.",
+    if ( !(info[0] > TAP_WIN32_MIN_MAJOR
+	   || (info[0] == TAP_WIN32_MIN_MAJOR && info[1] >= TAP_WIN32_MIN_MINOR)) )
+      msg (M_FATAL, "ERROR:  This version of " PACKAGE_NAME " requires a TAP-Win32 driver that is at least version %d.%d -- If you recently upgraded your " PACKAGE_NAME " distribution, a reboot is probably required at this point to get Windows to see the new driver.",
 	   TAP_WIN32_MIN_MAJOR,
 	   TAP_WIN32_MIN_MINOR);
   }
@@ -1978,6 +2098,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   }
 
   /* set point-to-point mode if TUN device */
+
   if (tt->type == DEV_TYPE_TUN)
     {
       in_addr_t ep[2];
@@ -1995,19 +2116,50 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 
   /* should we tell the TAP-Win32 driver to masquerade as a DHCP server as a means
      of setting the adapter address? */
-  if (tt->did_ifconfig_setup && (tt->flags & IP_SET_MASK) == IP_SET_DHCP)
+  if (tt->did_ifconfig_setup && (tt->flags & IPW32_SET_MASK) == IPW32_SET_DHCP_MASQ)
     {
-      in_addr_t ep[2];
+      in_addr_t ep[4];
+      const bool hioff = (tt->flags & IPW32_DHCP_MASQ_HIOFF) != 0;
+      const bool short_lease = (tt->flags & IPW32_DHCP_MASQ_LEASE_TIME_SHORT) != 0;
+      const unsigned int offset = (tt->flags >> IPW32_DHCP_MASQ_OFFSET_SHIFT) & IPW32_DHCP_MASQ_OFFSET_MASK;
+
+      /* We will answer DHCP requests with a reply to set IP/subnet to these values */
       ep[0] = htonl (tt->local);
       ep[1] = htonl (tt->adapter_netmask);
+
+      /* At what IP address should the DHCP server masquerade at? */
+      if (tt->type == DEV_TYPE_TUN)
+	{
+	  ep[2] = htonl (tt->remote_netmask);
+	  if (offset != 0)
+	    msg (M_WARN, "WARNING: because you are using '--dev tun' mode, the '--ip-win32 dynamic [offset]' option is ignoring the offset parameter");
+	}
+      else
+	{
+	  in_addr_t dsa; /* DHCP server addr */
+	  if (hioff)
+	    dsa = (tt->local | (~tt->adapter_netmask)) - offset;
+	  else
+	    dsa = (tt->local & tt->adapter_netmask) + offset;
+	  if ((tt->local & tt->adapter_netmask) != (dsa & tt->adapter_netmask))
+	    msg (M_FATAL, "ERROR: --tap-win32 dynamic [offset] : offset is outside of --ifconfig subnet");
+	  ep[2] = htonl (dsa);
+	}
+
+      /* lease time in seconds */
+      ep[3] = (short_lease ? 60 : 31536000); /* the long lease is 1 year */
+
       if (!DeviceIoControl (tt->hand, TAP_IOCTL_CONFIG_DHCP_MASQ,
 			    ep, sizeof (ep),
 			    ep, sizeof (ep), &len, NULL))
 	msg (M_FATAL, "ERROR: The TAP-Win32 driver rejected a DeviceIoControl call to set TAP_IOCTL_CONFIG_DHCP_MASQ mode");
-      msg (M_INFO, "Notified TAP-Win32 driver to set a dynamic IP/netmask of %s/%s on interface %s",
+
+      msg (M_INFO, "Notified TAP-Win32 driver to set a DHCP IP/netmask of %s/%s on interface %s [DHCP-serv: %s, lease-time: %d]",
 	   print_in_addr_t (tt->local, false),
 	   print_in_addr_t (tt->adapter_netmask, false),
-	   device_guid
+	   device_guid,
+	   print_in_addr_t (ntohl(ep[2]), false),
+	   ep[3]
 	   );
     }
 
@@ -2058,14 +2210,14 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
      * make sure the TCP/IP properties for the adapter are
      * set correctly.
      */
-    if (tt->did_ifconfig_setup && (tt->flags & IP_SET_MASK) == IP_SET_DHCP)
+    if (tt->did_ifconfig_setup && (tt->flags & IPW32_SET_MASK) == IPW32_SET_DHCP_MASQ)
       {
 	/* check dhcp enable status */
 	if (dhcp_disabled (index))
 	  msg (M_WARN, "WARNING: You have selected '--ip-win32 dynamic', which will not work unless the TAP-Win32 TCP/IP properties are set to 'Obtain an IP address automatically'");
       }
 
-    if (tt->did_ifconfig_setup && (tt->flags & IP_SET_MASK) == IP_SET_IPAPI)
+    if (tt->did_ifconfig_setup && (tt->flags & IPW32_SET_MASK) == IPW32_SET_IPAPI)
       {
 	DWORD status;
 	const char *error_suffix = "I am having trouble using the Windows 'IP helper API' to automatically set the IP address -- consider using other --ip-win32 methods (not 'ipapi')";
@@ -2113,7 +2265,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 }
 
 const char *
-tap_win32_getinfo (struct tuntap *tt)
+tap_win32_getinfo (const struct tuntap *tt)
 {
   if (tt && tt->hand != NULL)
     {
@@ -2129,6 +2281,28 @@ tap_win32_getinfo (struct tuntap *tt)
     }
   return NULL;
 }
+
+#ifdef TAP_WIN32_DEBUG
+
+void
+tun_show_debug (struct tuntap *tt)
+{
+  if (tt && tt->hand != NULL)
+    {
+      struct buffer out = alloc_buf (1024);
+      DWORD len;
+      while (DeviceIoControl (tt->hand, TAP_IOCTL_GET_LOG_LINE,
+			      BSTR (&out), BCAP (&out),
+			      BSTR (&out), BCAP (&out),
+			      &len, NULL))
+	{
+	  msg (D_TAP_WIN32_DEBUG, "TAP-Win32: %s", BSTR (&out));
+	}
+      free_buf (&out);
+    }
+}
+
+#endif
 
 void
 close_tun (struct tuntap *tt)
@@ -2177,7 +2351,7 @@ struct ipset_names {
   const char *short_form;
 };
 
-/* Indexed by IP_SET_x */
+/* Indexed by IPW32_SET_x */
 static const struct ipset_names ipset_names[] = {
   {"manual"},
   {"netsh"},
@@ -2189,8 +2363,8 @@ int
 ascii2ipset (const char* name)
 {
   int i;
-  ASSERT (IP_SET_N == SIZE (ipset_names));
-  for (i = 0; i < IP_SET_N; ++i)
+  ASSERT (IPW32_SET_N == SIZE (ipset_names));
+  for (i = 0; i < IPW32_SET_N; ++i)
     if (!strcmp (name, ipset_names[i].short_form))
       return i;
   return -1;
@@ -2199,8 +2373,8 @@ ascii2ipset (const char* name)
 const char *
 ipset2ascii (int index)
 {
-  ASSERT (IP_SET_N == SIZE (ipset_names));
-  if (index < 0 || index >= IP_SET_N)
+  ASSERT (IPW32_SET_N == SIZE (ipset_names));
+  if (index < 0 || index >= IPW32_SET_N)
     return "[unknown --ip-win32 type]";
   else
     return ipset_names[index].short_form;
@@ -2212,8 +2386,8 @@ ipset2ascii_all ()
   struct buffer out = alloc_buf_gc (256);
   int i;
 
-  ASSERT (IP_SET_N == SIZE (ipset_names));
-  for (i = 0; i < IP_SET_N; ++i)
+  ASSERT (IPW32_SET_N == SIZE (ipset_names));
+  for (i = 0; i < IPW32_SET_N; ++i)
     {
       if (i)
 	buf_printf(&out, " ");

@@ -4,7 +4,7 @@
 .\"             packet encryption, packet authentication, and
 .\"             packet compression.
 .\"
-.\"  Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
+.\"  Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 .\"
 .\"  This program is free software; you can redistribute it and/or modify
 .\"  it under the terms of the GNU General Public License as published by
@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "3 November 2003"
+.TH openvpn 8 "1 February 2004"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -103,6 +103,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-comp\-lzo\fR\ ]
 [\ \fB\-\-comp\-noadapt\fR\ ]
 [\ \fB\-\-config\fR\ \fIfile\fR\ ]
+[\ \fB\-\-connect\-retry\fR\ \fIn\fR\ ]
 [\ \fB\-\-crl\-verify\fR\ \fIcrl\fR\ ]
 [\ \fB\-\-daemon\fR\ ]
 [\ \fB\-\-dev\-name\fR\ \fIname\fR\ ]
@@ -119,11 +120,13 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
 [\ \fB\-\-http\-proxy\fR\ \fIserver\ port\ [authfile]\fR\ ]
 [\ \fB\-\-http\-proxy\-retry\fR\ ]
+[\ \fB\-\-socks\-proxy\fR\ \fIserver\ [port]\fR\ ]
+[\ \fB\-\-socks\-proxy\-retry\fR\ ]
 [\ \fB\-\-ifconfig\fR\ \fIl\ r\fR\ ]
 [\ \fB\-\-ifconfig\-noexec\fR\ ]
 [\ \fB\-\-ifconfig\-nowarn\fR\ ]
 [\ \fB\-\-inactive\fR\ \fIn\fR\ ]
-[\ \fB\-\-inetd\fR\ ]
+[\ \fB\-\-inetd\fR\ \fI[wait|nowait]\ [progname]\fR\ ]
 [\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-key\fR\ \fIfile\fR\ ]
 [\ \fB\-\-key\-method\fR\ \fIm\fR\ ]
@@ -347,6 +350,15 @@ a security and robustness perspective, such as tunneling non-IP or
 application-level UDP protocols, or tunneling protocols which don't
 possess a built-in reliability layer.
 .TP
+.B --connect-retry n
+For
+.B --proto tcp-client,
+take
+.B n
+as the
+number of seconds to wait
+between connection retries (default=5).
+.TP
 .B --http-proxy server port [authfile]
 Connect to remote host through an HTTP proxy at address
 .B server
@@ -360,12 +372,27 @@ is a file containing a username and password on 2 lines.
 Retry indefinitely on HTTP proxy errors.  If an HTTP proxy error
 occurs, simulate a SIGUSR1 reset.
 .TP
+.B --socks-proxy server [port]
+Connect to remote host through a Socks5 proxy at address
+.B server
+and port
+.B port
+(default=1080).
+.TP
+.B --socks-proxy-retry
+Retry indefinitely on Socks proxy errors.  If a Socks proxy error
+occurs, simulate a SIGUSR1 reset.
+.TP
 .B --resolv-retry n
 If hostname resolve fails for
 .B --remote,
 retry resolve for
 .B n
 seconds before failing (disabled by default).
+
+Set
+.B n
+to "infinite" to retry indefinitely.
 .TP
 .B --float
 Allow remote peer to change its IP address and/or port number, such as due to
@@ -561,6 +588,12 @@ platforms.
 parameters which are IP addresses can
 also be specified as a DNS or /etc/hosts
 file resolvable name.
+
+For TAP devices,
+.B --ifconfig
+should not be used if the TAP interface will be
+getting an IP address lease from a DHCP
+server.
 .TP
 .B --ifconfig-noexec
 Don't actually execute ifconfig/netsh commands, instead
@@ -697,7 +730,7 @@ Don't add or remove routes automatically.  Instead pass routes to
 script using environmental variables.
 .TP
 .B --redirect-gateway
-Automatically execute routing commands to cause all outgoing IP traffic
+(Experimental) Automatically execute routing commands to cause all outgoing IP traffic
 to be redirected over the VPN.  Currently implemented only on Linux and Windows.
 
 This option performs three steps:
@@ -745,11 +778,6 @@ Prior to OpenVPN 1.5, this option was named
 While deprecated, this name will still be supported
 for compatibility.
 
-This option should only be used for TUN style tunnels.  TAP tunnels
-that are used for ethernet bridging should use the
-.B --tun-mtu
-parameter.
-
 The MTU (Maximum Transmission Units) is
 the maximum datagram size in bytes that can be sent unfragmented
 over a particular network path.  OpenVPN requires that packets
@@ -766,6 +794,10 @@ hang during periods of active usage.  The
 and
 .B --mssfix
 options are provided as workarounds to such problems.
+When using either of these options, it's best to
+set
+.B --tun-mtu
+to 1500.
 
 OpenVPN
 adds a small amount of overhead to each tunnel packet before
@@ -930,7 +962,7 @@ Therefore, one could lower the maximum UDP packet size
 to 1300 (a good first try for solving MTU-related
 connection problems) with the following options:
 
-.B --fragment 1300 --mssfix
+.B --tun-mtu 1500 --fragment 1300 --mssfix
 .TP
 .B --shaper n
 Limit bandwidth of outgoing tunnel data to
@@ -979,7 +1011,8 @@ if no packets have been sent for at least
 .B n
 seconds (specify
 .B --ping
-on both peers to cause ping packets to be sent in both directions).
+on both peers to cause ping packets to be sent in both directions since
+OpenVPN ping packets are not echoed like IP ping packets).
 When used in one of OpenVPN's secure modes (where
 .B --secret, --tls-server,
 or
@@ -1402,10 +1435,28 @@ In OpenVPN, the vast majority of errors which occur after initialization are non
 .B --passtos
 Set the TOS field of the tunnel packet to what the payload's TOS is.
 .TP
-.B --inetd [progname]
+.B --inetd [wait|nowait] [progname]
 Use this option when OpenVPN is being run from the inetd or
 .BR xinetd(8)
 server.
+
+The
+.B wait/nowait
+option must match what is specified in the inetd/xinetd
+config file.  The
+.B nowait
+mode can only be used with
+.B --proto tcp-server.
+The default is
+.B wait.
+The
+.B nowait
+mode can be used to instantiate the OpenVPN daemon as a classic TCP server,
+where client connection requests are serviced on a single
+port number.  For additional information on this kind of configuration,
+see the OpenVPN FAQ:
+.I http://openvpn.sourceforge.net/faq.html#oneport
+
 This option precludes the use of
 .B --daemon, --local,
 or
@@ -1418,13 +1469,12 @@ option.  The optional
 parameter is also handled exactly as in
 .B --daemon.
 
-Also note that each OpenVPN tunnel requires a separate TCP/UDP port and
+Also note that in
+.B wait
+mode, each OpenVPN tunnel requires a separate TCP/UDP port and
 a separate inetd or xinetd entry.  See the OpenVPN HOWTO for an example
 on using OpenVPN with xinetd:
 .I http://openvpn.sourceforge.net/howto.html
-
-When starting OpenVPN via inetd or xinetd, make sure to use "wait" or
-"wait = yes" in the entry for OpenVPN.
 .TP
 .B --log file
 Output logging messages to
@@ -1631,7 +1681,7 @@ your peer (such as
 fact that your key never changes unless you manually generate a new one,
 makes it somewhat less secure than TLS mode (see below).  If an attacker
 manages to steal your key, everything that was ever encrypted with
-it is compromised.  Contrast that to the perfect forward security features of
+it is compromised.  Contrast that to the perfect forward secrecy features of
 TLS mode (using Diffie Hellman key exchange), where even if an attacker
 was able to steal your private key, he would gain no information to help
 him decrypt past sessions.
@@ -1916,7 +1966,7 @@ any mediation.  The result is the best of both worlds: a fast data channel
 that forwards over UDP with only the overhead of encrypt,
 decrypt, and HMAC functions,
 and a control channel that provides all of the security features of TLS,
-including certificate-based authentication and Diffie Hellman forward security.
+including certificate-based authentication and Diffie Hellman forward secrecy.
 
 To use TLS mode, each peer that runs OpenVPN should have its own local
 certificate/key pair (
@@ -2395,7 +2445,8 @@ When using
 .B --ifconfig
 on Windows, set the TAP-Win32 adapter
 IP address and netmask using
-.B method.
+.B method.  Don't use this option unless you are also using
+.B --ifconfig.
 
 .B manual --
 Don't set the IP address or netmask automatically.
@@ -2404,6 +2455,44 @@ to the console telling the user to configure the
 adapter manually and indicating the IP/netmask which
 OpenVPN expects the adapter to be set to.
 
+.B dynamic [offset] [lease-time] --
+Automatically set the IP address and netmask by replying to
+DHCP query messages generated by the kernel.  This mode is
+probably the "cleanest" solution
+for setting the TCP/IP properties since it uses the well-known
+DHCP interface.  There are, however, two prerequisites for using
+this mode: (1) The TCP/IP properties for the TAP-Win32
+adapter must be set to "Obtain an IP address automatically," and
+(2) OpenVPN needs to claim an IP address in the subnet for use
+as the virtual DHCP server address.  By default in
+.B --dev tap
+mode, OpenVPN will
+take the normally unused first address in the subnet.  For example,
+if your subnet is 192.168.4.0 netmask 255.255.255.0, then
+OpenVPN will take the IP address 192.168.4.0 to use as the
+virtual DHCP server address.  In
+.B --dev tun
+mode, OpenVPN will cause the DHCP server to masquerade as if it were
+coming from the remote endpoint.  The optional offset parameter is
+an integer which is > -256 and < 256 and which defaults to 0.
+If offset is positive, the DHCP server will masquerade as the IP
+address at network address + offset.
+If offset is negative, the DHCP server will masquerade as the IP
+address at broadcast address + offset.  The Windows
+.B ipconfig /all
+command can be used to show what Windows thinks the DHCP server
+address is.  OpenVPN will "claim" this address, so make sure to
+use a free address.  Having said that, different OpenVPN instantiations,
+including different ends of the same connection, can share the same
+virtual DHCP server address.  The
+.B lease-time
+parameter controls the lease time of the DHCP assignment given to
+the TAP-Win32 adapter.  It can be 'long'
+(1 month, default) or 'short' (60 seconds).  Normally 'long' is better
+because it prevents routes involving the TAP-Win32 adapter from
+being lost when the system goes to sleep.  'short' is provided
+for experimental purposes.
+
 .B netsh --
 Automatically set the IP address and netmask using
 the Windows command-line "netsh"
@@ -2411,17 +2500,13 @@ command.  This method appears to work correctly on
 Windows XP but not Windows 2000.
 
 .B ipapi --
-Set the IP address and netmask using the
-Windows IP Helper API (this is the default).  This approach
+(Default) Automatically set the IP address and netmask using the
+Windows IP Helper API.  This approach
 does not have ideal semantics, though testing has indicated
-that it works well in practice.  If you use this option,
+that it works okay in practice.  If you use this option,
 it is best to leave the TCP/IP properties for the TAP-Win32
 adapter in their default state, i.e. "Obtain an IP address
 automatically."
-
-.B dynamic --
-This option is not yet implemented, and is reserved for
-future use.
 .TP
 .B --tap-sleep n
 Cause OpenVPN to sleep for
@@ -2692,6 +2777,15 @@ script execution due to a restart will also see this variable.
 .TP
 .B tls_id_{n}
 A series of certificate fields from the remote peer,
+where
+.B n
+is the verification level.  Only set for TLS connections.  Set prior
+to execution of
+.B --tls-verify
+script.
+.TP
+.B tls_serial_{n}
+The serial number of the certificate from the remote peer,
 where
 .B n
 is the verification level.  Only set for TLS connections.  Set prior

@@ -198,8 +198,13 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 
 /*
  * If opt->use_iv is not NULL, we will read an IV from the packet.
+ *
+ * Set buf->len to 0 and return false on decrypt error.
+ *
+ * On success, buf is set to point to plaintext, true
+ * is returned.
  */
-void
+bool
 openvpn_decrypt (struct buffer *buf, struct buffer work,
 		 const struct crypto_options *opt,
 		 const struct frame* frame,
@@ -349,11 +354,11 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	}
       *buf = work;
     }
-  return;
+  return true;
 
  error_exit:
   buf->len = 0;
-  return;
+  return false;
 }
 
 /*

@@ -1,9 +1,9 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.22 2003/10/29 09:57:53 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.23 2003/11/01 10:46:53 jimyonan Exp $
 
-2003.10.xx -- Version 1.5-beta13
+2003.11.xx -- Version 1.5-beta13
 
 * Added CRL (certificate revocation list) capability using
   --crl-verify option (Stefano Bracalenti).
@@ -24,13 +24,35 @@ $Id: ChangeLog,v 1.86.2.22 2003/10/29 09:57:53 jimyonan Exp $
 * Added --key-method option for selecting alternative data
   channel key negotiation methods.  Method 1 is the default.
   Method 2 has been added (see man page for more info).
+* Added French translation of HOWTO to web site
+  (Guillaume Lehmann).
+* Fixed problem caused by late resolver library load on
+  certain platforms when --resolv-retry and --chroot are
+  used together (Teemu Kiviniemi).
+* In TCP mode, all decryption or TLS errors will abort the current
+  connection (this is not done in UDP mode because UDP is
+  "connectionless").
+* Fixed a TCP client reconnect bug that only occurs on the
+  BSDs, where connect() fails with an invalid argument.  This
+  bug was partially (but not completely) fixed in beta7.
+* Added "route_net_gateway" environmental variable which contains
+  the pre-existing default gateway address from the routing table
+  (there's no standard API for getting the default gateway, so
+  right now this feature only works on Windows or Linux).
+* Renamed the "route_default_gateway" enviromental variable to
+  "route_vpn_gateway" -- this is the remote VPN endpoint.
+* The special keywords vpn_gateway, net_gateway, and remote_host
+  can now be used for the network or gateway components of the
+  --route option.
+* Added the --redirect-gateway option to configure the VPN
+  as the default gateway (implemented on Linux and Windows only).
 
 2003.10.12 -- Version 1.5-beta12
 
 * Fixed Linux-only bug in --mktun and --rmtun which was
   introduced around beta8 or so, which would cause
   an error such as "I don't recognize device tun0 as a
-  tun or tap device".
+  tun or tap device1".
 * Added --ifconfig-nowarn option to disable options
   consistency warnings about --ifconfig parameters.
 * Don't allow any kind of sequence number backtracking or

@@ -244,6 +244,39 @@ possibly_become_daemon (int level, const struct options* options, const bool fir
 }
 
 /*
+ * Initialize the route list, resolving any DNS names in route
+ * options and saving routes in the environment.
+ */
+static void
+do_init_route_list (const struct options *options,
+		    struct route_list *route_list,
+		    struct link_socket *link_socket,
+		    bool fatal)
+{
+  const char *gw = NULL;
+  int dev = dev_type_enum (options->dev, options->dev_type);
+
+  if (dev == DEV_TYPE_TUN)
+    gw = options->ifconfig_remote_netmask;
+  if (options->route_default_gateway)
+    gw = options->route_default_gateway;
+
+  if (!init_route_list (route_list,
+			&options->routes,
+			gw,
+			link_socket_current_remote (link_socket)))
+    {
+      if (fatal)
+	openvpn_exit (OPENVPN_EXIT_STATUS_ERROR); /* exit point */
+    }
+  else
+    {  
+      /* copy routes to environment */
+      setenv_routes (route_list);
+    }
+}
+
+/*
  * Possibly add routes and/or call route-up script
  * based on options.
  */
@@ -275,6 +308,9 @@ do_open_tun (const struct options *options,
 
   if (!tuntap_defined (tuntap))
     {
+      /* parse and resolve the route option list */
+      do_init_route_list (options, route_list, link_socket, true);
+
       /* do ifconfig */
       if (!options->ifconfig_noexec
 	  && ifconfig_order() == IFCONFIG_BEFORE_TUN_OPEN)
@@ -369,6 +405,29 @@ signal_description (int signum, const char *sigtext)
       default:
 	return "unknown";
       }
+    }
+}
+
+static void
+print_signal (int signum)
+{
+  switch (signum)
+    {
+    case SIGINT:
+      msg (M_INFO, "SIGINT received, exiting");
+      break;
+    case SIGTERM:
+      msg (M_INFO, "SIGTERM received, exiting");
+      break;
+    case SIGHUP:
+      msg (M_INFO, "SIGHUP received, restarting");
+      break;
+    case SIGUSR1:
+      msg (M_INFO, "SIGUSR1 received, restarting");
+      break;
+    default:
+      msg (M_INFO, "Unknown signal %d received", signal_received);
+      break;
     }
 }
 
@@ -1153,7 +1212,15 @@ openvpn (const struct options *options,
       get_pid_file (options->writepid, &pid_state);
 
       /* chroot if requested */
-      do_chroot (options->chroot_dir);
+      if (options->chroot_dir)
+        {
+          /* do a dummy DNS lookup before entering the chroot jail
+             to load the resolver libraries */
+          if (options->remote)
+            (void) gethostbyname (options->remote);
+          
+          do_chroot (options->chroot_dir);
+        }
     }
 
   /* become a daemon if --daemon */
@@ -1192,6 +1259,7 @@ openvpn (const struct options *options,
 #if 0
       signal_text = "socket";
 #endif
+      print_signal (signal_received);
       goto cleanup;
     }
   
@@ -1316,6 +1384,15 @@ openvpn (const struct options *options,
 	      timeval.tv_sec = wakeup;
 	      timeval.tv_usec = 0;
 	    }
+	}
+
+      if (link_socket_connection_oriented (&link_socket) && tls_multi->n_errors)
+	{
+	  /* TLS errors are fatal in TCP mode */
+	  signal_received = SIGUSR1;
+	  msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
+	  signal_text = "tls-error";
+	  break;
 	}
 #endif
 
@@ -1749,25 +1826,9 @@ openvpn (const struct options *options,
 	      continue;
 	    }
 
+	  print_signal (signal_received);
+
 	  /* for all other signals (INT, TERM, HUP, USR1) we break */
-	  switch (signal_received)
-	    {
-	    case SIGINT:
-	      msg (M_INFO, "SIGINT received, exiting");
-	      break;
-	    case SIGTERM:
-	      msg (M_INFO, "SIGTERM received, exiting");
-	      break;
-	    case SIGHUP:
-	      msg (M_INFO, "SIGHUP received, restarting");
-	      break;
-	    case SIGUSR1:
-	      msg (M_INFO, "SIGUSR1 received, restarting");
-	      break;
-	    default:
-	      msg (M_INFO, "Unknown signal %d received", signal_received);
-	      break;
-	    }
 	  break;
 	}
 
@@ -1798,12 +1859,12 @@ openvpn (const struct options *options,
 		  if (options->inetd)
 		    {
 		      signal_received = SIGTERM;
-		      msg (M_INFO, "Connection reset, inetd/xinetd exit [%d]", status);
+		      msg (D_STREAM_ERRORS, "Connection reset, inetd/xinetd exit [%d]", status);
 		    }
 		  else
 		    {
 		      signal_received = SIGUSR1;
-		      msg (M_INFO, "Connection reset, restarting [%d]", status);
+		      msg (D_STREAM_ERRORS, "Connection reset, restarting [%d]", status);
 		    }
 		  signal_text = "connection-reset";
 		  break;		  
@@ -1885,7 +1946,17 @@ openvpn (const struct options *options,
 		    }
 #endif /* USE_SSL */
 		  /* authenticate and decrypt the incoming packet */
-		  openvpn_decrypt (&buf, decrypt_buf, &crypto_options, &frame, current);
+		  if (!openvpn_decrypt (&buf, decrypt_buf, &crypto_options, &frame, current))
+		    {
+		      if (link_socket_connection_oriented (&link_socket))
+			{
+			  /* decryption errors are fatal in TCP mode */
+			  signal_received = SIGUSR1;
+			  msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
+			  signal_text = "decryption-error";
+			  break;
+			}
+		    }
 #ifdef USE_SSL
 		  mutex_unlock (L_TLS);
 #endif /* USE_SSL */
@@ -2793,24 +2864,11 @@ main (int argc, char *argv[])
 	CLEAR (ks);
 	clear_tuntap (&tuntap);
 	packet_id_persist_init (&pid_persist);
-
-	/* init route list */
-	{
-	  const char *gw = NULL;
-
-	  if (dev == DEV_TYPE_TUN)
-	    gw = options.ifconfig_remote_netmask;
-	  if (options.route_default_gateway)
-	    gw = options.route_default_gateway;
-
-	  if (!init_route_list (&route_list, &options.routes, gw))
-	    openvpn_exit (OPENVPN_EXIT_STATUS_ERROR); /* exit point */
-
-	  /* copy routes to environment */
-	  setenv_routes (&route_list);
-	}
+	clear_route_list (&route_list);
 
 	do {
+	  if (!first_time)
+	    socket_restart_pause (options.proto);
 	  sig = openvpn (&options, &usa, &tuntap, &ks, &pid_persist, &route_list, first_time);
 	  first_time = false;
 	} while (sig == SIGUSR1);

@@ -73,6 +73,12 @@ struct stream_buf
 		  requiring that connection be restarted */
 };
 
+#ifdef WIN32
+typedef SOCKET socket_descriptor_t;
+#else
+typedef int socket_descriptor_t;
+#endif
+
 /*
  * This is the main socket structure used by OpenVPN.  The SOCKET_
  * defines try to abstract away our implementation differences between
@@ -93,7 +99,6 @@ struct link_socket
 # define SOCKET_SETMAXFD(sock)
 # define SOCKET_READ_STAT(sock)  (overlapped_io_state_ascii (&sock.reads,  "sr"))
 # define SOCKET_WRITE_STAT(sock) (overlapped_io_state_ascii (&sock.writes, "sw"))
-  SOCKET sd;
   struct overlapped_io reads;
   struct overlapped_io writes;
 #else
@@ -105,8 +110,9 @@ struct link_socket
 # define SOCKET_SETMAXFD(sock) { wait_update_maxfd (&event_wait, sock.sd); }
 # define SOCKET_READ_STAT(sock)  (SOCKET_ISSET (sock, reads) ?  "SR" : "sr")
 # define SOCKET_WRITE_STAT(sock) (SOCKET_ISSET (sock, writes) ? "SW" : "sw")
-  int sd;			/* file descriptor for socket */
 #endif
+
+  socket_descriptor_t sd;
 
   /* set on initial call to init phase 1 */
   const char *local_host;
@@ -218,6 +224,10 @@ void setenv_sockaddr (const char *name_prefix,
 		      const struct sockaddr_in *addr);
 
 void bad_address_length (int actual, int expected);
+
+void socket_restart_pause (int proto);
+
+in_addr_t link_socket_current_remote (const struct link_socket *sock);
 
 /*
  * DNS resolution

@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "29 October 2003"
+.TH openvpn 8 "1 November 2003"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -152,6 +152,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-ping\fR\ \fIn\fR\ ]
 [\ \fB\-\-port\fR\ \fIport\fR\ ]
 [\ \fB\-\-proto\fR\ \fIp\fR\ ]
+[\ \fB\-\-redirect\-gateway\fR\ ]
 [\ \fB\-\-remote\fR\ \fIhost\fR\ ]
 [\ \fB\-\-reneg\-bytes\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-pkts\fR\ \fIn\fR\ ]
@@ -605,7 +606,27 @@ and
 .B gateway
 parameters can
 also be specified as a DNS or /etc/hosts
-file resolvable name.
+file resolvable name, or as one of three special keywords:
+
+.B vpn_gateway
+-- The remote VPN endpoint address
+(derived either from
+.B --route-gateway
+or the second parameter to
+.B --ifconfig
+when
+.B --dev tun
+is specified).
+
+.B net_gateway
+-- The pre-existing IP default gateway, read from the routing
+table (Linux and Windows only).
+
+.B remote_host
+-- The
+.B --remote
+address, or the address of a connecting client if OpenVPN
+is being run in server mode.
 .TP
 .B --route-gateway gw
 Specify a default gateway
@@ -659,6 +680,35 @@ can be a shell command with multiple arguments.
 Don't add or remove routes automatically.  Instead pass routes to
 .B --route-up
 script using environmental variables.
+.TP
+.B --redirect-gateway
+Automatically execute routing commands to cause all outgoing IP traffic
+to be redirected over the VPN.  Currently implemented only on Linux and Windows.
+
+This option performs three steps:
+
+.B (1)
+Create a static route for the
+.B --remote
+address which forwards to the pre-existing default gateway.
+This is done so that
+.B (3)
+will not create a routing loop.
+
+.B (2)
+Delete the default gateway route.
+
+.B (3)
+Set the new default gateway to be the VPN endpoint address (derived either from
+.B --route-gateway
+or the second parameter to
+.B --ifconfig
+when
+.B --dev tun
+is specified).
+
+When the tunnel is torn down, all of the above steps are reversed so
+that the original default route is restored.
 .TP
 .B --link-mtu n
 Take the link device MTU to be n and derive the TUN MTU
@@ -2550,7 +2600,14 @@ or
 .B --rport.
 Set on program initiation and reset on SIGHUP.
 .TP
-.B route_default_gateway
+.B route_net_gateway
+The pre-existing default IP gateway in the system routing
+table.
+Set prior to
+.B --up
+script execution.
+.TP
+.B route_vpn_gateway
 The default gateway used by
 .B --route
 options, as specified in either the
@@ -2560,13 +2617,15 @@ option or the second parameter to
 when
 .B --dev tun
 is specified.
-
 Set prior to
-.B --route-up
+.B --up
 script execution.
 .TP
 .B route_{parm}_{n}
-A set of variables which define each route to be added.
+A set of variables which define each route to be added, and
+are set prior to
+.B --up
+script execution.
 
 .B parm
 will be one of "network", "netmask", "gateway", or "metric".

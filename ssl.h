@@ -366,6 +366,16 @@ struct tls_multi
   int n_sessions;
 
   /*
+   * Number of errors.
+   *
+   * Includes:
+   *   (a) errors due to TLS negotiation failure
+   *   (b) errors due to unrecognized or failed-to-authenticate
+   *       incoming packets
+   */
+  int n_errors;
+
+  /*
    * Our session objects.
    */
   struct tls_session session[TM_SIZE];

@@ -47,6 +47,7 @@
 
 static void add_route (struct route *r);
 static void delete_route (const struct route *r);
+static bool get_default_gateway (in_addr_t *ret);
 
 static const char *
 route_string (const struct route *r)
@@ -79,15 +80,57 @@ setenv_route_addr (const char *key, const in_addr_t addr, int i)
   if (i >= 0)
     openvpn_snprintf (name, sizeof (name), "route_%s_%d", key, i);
   else
-    openvpn_snprintf (name, sizeof (name), "route_default_%s", key);
+    openvpn_snprintf (name, sizeof (name), "route_%s", key);
   setenv_str (name, print_in_addr_t (addr, false));
+}
+
+static bool
+get_special_addr (const struct route_special_addr *spec,
+		  const char *string,
+		  in_addr_t *out,
+		  bool *status)
+{
+  *status = true;
+  if (!strcmp (string, "vpn_gateway"))
+    {
+      if (spec->remote_endpoint_defined)
+	*out = spec->remote_endpoint;
+      else
+	{
+	  msg (M_INFO, "OpenVPN ROUTE: vpn_gateway undefined");
+	  *status = false;
+	}
+      return true;
+    }
+  else if (!strcmp (string, "net_gateway"))
+    {
+      if (spec->net_gateway_defined)
+	*out = spec->net_gateway;
+      else
+	{
+	  msg (M_INFO, "OpenVPN ROUTE: net_gateway undefined -- unable to get default gateway from system");
+	  *status = false;
+	}
+      return true;
+    }
+  else if (!strcmp (string, "remote_host"))
+    {
+      if (spec->remote_host_defined)
+	*out = spec->remote_host;
+      else
+	{
+	  msg (M_INFO, "OpenVPN ROUTE: remote_host undefined");
+	  *status = false;
+	}
+      return true;
+    }
+  return false;
 }
 
 static bool
 init_route (struct route *r,
 	    const struct route_option *ro,
-	    in_addr_t default_gateway,
-	    bool default_gateway_defined)
+	    const struct route_special_addr *spec)
 {
   const in_addr_t default_netmask = ~0;
   bool status;
@@ -101,14 +144,19 @@ init_route (struct route *r,
     {
       goto fail;
     }
-  r->network = getaddr (
-			GETADDR_RESOLVE
-			| GETADDR_HOST_ORDER
-			| GETADDR_FATAL_ON_SIGNAL,
-			ro->network,
-			0,
-			&status,
-			NULL);
+  
+  if (!get_special_addr (spec, ro->network, &r->network, &status))
+    {
+      r->network = getaddr (
+			    GETADDR_RESOLVE
+			    | GETADDR_HOST_ORDER
+			    | GETADDR_FATAL_ON_SIGNAL,
+			    ro->network,
+			    0,
+			    &status,
+			    NULL);
+    }
+
   if (!status)
     goto fail;
 
@@ -133,24 +181,27 @@ init_route (struct route *r,
 
   if (is_route_parm_defined (ro->gateway))
     {
-      r->gateway = getaddr (
-			    GETADDR_RESOLVE
-			    | GETADDR_HOST_ORDER
-			    | GETADDR_FATAL_ON_SIGNAL,
-			    ro->gateway,
-			    0,
-			    &status,
-			    NULL);
+      if (!get_special_addr (spec, ro->gateway, &r->gateway, &status))
+	{
+	  r->gateway = getaddr (
+				GETADDR_RESOLVE
+				| GETADDR_HOST_ORDER
+				| GETADDR_FATAL_ON_SIGNAL,
+				ro->gateway,
+				0,
+				&status,
+				NULL);
+	}
       if (!status)
 	goto fail;
     }
   else
     {
-      if (default_gateway_defined)
-	r->gateway = default_gateway;
+      if (spec->remote_endpoint_defined)
+	r->gateway = spec->remote_endpoint;
       else
 	{
-	  msg (M_WARN, "OpenVPN ROUTE: OpenVPN needs a gateway parameter for a --route option and no default was specified by either --route-gateway --ifconfig options");
+	  msg (M_WARN, "OpenVPN ROUTE: OpenVPN needs a gateway parameter for a --route option and no default was specified by either --route-gateway or --ifconfig options");
 	  goto fail;
 	}
     }
@@ -216,37 +267,51 @@ clear_route_list (struct route_list *rl)
 bool
 init_route_list (struct route_list *rl,
 		 const struct route_option_list *opt,
-		 const char *default_gateway)
+		 const char *remote_endpoint,
+		 in_addr_t remote_host)
 {
   int i;
   bool ret = true;
 
   clear_route_list (rl);
 
-  if (is_route_parm_defined (default_gateway))
+  if (remote_host)
     {
-      rl->default_gateway = getaddr (
+      rl->spec.remote_host = remote_host;
+      rl->spec.remote_host_defined = true;
+    }
+
+  rl->spec.net_gateway_defined = get_default_gateway (&rl->spec.net_gateway);
+  if (rl->spec.remote_endpoint_defined)
+    {
+      setenv_route_addr ("net_gateway", rl->spec.net_gateway, -1);
+    }
+  rl->redirect_default_gateway = opt->redirect_default_gateway;
+
+  if (is_route_parm_defined (remote_endpoint))
+    {
+      rl->spec.remote_endpoint = getaddr (
 				     GETADDR_RESOLVE
 				     | GETADDR_HOST_ORDER
 				     | GETADDR_FATAL_ON_SIGNAL,
-				     default_gateway,
+				     remote_endpoint,
 				     0,
-				     &rl->default_gateway_defined,
+				     &rl->spec.remote_endpoint_defined,
 				     NULL);
 
-      if (rl->default_gateway_defined)
+      if (rl->spec.remote_endpoint_defined)
 	{
-	  setenv_route_addr ("gateway", rl->default_gateway, -1);
+	  setenv_route_addr ("vpn_gateway", rl->spec.remote_endpoint, -1);
 	}
       else
 	{
 	  msg (M_WARN, "OpenVPN ROUTE: failed to parse/resolve default gateway: %s",
-	       default_gateway);
+	       remote_endpoint);
 	  ret = false;
 	}
     }
   else
-    rl->default_gateway_defined = false;
+    rl->spec.remote_endpoint_defined = false;
 
   ASSERT (opt->n >= 0 && opt->n < MAX_ROUTES);
 
@@ -254,8 +319,7 @@ init_route_list (struct route_list *rl,
     {
       if (!init_route (&rl->routes[i],
 		       &opt->routes[i],
-		       rl->default_gateway,
-		       rl->default_gateway_defined))
+		       &rl->spec))
 	ret = false;
     }
 
@@ -263,9 +327,103 @@ init_route_list (struct route_list *rl,
   return ret;
 }
 
+static void
+add_route3 (in_addr_t network,
+	    in_addr_t netmask,
+	    in_addr_t gateway)
+{
+  struct route r;
+  CLEAR (r);
+  r.defined = true;
+  r.network = network;
+  r.netmask = netmask;
+  r.gateway = gateway;
+  add_route (&r);
+}
+
+static void
+del_route3 (in_addr_t network,
+	    in_addr_t netmask,
+	    in_addr_t gateway)
+{
+  struct route r;
+  CLEAR (r);
+  r.defined = true;
+  r.network = network;
+  r.netmask = netmask;
+  r.gateway = gateway;
+  delete_route (&r);
+}
+
+static void
+redirect_default_route_to_vpn (struct route_list *rl)
+{
+  const char err[] = "NOTE: unable to redirect default gateway --";
+
+  if (rl->redirect_default_gateway)
+    {
+      if (!rl->spec.remote_endpoint_defined)
+	{
+	  msg (M_WARN, "%s VPN gateway parameter (--route-gateway or --ifconfig) is missing", err);
+	}
+      else if (!rl->spec.net_gateway_defined)
+	{
+	  msg (M_WARN, "%s Cannot read current default gateway from system", err);
+	}
+      else if (!rl->spec.remote_host_defined)
+	{
+	  msg (M_WARN, "%s Cannot obtain current remote host address", err);
+	}
+      else
+	{
+	  /* route remote host to original default gateway */
+	  add_route3 (rl->spec.remote_host,
+		      ~0,
+		      rl->spec.net_gateway);
+
+	  /* delete default route */
+	  del_route3 (0,
+		      0,
+		      rl->spec.net_gateway);
+
+	  /* add new default route */
+	  add_route3 (0,
+		      0,
+		      rl->spec.remote_endpoint);
+
+	  rl->did_redirect_default_gateway = true;
+	}
+    }
+}
+
+static void
+undo_redirect_default_route_to_vpn (struct route_list *rl)
+{
+  if (rl->did_redirect_default_gateway)
+    {
+      /* delete remote host route */
+      del_route3 (rl->spec.remote_host,
+		  ~0,
+		  rl->spec.net_gateway);
+
+      /* delete default route */
+      del_route3 (0,
+		  0,
+		  rl->spec.remote_endpoint);
+
+      /* restore original default route */
+      add_route3 (0,
+		  0,
+		  rl->spec.net_gateway);
+
+      rl->did_redirect_default_gateway = false;
+    }
+}
+
 void
 add_routes (struct route_list *rl, bool delete_first)
-{  
+{
+  redirect_default_route_to_vpn (rl);
   if (!rl->routes_added)
     {
       int i;
@@ -292,6 +450,7 @@ delete_routes (struct route_list *rl)
 	}
       rl->routes_added = false;
     }
+  undo_redirect_default_route_to_vpn (rl);
 }
 
 static const char *
@@ -318,6 +477,8 @@ print_route_options (const struct route_option_list *rol,
 		     int level)
 {
   int i;
+  if (rol->redirect_default_gateway)
+    msg (level, "  [redirect_default_gateway]");
   for (i = 0; i < rol->n; ++i)
     print_route_option (&rol->routes[i], level);
 }
@@ -542,3 +703,106 @@ delete_route (const struct route *r)
 
   gc_free_level (gc_level);
 }
+
+/*
+ * The --redirect-gateway option requires OS-specific code below
+ * to get the current default gateway.
+ */
+
+#if defined(WIN32)
+
+static bool
+get_default_gateway (in_addr_t *ret)
+{
+  ULONG size = 0;
+  DWORD status;
+
+  if ((status = GetIpForwardTable (NULL, &size, TRUE)) == ERROR_INSUFFICIENT_BUFFER)
+    {
+      int i;
+      PMIB_IPFORWARDTABLE routes = (PMIB_IPFORWARDTABLE) gc_malloc (size);
+      ASSERT (routes);
+      if ((status = GetIpForwardTable (routes, &size, TRUE)) != NO_ERROR)
+	return false;
+
+      for (i = 0; i < routes->dwNumEntries; ++i)
+	{
+	  const MIB_IPFORWARDROW *row = &routes->table[i];
+	  const in_addr_t net = ntohl (row->dwForwardDest);
+	  const in_addr_t mask = ntohl (row->dwForwardMask);
+	  const in_addr_t gw = ntohl (row->dwForwardNextHop);
+
+#if 0
+	  msg (M_INFO, "route[%d] %s %s %s",
+	       i,
+	       print_in_addr_t ((in_addr_t) net, false),
+	       print_in_addr_t ((in_addr_t) mask, false),
+	       print_in_addr_t ((in_addr_t) gw, false));
+#endif
+
+	  if (!net && !mask)
+	    {
+	      *ret = gw;
+	      return true;
+	    }
+	}
+    }
+  return false;
+}
+
+#elif defined(TARGET_LINUX)
+
+static bool
+get_default_gateway (in_addr_t *ret)
+{
+  FILE *fp = fopen ("/proc/net/route", "r");
+  if (fp)
+    {
+      char line[256];
+      int count = 0;
+      while (fgets (line, sizeof (line), fp) != NULL)
+	{
+	  if (count)
+	    {
+	      unsigned int net_x = 0;
+	      unsigned int mask_x = 0;
+	      unsigned int gw_x = 0;
+	      const int np = sscanf (line, "%*s\t%x\t%x\t%*s\t%*s\t%*s\t%*s\t%x",
+				     &net_x,
+				     &gw_x,
+				     &mask_x);
+	      if (np == 3)
+		{
+		  const in_addr_t net = ntohl (net_x);
+		  const in_addr_t mask = ntohl (mask_x);
+		  const in_addr_t gw = ntohl (gw_x);
+#if 0
+		  msg (M_INFO, "route %s %s %s",
+		       print_in_addr_t ((in_addr_t) net, false),
+		       print_in_addr_t ((in_addr_t) mask, false),
+		       print_in_addr_t ((in_addr_t) gw, false));
+#endif
+		  if (!net && !mask)
+		    {
+		      fclose (fp);
+		      *ret = gw;
+		      return true;
+		    }
+		}
+	    }
+	  ++count;
+	}
+      fclose (fp);
+    }
+  return false;
+}
+
+#else
+
+static bool
+get_default_gateway (in_addr_t *ret)
+{
+  return false;
+}
+
+#endif

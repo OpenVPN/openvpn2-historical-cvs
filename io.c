@@ -333,7 +333,7 @@ semaphore_lock (struct semaphore *s, int timeout_milliseconds)
   ASSERT (s->hand);
   ASSERT (!s->locked);
 
-  msg (M_INFO, "Attempting to lock Win32 semaphore '%s' prior to net shell command (timeout = %d sec)",
+  msg (D_SEMAPHORE_LOW, "Attempting to lock Win32 semaphore '%s' prior to net shell command (timeout = %d sec)",
        s->name,
        timeout_milliseconds / 1000);
   status = WaitForSingleObject (s->hand, timeout_milliseconds);

@@ -291,7 +291,7 @@ void openvpn_encrypt (struct buffer *buf, struct buffer work,
 		      const struct frame* frame,
 		      const time_t current);
 
-void openvpn_decrypt (struct buffer *buf, struct buffer work,
+bool openvpn_decrypt (struct buffer *buf, struct buffer work,
 		      const struct crypto_options *opt,
 		      const struct frame* frame,
 		      const time_t current);

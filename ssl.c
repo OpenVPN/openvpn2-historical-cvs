@@ -2282,6 +2282,7 @@ tls_multi_process (struct tls_multi *multi,
 	   */
 	  if (ks->state == S_ERROR)
 	    {
+	      ++multi->n_errors;
 	      if (i == TM_ACTIVE && ks_lame->state >= S_ACTIVE)
 		move_session (multi, TM_LAME_DUCK, TM_ACTIVE, true);
 	      else
@@ -2674,6 +2675,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	  msg (D_TLS_ERRORS,
 	       "TLS Error: Unknown data channel key ID or IP address received from %s: %d",
 	       print_sockaddr (from), key_id);
+	  goto error;
 	}
       else			  /* control channel packet */
 	{
@@ -2687,7 +2689,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	      msg (D_TLS_ERRORS,
 		   "TLS Error: unknown opcode received from %s op=%d",
 		   print_sockaddr (from), op);
-	      goto done;
+	      goto error;
 	    }
 
 	  /* hard reset ? */
@@ -2700,7 +2702,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  msg (D_TLS_ERRORS,
 		       "TLS Error: client->client or server->server connection attempted from %s",
 		       print_sockaddr (from));
-		  goto done;
+		  goto error;
 		}
 	    }
 
@@ -2719,7 +2721,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		msg (D_TLS_ERRORS,
 		     "TLS Error: session-id not found in packet from %s",
 		     print_sockaddr (from));
-		goto done;
+		goto error;
 	      }
 	  }
 
@@ -2746,7 +2748,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		    msg (D_TLS_ERRORS,
 			 "TLS ERROR: received control packet with stale session-id=%s",
 			 session_id_print (&sid));
-		    goto done;
+		    goto error;
 		  }
 		  msg (D_TLS_DEBUG,
 		       "tls_pre_decrypt: found match, session[%d], sid=%s",
@@ -2770,7 +2772,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  msg (D_TLS_ERRORS, "TLS ERROR: first response local/remote key_method mismatch, local key_method=%d, op=%s",
 		       multi->opt.key_method,
 		       packet_opcode_name (op));
-		  goto done;
+		  goto error;
 		}
 
 	      if (!session_id_defined (&ks->session_id_remote))
@@ -2799,11 +2801,11 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  msg (D_TLS_ERRORS, "TLS ERROR: new session local/remote key_method mismatch, local key_method=%d, op=%s",
 		       multi->opt.key_method,
 		       packet_opcode_name (op));
-		  goto done;
+		  goto error;
 		}
 
 	      if (!read_control_auth (buf, &session->tls_auth, from, current))
-		goto done;
+		goto error;
 
 	      /*
 	       * New session-initiating control packet is authenticated at this point,
@@ -2834,7 +2836,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		       print_sockaddr (from),
 		       i,
 		       packet_opcode_name (op));
-		  goto done;
+		  goto error;
 		}
 
 	      /*
@@ -2844,7 +2846,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		{
 		  msg (D_TLS_ERRORS, "TLS Error: Received control packet from unexpected IP addr: %s",
 		      print_sockaddr (from));
-		  goto done;
+		  goto error;
 		}
 
 	      /*
@@ -2854,7 +2856,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  && DECRYPT_KEY_ENABLED (multi, ks))
 		{
 		  if (!read_control_auth (buf, &session->tls_auth, from, current))
-		    goto done;
+		    goto error;
 
 		  key_state_soft_reset (session, current);
 
@@ -2871,7 +2873,8 @@ tls_pre_decrypt (struct tls_multi *multi,
 		    do_burst = true;
 
 		  if (!read_control_auth (buf, &session->tls_auth, from, current))
-		    goto done;
+		    goto error;
+
 		  msg (D_TLS_DEBUG,
 		       "tls_pre_decrypt: received control channel packet s#=%d sid=%s",
 		       i, session_id_print (&sid));
@@ -2886,7 +2889,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	      msg (D_TLS_ERRORS,
 		   "TLS Error: Cannot accept new session request from %s due to --single-session",
 		   print_sockaddr (from));
-	      goto done;
+	      goto error;
 	    }
 
 	  /*
@@ -2920,7 +2923,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		msg (D_TLS_ERRORS,
 		     "TLS Error: Existing session control channel packet from unknown IP address: %s",
 		     print_sockaddr (from));
-		goto done;
+		goto error;
 	      }
 
 	    /*
@@ -2940,7 +2943,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		msg (D_TLS_ERRORS,
 		     "TLS ERROR: local/remote key IDs out of sync (%d/%d) ID: %s",
 		     ks->key_id, key_id, print_key_id (multi));
-		goto done;
+		goto error;
 	      }
 	      
 	    /*
@@ -2956,7 +2959,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		{
 		  msg (D_TLS_ERRORS,
 		       "TLS Error: reading acknowledgement record from packet");
-		  goto done;
+		  goto error;
 		}
 	      reliable_send_purge (&ks->send_reliable, &send_ack);
 	    }
@@ -2988,6 +2991,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	  }
 	}
     }
+
  done:
   buf->len = 0;
   opt->key_ctx_bi = NULL;
@@ -2995,6 +2999,10 @@ tls_pre_decrypt (struct tls_multi *multi,
   opt->pid_persist = NULL;
   opt->packet_id_long_form = false;
   return ret;
+
+ error:
+  ++multi->n_errors;
+  goto done;
 }
 
 /* Choose the key with which to encrypt a data packet */

@@ -48,6 +48,7 @@
 #define D_COMP_ERRORS        LOGLEV(1, 14, M_NONFATAL)   /* show compression errors */
 #define D_PID_PERSIST        LOGLEV(1, 15, M_NONFATAL)   /* show packet_id persist errors */
 #define D_FRAG_ERRORS        LOGLEV(1, 16, M_NONFATAL)   /* show fragmentation errors */
+#define D_STREAM_ERRORS      LOGLEV(1, 17, M_NONFATAL)   /* TCP stream error requiring restart */
 
 #define D_HANDSHAKE          LOGLEV(2, 20, 0)        /* show data & control channel handshakes */
 #define D_MTU_INFO           LOGLEV(2, 21, 0)        /* show terse MTU info */
@@ -60,17 +61,19 @@
 #define D_GENKEY             LOGLEV(3, 32, 0)        /* print message after key generation */
 #define D_ROUTE              LOGLEV(3, 33, 0)        /* show routes added and deleted */
 #define D_TUNTAP_INFO        LOGLEV(3, 34, 0)        /* show debugging info from TUN/TAP driver */
+#define D_RESTART            LOGLEV(3, 35, 0)        /* show certain restart messages */
 
 #define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
 #define D_SHOW_OCC           LOGLEV(4, 41, 0)        /* show options compatibility string */
 #define D_MSS                LOGLEV(4, 42, 0)        /* show MSS adjustments */
 #define D_BACKTRACK          LOGLEV(4, 43, 0)        /* show replay backtracks */
+#define D_SEMAPHORE_LOW      LOGLEV(4, 44, 0)        /* show Win32 semaphore waits (low freq) */
 
 #define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 
 #define D_LINK_RW            LOGLEV(6, 60, M_DEBUG)  /* show TCP/UDP reads/writes (terse) */
 
-#define D_SHOW_KEYS          LOGLEV(4, 70, M_DEBUG)  /* show data channel encryption keys (JYFIXME) */
+#define D_SHOW_KEYS          LOGLEV(7, 70, M_DEBUG)  /* show data channel encryption keys */
 #define D_SHOW_KEY_SOURCE    LOGLEV(7, 70, M_DEBUG)  /* show data channel key source entropy */
 #define D_REL_LOW            LOGLEV(7, 70, M_DEBUG)  /* show low frequency info from reliable layer */
 #define D_FRAG_DEBUG         LOGLEV(7, 70, M_DEBUG)  /* show fragment debugging info */

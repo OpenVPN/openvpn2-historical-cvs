@@ -119,6 +119,11 @@ packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin, time_t 
 	  && current > SEQ_EXPIRED)
 	CIRC_LIST_ITEM (p->seq_list, diff) = current;
     }
+  else
+    {
+      p->time = pin->time;
+      p->id = pin->id;
+    }
 }
 
 /*

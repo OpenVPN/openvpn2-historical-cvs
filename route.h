@@ -32,6 +32,16 @@
 
 #define MAX_ROUTES 50
 
+struct route_special_addr
+{
+  in_addr_t remote_endpoint;
+  bool remote_endpoint_defined;
+  in_addr_t net_gateway;
+  bool net_gateway_defined;
+  in_addr_t remote_host;
+  bool remote_host_defined;
+};
+
 struct route_option {
   const char *network;
   const char *netmask;
@@ -41,6 +51,7 @@ struct route_option {
 
 struct route_option_list {
   int n;
+  bool redirect_default_gateway;
   struct route_option routes[MAX_ROUTES];
 };
 
@@ -56,8 +67,10 @@ struct route {
 
 struct route_list {
   bool routes_added;
-  in_addr_t default_gateway;
-  bool default_gateway_defined;
+  struct route_special_addr spec;
+  bool redirect_default_gateway;
+  bool did_redirect_default_gateway;
+
   int n;
   struct route routes[MAX_ROUTES];
 };
@@ -72,7 +85,8 @@ void clear_route_list (struct route_list *rl);
 
 bool init_route_list (struct route_list *rl,
 		      const struct route_option_list *opt,
-		      const char *default_gateway);
+		      const char *remote_endpoint,
+		      in_addr_t remote_host);
 
 void add_routes (struct route_list *rl,
 		 bool delete_first);

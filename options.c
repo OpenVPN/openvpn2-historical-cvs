@@ -118,6 +118,8 @@ static const char usage_message[] =
   "--route-up cmd  : Execute shell cmd after routes are added.\n"
   "--route-noexec  : Don't add routes automatically.  Instead pass routes to\n"
   "                  --route-up script using environmental variables.\n"
+  "--redirect-gateway : Automatically execute routing commands to cause all\n"
+  "                     outgoing IP traffic to be redirected into the VPN.\n"
   "--setenv name value : Set a custom environmental variable to pass to script.\n"
   "--shaper n      : Restrict output to peer to n bytes per second.\n"
   "--inactive n    : Exit after n seconds of inactivity on TUN/TAP device.\n"
@@ -772,7 +774,7 @@ usage (void)
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   fprintf (fp, usage_message,
 	   title_string, o.local_port, o.remote_port,
-	   TAP_MTU_DEFAULT, o.tun_mtu_extra, o.link_mtu,
+	   TAP_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT, LINK_MTU_DEFAULT,
 	   o.verbosity,
 	   o.authname, o.ciphername,
            o.replay_window, o.replay_time,
@@ -781,14 +783,14 @@ usage (void)
 #elif defined(USE_CRYPTO)
   fprintf (fp, usage_message,
 	   title_string, o.local_port, o.remote_port,
-	   TAP_MTU_DEFAULT, o.tun_mtu_extra, o.link_mtu,
+	   TAP_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT, LINK_MTU_DEFAULT,
 	   o.verbosity,
 	   o.authname, o.ciphername,
            o.replay_window, o.replay_time);
 #else
   fprintf (fp, usage_message,
 	   title_string, o.local_port, o.remote_port,
-	   TAP_MTU_DEFAULT, o.tun_mtu_extra, o.link_mtu,
+	   TAP_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT, LINK_MTU_DEFAULT,
 	   o.verbosity);
 #endif
   fflush(fp);
@@ -1356,6 +1358,10 @@ add_option (struct options *options, int i, char *p[],
   else if (streq (p[0], "route-noexec"))
     {
       options->route_noexec = true;
+    }
+  else if (streq (p[0], "redirect-gateway"))
+    {
+      options->routes.redirect_default_gateway = true;
     }
   else if (streq (p[0], "setenv") && p[1] && p[2])
     {

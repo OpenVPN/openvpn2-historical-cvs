@@ -199,11 +199,76 @@ update_remote (const char* host,
 }
 
 /*
+ * SOCKET INITALIZATION CODE.
+ * Create a TCP/UDP socket
+ */
+
+static socket_descriptor_t
+create_socket_tcp (void)
+{
+  socket_descriptor_t sd;
+
+  if ((sd = socket (PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+    msg (M_SOCKERR, "Cannot create TCP socket");
+
+  /* set SO_REUSEADDR on socket */
+  {
+    int on = 1;
+    if (setsockopt (sd, SOL_SOCKET, SO_REUSEADDR,
+		    (void *) &on, sizeof (on)) < 0)
+      msg (M_SOCKERR, "Cannot setsockopt SO_REUSEADDR on TCP socket");
+  }
+
+#if 0
+  /* set socket linger options */
+  {
+    struct linger linger;
+    linger.l_onoff = 1;
+    linger.l_linger = 2;
+    if (setsockopt (sd, SOL_SOCKET, SO_LINGER,
+		    (void *) &linger, sizeof (linger)) < 0)
+      msg (M_SOCKERR, "Cannot setsockopt SO_LINGER on TCP socket");
+  }
+#endif
+
+  return sd;
+}
+
+static socket_descriptor_t
+create_socket_udp (void)
+{
+  socket_descriptor_t sd;
+
+  if ((sd = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+    msg (M_SOCKERR, "Cannot create UDP socket");
+  return sd;
+}
+
+static void
+create_socket (struct link_socket *sock)
+{
+  /* create socket */
+  if (sock->proto == PROTO_UDPv4)
+    {
+      sock->sd = create_socket_udp ();
+    }
+  else if (sock->proto == PROTO_TCPv4_SERVER
+	   || sock->proto == PROTO_TCPv4_CLIENT)
+    {
+      sock->sd = create_socket_tcp ();
+    }
+  else
+    {
+      ASSERT (0);
+    }
+}
+
+/*
  * Functions used for establishing a TCP stream connection.
  */
 
 static int
-socket_listen_accept (int sd,
+socket_listen_accept (socket_descriptor_t sd,
 		      struct sockaddr_in *remote,
 		      const char *remote_dynamic,
 		      bool *remote_changed,
@@ -284,7 +349,7 @@ socket_listen_accept (int sd,
 }
 
 static void
-socket_connect (int sd,
+socket_connect (socket_descriptor_t *sd,
 		struct sockaddr_in *remote,
 		const char *remote_dynamic,
 		bool *remote_changed,
@@ -296,25 +361,54 @@ socket_connect (int sd,
        print_sockaddr (remote));
   while (true)
     {
-      const int status = connect (sd, (struct sockaddr *) remote,
+      const int status = connect (*sd, (struct sockaddr *) remote,
 				  sizeof (*remote));
 
       GET_SIGNAL (*signal_received);
       if (*signal_received)
 	return;
 
-      if (status)
-	msg (D_LINK_ERRORS | M_ERRNO_SOCK,
-	     "connect() failed, will try again in %d seconds, error",
-	     try_again_seconds);
-      else
+      if (!status)
 	break;
 
+      msg (D_LINK_ERRORS | M_ERRNO_SOCK,
+	   "connect() failed, will try again in %d seconds, error",
+	   try_again_seconds);
+
+      openvpn_close_socket (*sd);
       sleep (try_again_seconds);
+      *sd = create_socket_tcp ();
       update_remote (remote_dynamic, remote, remote_changed);
     }
   msg (M_INFO, "TCP connection established with %s", 
        print_sockaddr (remote));
+}
+
+/*
+ * Depending on protocol, sleep before restart to prevent
+ * TCP race.
+ */
+void
+socket_restart_pause (int proto)
+{
+  int sec = 0;
+  switch (proto)
+    {
+    case PROTO_UDPv4:
+      sec = 0;
+      break;
+    case PROTO_TCPv4_SERVER:
+      sec = 1;
+      break;
+    case PROTO_TCPv4_CLIENT:
+      sec = 3;
+      break;
+    }
+  if (sec)
+    {
+      msg (D_RESTART, "Restart pause, %d second(s)", sec);
+      sleep (sec);
+    }
 }
 
 /* For stream protocols, allocate a buffer to build up packet.
@@ -347,51 +441,6 @@ void
 frame_adjust_path_mtu (struct frame *frame, int pmtu, int proto)
 {
   frame_set_mtu_dynamic (frame, pmtu - datagram_overhead (proto), SET_MTU_UPPER_BOUND);
-}
-
-/*
- * SOCKET INITALIZATION CODE.
- * Create a TCP/UDP socket
- */
-
-static void
-create_socket (struct link_socket *sock)
-{
-  /* create socket */
-  if (sock->proto == PROTO_UDPv4)
-    {
-      if ((sock->sd = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-	msg (M_SOCKERR, "Cannot create UDP socket");
-    }
-  else if (sock->proto == PROTO_TCPv4_SERVER
-	   || sock->proto == PROTO_TCPv4_CLIENT)
-    {
-      if ((sock->sd = socket (PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
-	msg (M_SOCKERR, "Cannot create TCP socket");
-
-      /* set SO_REUSEADDR on socket */
-      {
-	int on = 1;
-	if (setsockopt (sock->sd, SOL_SOCKET, SO_REUSEADDR,
-			(void *) &on, sizeof (on)) < 0)
-	  msg (M_SOCKERR, "Cannot setsockopt SO_REUSEADDR on TCP socket");
-      }
-#if 0
-      /* set socket linger options */
-      {
-	struct linger linger;
-	linger.l_onoff = 1;
-	linger.l_linger = 2;
-	if (setsockopt (sock->sd, SOL_SOCKET, SO_LINGER,
-			(void *) &linger, sizeof (linger)) < 0)
-	  msg (M_SOCKERR, "Cannot setsockopt SO_LINGER on TCP socket");
-      }
-#endif
-    }
-  else
-    {
-      ASSERT (0);
-    }
 }
 
 static void
@@ -567,7 +616,7 @@ link_socket_init_phase2 (struct link_socket *sock,
 					 remote_dynamic, &remote_changed,
 					 &sock->lsa->local, true, signal_received);
       else if (sock->proto == PROTO_TCPv4_CLIENT)
-	socket_connect (sock->sd, &sock->lsa->actual,
+	socket_connect (&sock->sd, &sock->lsa->actual,
 			remote_dynamic, &remote_changed,
 			signal_received);
       
@@ -659,6 +708,21 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
 	}
     }
   mutex_unlock (L_SOCK);
+}
+
+in_addr_t
+link_socket_current_remote (const struct link_socket *sock)
+{
+  if (addr_defined (&sock->lsa->actual))
+    {
+      return ntohl (sock->lsa->actual.sin_addr.s_addr);
+    }
+  else if (addr_defined (&sock->lsa->remote))
+    {
+      return ntohl (sock->lsa->remote.sin_addr.s_addr);
+    }
+  else
+    return 0;
 }
 
 void

@@ -340,7 +340,7 @@ typedef unsigned int ssize_t;
 #define PACKAGE_TARNAME "openvpn"
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "1.4.1.6"
+#define PACKAGE_VERSION "1.5.0-pre1"
 
 /* Define to the full name and version of this package. */
 #define PACKAGE_STRING "OpenVPN " PACKAGE_VERSION

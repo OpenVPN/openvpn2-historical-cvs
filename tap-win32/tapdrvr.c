@@ -35,11 +35,6 @@
 #include "types.h"
 #include "prototypes.h"
 
-#ifdef ENABLE_RANDOM_MAC
-#include "md5.h"
-#include "md5.c"
-#endif
-
 #include "macinfo.c"
 
 //===========================================================================================

@@ -1,12 +1,11 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.2 2003/07/19 00:33:19 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.3 2003/07/19 08:31:56 jimyonan Exp $
 
 Todo:
 * finish tcp
 * implement --up-restart
-* options error if mtu-dynamic + tcp
 	
 Upcoming version 1.5.0
 
@@ -19,7 +18,7 @@ Upcoming version 1.5.0
   TAP driver derived from the Cipe-Win32
   project by Damion K. Wilson
   (still experimental and I have not
-  yet tested on pre-XP Windows).
+  yet tested on non-XP Windows).
 * Added --show-adapters flag for
   windows version.
 * Reworked the SSL/TLS packet acknowledge

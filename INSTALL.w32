@@ -149,8 +149,12 @@ Type:
 
 You should see a list that looks like this:
 
-Fri Jul 18 14:17:09 2003 0: Available TAP-WIN32 devices:
+Fri Jul 18 14:17:09 2003 0: Available TAP-Win32 devices:
 Fri Jul 18 14:17:09 2003 1: [1] 'my-tap'
+
+You can list all network interfaces with the
+Windows "ipconfig" command, and all TAP-Win32
+interfaces should be included among them.
 
 Example running a VPN between Windows and Linux
 -----------------------------------------------

@@ -17,7 +17,7 @@
    ClassGUID = {4d36e972-e325-11ce-bfc1-08002be10318}
    Provider = %l_Provider%
    Class = Net
-   DriverVer=07/08/2003,1.01.00.0008
+   DriverVer=07/08/2003,1.01.00.0011
 
 [Strings]
    l_DeviceDescription = "TAP VPN Adapter"

@@ -63,40 +63,61 @@ void ConvertMacInfo (unsigned char *p_Destination, unsigned char *p_Source, unsi
    }
 
 /*
- * Generate a random MAC, using the adapter name string, current system
- * time, and an incrementing local sequence number as entropy.
+ * Generate a MAC using the GUID in the adapter name.
+ *
+ * The mac is constructed as 00:FF:xx:xx:xx:xx where
+ * the Xs are taken from the first 32 bits of the GUID in the
+ * adapter name.  This is similar to the Linux 2.4 tap MAC
+ * generator, except linux uses 32 random bits for the Xs.
+ *
+ * In general, this solution is reasonable for most
+ * applications except for very large bridged TAP networks,
+ * where the probability of address collisions becomes more
+ * than infintesimal.
+ *
+ * Using the well-known "birthday paradox", on a 1000 node
+ * network the probability of collision would be
+ * 0.000116292153.  On a 10,000 node network, the probability
+ * of collision would be 0.01157288998621678766.
  */
 
-int random_mac_sequence_number = 0;
-unsigned char random_mac_previous[6] = { 0, 0, 0, 0, 0, 0};
-
-void GenerateRandomMac (unsigned char *mac, char *adapter_name)
+void GenerateRandomMac (unsigned char *mac, unsigned char *adapter_name)
 {
-  md5_state_t md5;
-  md5_byte_t d[16];
-  LARGE_INTEGER current_time;
+  unsigned const char *cp = adapter_name;
+  unsigned char c;
+  unsigned int i = 2;
+  unsigned int byte = 0;
+  int brace = 0;
+  int state = 0;
 
-  ++random_mac_sequence_number;
-  KeQuerySystemTime (&current_time);
+  NdisZeroMemory (mac, 6);
 
-  /* compute MD5 digest of entropy */
-  md5_init (&md5);
-  md5_append (&md5, (md5_byte_t *) &random_mac_previous, sizeof (random_mac_previous));
-  md5_append (&md5, (md5_byte_t *) &random_mac_sequence_number, sizeof (random_mac_sequence_number));
-  md5_append (&md5, (md5_byte_t *) &current_time, sizeof (current_time));
-  md5_append (&md5, (md5_byte_t *) &adapter_name, strlen (adapter_name));
-  md5_process (&md5, d);
-
-  /* build mac from digest */
-  mac[0] = 0x00;  /* 0:FF prefix taken from linux TAP driver */
+  mac[0] = 0x00;
   mac[1] = 0xFF;
-  mac[2] = d[0] ^ d[4] ^ d[8] ^ d[12];
-  mac[3] = d[1] ^ d[5] ^ d[9] ^ d[13];
-  mac[4] = d[2] ^ d[6] ^ d[10] ^ d[14];
-  mac[5] = d[3] ^ d[7] ^ d[11] ^ d[15];
 
-  /* save to use as entropy for next call */
-  memcpy (random_mac_previous, mac, 6);
+  while (c = *cp++)
+    {
+      if (i >= 6)
+	break;
+      if (c == '{')
+	brace = 1;
+      if (IsHexDigit (c) && brace)
+	{
+	  const unsigned int digit = HexStringToDecimalInt (c);
+	  if (state)
+	    {
+	      byte <<= 4;
+	      byte |= digit;
+	      mac[i++] = (unsigned char) byte;
+	      state = 0;
+	    }
+	  else
+	    {
+	      byte = digit;
+	      state = 1;
+	    }
+	}
+    }
 }
 
 #ifdef __cplusplus

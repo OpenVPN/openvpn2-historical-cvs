@@ -41,6 +41,7 @@ extern "C" {
 //                                      Macros
 //===================================================================================
 #define IsMacDelimiter(a) (a == ':' || a == '-' || a == '.')
+#define IsHexDigit(c) ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))
 
 #ifdef ASSERT
 #   undef ASSERT
@@ -53,6 +54,7 @@ extern "C" {
 //===================================================================================
 unsigned char HexStringToDecimalInt (unsigned char p_Character);
 void ConvertMacInfo (unsigned char *p_Destination, unsigned char *p_Source, unsigned long p_Length);
+void GenerateRandomMac (unsigned char *mac, unsigned char *adapter_name);
 
 #ifdef __cplusplus
 }

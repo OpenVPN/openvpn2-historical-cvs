@@ -8,7 +8,7 @@
 # Change this subnet to correspond to your private
 # ethernet subnet.  Home will use HOME_NET/24 and
 # Office will use OFFICE_NET/24.
-PRIVATE=/24
+PRIVATE=10.0.0.0/24
 
 # Loopback address
 LOOP=127.0.0.1

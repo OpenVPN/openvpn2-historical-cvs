@@ -1,8 +1,17 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.97 2004/02/23 03:58:44 jimyonan Exp $
+$Id: ChangeLog,v 1.98 2004/03/02 22:01:26 jimyonan Exp $
 
+2004.03.02 -- Version 1.6-rc1
+
+* For Windows, make "--ip-win32 dynamic" the default.
+* For Windows, make "--route-delay 10" the default
+  unless --ip-win32 dynamic is not used or --route-delay
+  is explicitly specified.
+* L_TLS mutex could have been left in a locked state
+  for certain kinds of TLS errors.
+	
 2004.02.22 -- Version 1.6-beta7
 	
 * Allow scheduling priority increase (--nice) together

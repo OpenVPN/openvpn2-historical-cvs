@@ -362,13 +362,32 @@ pre_setup (const struct options *options)
   /* set certain options as environmental variables */
   setenv_settings (options);
 
-#ifdef WIN32
-  /* put a title on the top window bar */
-  generate_window_title (options->config ? options->config : "");
-#endif
-
   /* print version number */
   msg (M_INFO, "%s", title_string);
+
+#ifdef WIN32
+  if (options->exit_event_name)
+    {
+      win32_signal_open (&win32_signal,
+			 WSO_FORCE_SERVICE,
+			 options->exit_event_name,
+			 options->exit_event_initial_state);
+    }
+  else
+    {
+      win32_signal_open (&win32_signal,
+			 WSO_FORCE_CONSOLE,
+			 NULL,
+			 false);
+
+      /* put a title on the top window bar */
+      if (win32_signal.mode == WSO_MODE_CONSOLE)
+	{
+	  window_title_save (&window_title); 
+	  window_title_generate (options->config);
+	}
+    }
+#endif
 }
 
 void
@@ -1503,20 +1522,13 @@ do_close_syslog (struct context *c)
 
 static void
 do_event_set_init (struct context *c,
-		   bool need_scalable,
 		   bool need_us_timeout)
 {
   unsigned int flags = 0;
 
   c->c2.event_set_max = 3;
 
-  if (need_scalable)
-    {
-      flags |= EVENT_METHOD_SCALABLE;
-      c->c2.event_set_max = 1000;
-    }
-  else
-    flags |= EVENT_METHOD_FAST;
+  flags |= EVENT_METHOD_FAST;
 
   if (need_us_timeout)
     flags |= EVENT_METHOD_US_TIMEOUT;
@@ -1585,7 +1597,9 @@ init_instance (struct context *c)
 
   /* our wait-for-i/o objects, different for posix vs. win32 */
   if (c->mode == CM_P2P)
-    do_event_set_init (c, false, SHAPER_DEFINED (&c->options));
+    do_event_set_init (c, SHAPER_DEFINED (&c->options));
+  else if (c->mode == CM_CHILD_TCP)
+    do_event_set_init (c, false);
 
   /* allocate our socket object */
   if (c->mode == CM_P2P || c->mode == CM_TOP || c->mode == CM_CHILD_TCP)
@@ -1823,9 +1837,7 @@ inherit_context_thread (struct context *dest,
   dest->c2.buffers_owned = false;
   dest->c2.event_set_owned = false;
 
-  do_event_set_init (dest,
-		     src->options.proto == PROTO_TCPv4_SERVER,
-		     false);
+  do_event_set_init (dest, false);
 }
 
 void
@@ -1871,8 +1883,9 @@ test_crypto_thread (void *arg)
 #endif
 
   ASSERT (options->test_crypto);
+  init_verb_mute (c, IVM_LEVEL_1);
   context_init_1 (c);
-  init_crypto_pre (c);
+  do_init_crypto_static (c);
 
 #if defined(USE_PTHREAD)
   {

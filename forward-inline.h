@@ -207,7 +207,7 @@ register_activity (struct context *c)
 static inline unsigned int
 p2p_iow_flags (const struct context *c)
 {
-  unsigned int flags = (IOW_SHAPER|IOW_CHECK_RESIDUAL|IOW_FRAG);
+  unsigned int flags = (IOW_SHAPER|IOW_CHECK_RESIDUAL|IOW_FRAG|IOW_READ);
   if (c->c2.to_link.len > 0)
     flags |= IOW_TO_LINK;
   if (c->c2.to_tun.len > 0)

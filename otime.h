@@ -71,6 +71,13 @@ update_time (void)
     now = real_time;
 }
 
+static inline void
+tv_clear (struct timeval *tv)
+{
+  tv->tv_sec = 0;
+  tv->tv_usec = 0;
+}
+
 static inline bool
 tv_defined (const struct timeval *tv)
 {

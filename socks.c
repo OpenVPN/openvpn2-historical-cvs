@@ -40,7 +40,7 @@
 
 #include "common.h"
 #include "misc.h"
-#include "io.h"
+#include "win32.h"
 #include "socket.h"
 #include "fdmisc.h"
 #include "proxy.h"

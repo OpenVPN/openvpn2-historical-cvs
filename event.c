@@ -38,6 +38,23 @@
 
 #include "memdbg.h"
 
+/*
+ * Some OSes will prefer select() over poll()
+ * when both are available.
+ */
+#if defined(TARGET_DARWIN)
+#define SELECT_PREFERRED_OVER_POLL
+#endif
+
+/*
+ * All non-windows OSes are assumed to have select()
+ */
+#ifdef WIN32
+#define SELECT 0
+#else
+#define SELECT 1
+#endif
+
 static inline int
 tv_to_ms_timeout (const struct timeval *tv)
 {
@@ -158,6 +175,9 @@ static struct event_set *
 we_init (int *maxevents, unsigned int flags)
 {
   struct we_set *wes;
+
+  msg (D_EVENT_WAIT, "WE_INIT maxevents=%d flags=0x%08x", *maxevents, flags);
+
   ALLOC_OBJ_CLEAR (wes, struct we_set);
 
   /* set dispatch functions */
@@ -292,6 +312,8 @@ ep_init (int *maxevents, unsigned int flags)
   struct ep_set *eps;
   int fd;
 
+  msg (D_EVENT_WAIT, "EP_INIT maxevents=%d flags=0x%08x", *maxevents, flags);
+
   /* open epoll file descriptor */
   fd = epoll_create (*maxevents);
   if (fd < 0)
@@ -306,7 +328,7 @@ ep_init (int *maxevents, unsigned int flags)
   eps->func.ctl = ep_ctl;
   eps->func.wait = ep_wait;
 
-  /* fast method corresponds to epoll one-shot */
+  /* fast method ("sort of") corresponds to epoll one-shot */
   if (flags & EVENT_METHOD_FAST)
     eps->fast = true;
 
@@ -403,6 +425,13 @@ po_wait (struct event_set *es, const struct timeval *tv, struct event_set_return
   int stat;
 
   stat = poll (pos->events, pos->n_events, tv_to_ms_timeout (tv));
+
+  // JYFIXME -- show extra debug info after poll() call
+#if 0
+  msg (D_EVENT_WAIT, "PO_WAIT DEBUG stat=%d pos->n_events=%d",
+       stat, pos->n_events);
+#endif
+
   ASSERT (stat <= pos->n_events);
 
   if (stat > 0)
@@ -435,6 +464,9 @@ static struct event_set *
 po_init (int *maxevents, unsigned int flags)
 {
   struct po_set *pos;
+
+  msg (D_EVENT_WAIT, "PO_INIT maxevents=%d flags=0x%08x", *maxevents, flags);
+
   ALLOC_OBJ_CLEAR (pos, struct po_set);
 
   /* set dispatch functions */
@@ -453,7 +485,7 @@ po_init (int *maxevents, unsigned int flags)
   ASSERT (*maxevents > 0);
   pos->capacity = *maxevents;
 
-  /* Allocate space for Win32 event handles */
+  /* Allocate space for pollfd structures to be passed to poll() */
   ALLOC_ARRAY_CLEAR (pos->events, struct pollfd, pos->capacity);
 
   /* Allocate space for event_set_return objects */
@@ -463,28 +495,248 @@ po_init (int *maxevents, unsigned int flags)
 }
 #endif /* POLL */
 
-struct event_set *
-event_set_init (int *maxevents, unsigned int flags)
+#if SELECT
+
+struct se_set
+{
+  struct event_set_functions func;
+  bool fast;
+  fd_set readfds;
+  fd_set writefds;
+  void **args;
+  int maxfd;
+  int capacity;
+};
+
+static void
+se_free (struct event_set *es)
+{
+  struct se_set *ses = (struct se_set *) es;
+  free (ses->args);
+  free (ses);
+}
+
+static void
+se_reset (struct event_set *es)
+{
+  struct se_set *ses = (struct se_set *) es;
+  int i;
+  ASSERT (ses->fast);
+  
+  FD_ZERO (&ses->readfds);
+  FD_ZERO (&ses->writefds);
+  for (i = 0; i <= ses->maxfd; ++i)
+    ses->args[i] = NULL;
+  ses->maxfd = -1;
+}
+
+static void
+se_del (struct event_set *es, event_t event)
+{
+  struct se_set *ses = (struct se_set *) es;
+  ASSERT (!ses->fast);
+
+  if (event >= 0 && event < ses->capacity)
+    {
+      FD_CLR (event, &ses->readfds);
+      FD_CLR (event, &ses->writefds);
+      ses->args[event] = NULL;
+    }
+  else
+    msg (D_EVENT_ERRORS, "Error: select/se_del: too many I/O wait events");
+  return;
+}
+
+static void
+se_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
+{
+  struct se_set *ses = (struct se_set *) es;
+
+  msg (D_EVENT_WAIT, "SE_CTL rwflags=0x%04x ev=%d arg=0x%08x",
+       rwflags, (unsigned int)event, (unsigned int)arg);
+
+  if (event >= 0 && event < ses->capacity)
+    {
+      ses->maxfd = max_int (event, ses->maxfd);
+      ses->args[event] = arg;
+      if (ses->fast)
+	{
+	  if (rwflags & EVENT_READ)
+	    FD_SET (event, &ses->readfds);
+	  if (rwflags & EVENT_WRITE)
+	    FD_SET (event, &ses->writefds);
+	}
+      else
+	{
+	  if (rwflags & EVENT_READ)
+	    FD_SET (event, &ses->readfds);
+	  else
+	    FD_CLR (event, &ses->readfds);
+	  if (rwflags & EVENT_WRITE)
+	    FD_SET (event, &ses->writefds);
+	  else
+	    FD_CLR (event, &ses->writefds);
+	}
+    }
+  else
+    {
+      msg (D_EVENT_ERRORS, "Error: select: too many I/O wait events");
+    }
+}
+
+static int
+se_wait_return (struct se_set *ses,
+		fd_set *read,
+		fd_set *write,
+		struct event_set_return *out,
+		int outlen)
+{
+  int i, j = 0;
+  for (i = 0; i <= ses->maxfd && j < outlen; ++i)
+    {
+      const bool r = FD_ISSET (i, read);
+      const bool w = FD_ISSET (i, write);
+      if (r || w)
+	{
+	  out->rwflags = 0;
+	  if (r)
+	    out->rwflags |= EVENT_READ;
+	  if (w)
+	    out->rwflags |= EVENT_WRITE;
+	  out->arg = ses->args[i];
+	  msg (D_EVENT_WAIT, "SE_WAIT[%d,%d] rwflags=0x%04x arg=0x%08x",
+	       i, j, out->rwflags, (unsigned int)out->arg);
+	  ++out;
+	  ++j;
+	}
+    }
+  return j;
+}
+
+static int
+se_wait_fast (struct event_set *es, const struct timeval *tv, struct event_set_return *out, int outlen)
+{
+  struct se_set *ses = (struct se_set *) es;
+  struct timeval tv_tmp = *tv;
+  int stat;
+
+  stat = select (ses->maxfd + 1, &ses->readfds, &ses->writefds, NULL, &tv_tmp);
+
+  if (stat > 0)
+    stat = se_wait_return (ses, &ses->readfds, &ses->writefds, out, outlen);
+
+  return stat;
+}
+
+static int
+se_wait_scalable (struct event_set *es, const struct timeval *tv, struct event_set_return *out, int outlen)
+{
+  struct se_set *ses = (struct se_set *) es;
+  struct timeval tv_tmp = *tv;
+  fd_set read = ses->readfds;
+  fd_set write = ses->writefds;
+  int stat;
+
+  stat = select (ses->maxfd + 1, &read, &write, NULL, &tv_tmp);
+
+  if (stat > 0)
+    stat = se_wait_return (ses, &read, &write, out, outlen);
+
+  return stat;
+}
+
+static struct event_set *
+se_init (int *maxevents, unsigned int flags)
+{
+  const int maximum_fds = 256; // JYFIXME -- figure out the minimum on all OSes which OpenVPN supports
+  struct se_set *ses;
+
+  msg (D_EVENT_WAIT, "SE_INIT maxevents=%d flags=0x%08x", *maxevents, flags);
+
+  ALLOC_OBJ_CLEAR (ses, struct se_set);
+
+  /* set dispatch functions */
+  ses->func.free = se_free;
+  ses->func.reset = se_reset;
+  ses->func.del = se_del;
+  ses->func.ctl = se_ctl;
+  ses->func.wait = se_wait_scalable;
+
+  if (flags & EVENT_METHOD_FAST)
+    {
+      ses->fast = true;
+      ses->func.wait = se_wait_fast;
+    }
+
+  /* Select needs to be passed this value + 1 */
+  ses->maxfd = -1;
+
+  /* Figure our event capacity */
+  ASSERT (*maxevents > 0);
+  *maxevents = min_int (*maxevents, maximum_fds);
+  ses->capacity = *maxevents + 10;
+
+  /* Allocate space for event_set_return void * args */
+  ALLOC_ARRAY_CLEAR (ses->args, void *, ses->capacity);
+
+  return (struct event_set *) ses;
+}
+#endif /* SELECT */
+
+static struct event_set *
+event_set_init_simple (int *maxevents, unsigned int flags)
 {
   struct event_set *ret = NULL;
-
 #ifdef WIN32
   ret = we_init (maxevents, flags);
+#elif POLL && SELECT
+  if (flags & EVENT_METHOD_US_TIMEOUT)
+    ret = se_init (maxevents, flags); 
+# ifdef SELECT_PREFERRED_OVER_POLL
+   if (!ret)
+     ret = se_init (maxevents, flags);
+   if (!ret)
+     ret = po_init (maxevents, flags);
+# else
+   if (!ret)
+     ret = po_init (maxevents, flags);
+   if (!ret)
+     ret = se_init (maxevents, flags);
+# endif
+#elif POLL
+  ret = po_init (maxevents, flags);
+#elif SELECT
+  ret = se_init (maxevents, flags);
 #else
+#error At least one of poll, select, or WSAWaitForMultipleEvents must be supported by the kernel
+#endif
+  ASSERT (ret);
+  return ret;
+}
+
+static struct event_set *
+event_set_init_scalable (int *maxevents, unsigned int flags)
+{
+  struct event_set *ret = NULL;
 #if EPOLL
   ret = ep_init (maxevents, flags);
   if (!ret)
     {
-      msg (M_WARN, "Note: sys_epoll API is unavailable, falling back to poll API");
-      ret = po_init (maxevents, flags);
+      msg (M_WARN, "Note: sys_epoll API is unavailable, falling back to poll/select API");
+      ret = event_set_init_simple (maxevents, flags);
     }
-#elif POLL
-  ret = po_init (maxevents, flags);
 #else
-#error At least one of epoll, poll, or WSAWaitForMultipleEvents must be supported by the kernel
+  ret = event_set_init_simple (maxevents, flags);
 #endif
-#endif
-
   ASSERT (ret);
   return ret;
+}
+
+struct event_set *
+event_set_init (int *maxevents, unsigned int flags)
+{
+  if (flags & EVENT_METHOD_FAST)
+    return event_set_init_simple (maxevents, flags);
+  else
+    return event_set_init_scalable (maxevents, flags);
 }

@@ -36,6 +36,7 @@
 #include "push.h"
 #include "gremlin.h"
 #include "mss.h"
+#include "event.h"
 
 #include "memdbg.h"
 
@@ -282,11 +283,20 @@ check_fragment_dowork (struct context *c)
       lsi->mtu_changed = false;
     }
 
-  if (!c->c2.to_link.len
-      && fragment_outgoing_defined (c->c2.fragment)
-      && fragment_ready_to_send (c->c2.fragment, &c->c2.buf,
-				 &c->c2.frame_fragment))
-    encrypt_sign (c, false);
+  if (fragment_outgoing_defined (c->c2.fragment))
+    {
+      if (!c->c2.to_link.len)
+	{
+	  /* encrypt a fragment for output to TCP/UDP port */
+	  ASSERT (fragment_ready_to_send (c->c2.fragment, &c->c2.buf, &c->c2.frame_fragment));
+	  encrypt_sign (c, false);
+	}
+      else
+	{
+	  /* output buffer is full */
+	  //tv_clear (&c->c2.timeval);
+	}
+    }
 
   fragment_housekeeping (c->c2.fragment, &c->c2.frame_fragment, &c->c2.timeval);
 }
@@ -918,7 +928,7 @@ process_outgoing_tun (struct context *c)
 	  /* Did we write a different size packet than we intended? */
 	  if (size != BLEN (&c->c2.to_tun))
 	    msg (D_LINK_ERRORS,
-		 "TUN/TAP packet was fragmented on write to %s (tried=%d,actual=%d)",
+		 "TUN/TAP packet was destructively fragmented on write to %s (tried=%d,actual=%d)",
 		 c->c1.tuntap->actual_name,
 		 BLEN (&c->c2.to_tun),
 		 size);
@@ -1060,9 +1070,10 @@ io_wait (struct context *c,
 	  socket |= EVENT_WRITE;
 	}
     }
-  else if (!(flags & IOW_FRAG) || !c->c2.fragment || !fragment_outgoing_defined (c->c2.fragment))
+  else if (!((flags & IOW_FRAG) && TO_LINK_FRAG (c)))
     {
-      tuntap |= EVENT_READ;
+      if (flags & IOW_READ)
+	tuntap |= EVENT_READ;
     }
 
   /*
@@ -1081,7 +1092,8 @@ io_wait (struct context *c,
     }
   else
     {
-      socket |= EVENT_READ;
+      if (flags & IOW_READ)
+	socket |= EVENT_READ;
     }
 
   /*

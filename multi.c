@@ -45,6 +45,7 @@
 #include "forward-inline.h"
 
 #define MULTI_DEBUG // JYFIXME
+//#define MULTI_DEBUG_EVENT_LOOP // JYFIXME
 
 /*
  * Reaper constants.  The reaper is the process where the virtual address
@@ -64,6 +65,17 @@
 #define MULTI_CACHE_ROUTE_TTL 60
 
 static bool multi_process_post (struct multi_thread *mt, struct multi_instance *mi);
+
+#ifdef MULTI_DEBUG_EVENT_LOOP
+static const char *
+id (struct multi_instance *mi)
+{
+  if (mi)
+    return tls_common_name (mi->context.c2.tls_multi, false);
+  else
+    return "NULL";
+}
+#endif
 
 static void
 learn_address_script (const struct multi_context *m,
@@ -320,12 +332,19 @@ multi_instance_string (struct multi_instance *mi, bool null, struct gc_arena *gc
 static inline void
 set_prefix (struct multi_instance *mi)
 {
+#ifdef MULTI_DEBUG_EVENT_LOOP
+  if (mi->msg_prefix)
+    printf ("[%s]\n", mi->msg_prefix);
+#endif
   msg_set_prefix (mi->msg_prefix);
 }
 
 static inline void
 clear_prefix (void)
 {
+#ifdef MULTI_DEBUG_EVENT_LOOP
+  printf ("[NULL]\n");
+#endif
   msg_set_prefix (NULL);
 }
 
@@ -1162,6 +1181,9 @@ multi_bcast (struct multi_context *m,
 
   if (BLEN (buf) > 0)
     {
+#ifdef MULTI_DEBUG_EVENT_LOOP
+      printf ("BCAST len=%d\n", BLEN (buf));
+#endif
       mb = mbuf_alloc_buf (buf);
       hash_iterator_init (m->iter, &hi, true);
 
@@ -1244,12 +1266,10 @@ multi_process_post (struct multi_thread *mt, struct multi_instance *mi)
     }
   if (IS_SIG (&mi->context))
     {
-      /* make sure that link_out or tun_out is nullified if
+      /* make sure that pending is nullified if
 	 it points to our soon-to-be-deleted instance */
-      if (mt->link_out == mi)
-	mt->link_out = NULL;
-      if (mt->tun_out == mi)
-	mt->tun_out = NULL;
+      if (mt->pending == mi)
+	mt->pending = NULL;
       if (mt->earliest_wakeup == mi)
 	mt->earliest_wakeup = NULL;
       multi_close_instance (mt->multi, mi, false);
@@ -1257,27 +1277,18 @@ multi_process_post (struct multi_thread *mt, struct multi_instance *mi)
     }
   else
     {
-      /* did pre_select produce any to_link or to_tun output packets? */
-      if (mt->link_out)
-	{
-	  if (!BLEN (&mi->context.c2.to_link))
-	    mt->link_out = NULL;
-	}
-      else
-	{
-	  if (BLEN (&mi->context.c2.to_link))
-	    mt->link_out = mi;
-	}
-      if (mt->tun_out)
-	{
-	  if (!BLEN (&mi->context.c2.to_tun))
-	    mt->tun_out = NULL;
-	}
-      else
-	{
-	  if (BLEN (&mi->context.c2.to_tun))
-	    mt->tun_out = mi;
-	}
+      /* continue to pend on output? */
+      mt->pending = ANY_OUT (&mi->context) ? mi : NULL;
+#ifdef MULTI_DEBUG_EVENT_LOOP
+      printf ("POST %s[%d] to=%d lo=%d/%d w=%d/%d\n",
+	      id(mi),
+	      (int) (mi == mt->pending),
+	      mi ? mi->context.c2.to_tun.len : -1,
+	      mi ? mi->context.c2.to_link.len : -1,
+	      (mi && mi->context.c2.fragment) ? mi->context.c2.fragment->outgoing.len : -1,
+	      (int)mi->context.c2.timeval.tv_sec,
+	      (int)mi->context.c2.timeval.tv_usec);
+#endif
       return true;
     }
 }
@@ -1298,16 +1309,19 @@ multi_process_incoming_link (struct multi_thread *mt)
       struct multi_instance *mi;
       struct multi_context *m = mt->multi;
 
-      ASSERT (!mt->tun_out);
+#ifdef MULTI_DEBUG_EVENT_LOOP
+      printf ("UDP -> TUN [%d]\n", BLEN (&mt->top.c2.buf));
+#endif
+      ASSERT (!mt->pending);
 
-      mt->tun_out = multi_get_create_instance (mt);
-      if (!mt->tun_out)
+      mt->pending = multi_get_create_instance (mt);
+      if (!mt->pending)
 	return;
 
-      set_prefix (mt->tun_out);
+      set_prefix (mt->pending);
 
       /* get instance context */
-      c = &mt->tun_out->context;
+      c = &mt->pending->context;
 
       /* transfer packet pointer from top-level context buffer to instance */
       c->c2.buf = mt->top.c2.buf;
@@ -1332,7 +1346,7 @@ multi_process_incoming_link (struct multi_thread *mt)
 	      c->c2.to_tun.len = 0;
 	    }
 	  /* make sure that source address is associated with this client */
-	  else if (multi_get_instance_by_virtual_addr (m, &src, true) != mt->tun_out)
+	  else if (multi_get_instance_by_virtual_addr (m, &src, true) != mt->pending)
 	    {
 	      msg (D_MULTI_DEBUG, "MULTI: bad source address from client [%s], packet dropped",
 		   mroute_addr_print (&src, &gc));
@@ -1345,7 +1359,7 @@ multi_process_incoming_link (struct multi_thread *mt)
 	      if (mroute_flags & MROUTE_EXTRACT_MCAST)
 		{
 		  /* for now, treat multicast as broadcast */
-		  multi_bcast (m, &c->c2.to_tun, mt->tun_out);
+		  multi_bcast (m, &c->c2.to_tun, mt->pending);
 		}
 	      else /* possible client to client routing */
 		{
@@ -1377,7 +1391,7 @@ multi_process_incoming_link (struct multi_thread *mt)
 		{
 		  if (mroute_flags & (MROUTE_EXTRACT_BCAST|MROUTE_EXTRACT_MCAST))
 		    {
-		      multi_bcast (m, &c->c2.to_tun, mt->tun_out);
+		      multi_bcast (m, &c->c2.to_tun, mt->pending);
 		    }
 		  else /* try client-to-client routing */
 		    {
@@ -1394,7 +1408,7 @@ multi_process_incoming_link (struct multi_thread *mt)
 		}
 		  
 	      /* learn source address */
-	      multi_learn_addr (m, mt->tun_out, &src, 0);
+	      multi_learn_addr (m, mt->pending, &src, 0);
 	    }
 	  else
 	    {
@@ -1403,7 +1417,7 @@ multi_process_incoming_link (struct multi_thread *mt)
 	}
       
       /* postprocess and set wakeup */
-      multi_process_post (mt, mt->tun_out);
+      multi_process_post (mt, mt->pending);
 
       clear_prefix ();
     }
@@ -1419,13 +1433,18 @@ multi_process_incoming_tun (struct multi_thread *mt)
 {
   struct gc_arena gc = gc_new ();
   struct multi_context *m = mt->multi;
+
   if (BLEN (&mt->top.c2.buf) > 0)
     {
       unsigned int mroute_flags;
       struct mroute_addr src, dest;
       const int dev_type = TUNNEL_TYPE (mt->top.c1.tuntap);
 
-      ASSERT (!mt->link_out);
+#ifdef MULTI_DEBUG_EVENT_LOOP
+      printf ("TUN -> UDP [%d]\n", BLEN (&mt->top.c2.buf));
+#endif
+
+      ASSERT (!mt->pending);
 
       /* 
        * Route an incoming tun/tap packet to
@@ -1449,13 +1468,13 @@ multi_process_incoming_tun (struct multi_thread *mt)
 	    }
 	  else
 	    {
-	      mt->link_out = multi_get_instance_by_virtual_addr (m, &dest, dev_type == DEV_TYPE_TUN);
-	      if (mt->link_out)
+	      mt->pending = multi_get_instance_by_virtual_addr (m, &dest, dev_type == DEV_TYPE_TUN);
+	      if (mt->pending)
 		{
-		  set_prefix (mt->link_out);
+		  set_prefix (mt->pending);
 
 		  /* get instance context */
-		  c = &mt->link_out->context;
+		  c = &mt->pending->context;
 
 		  /* transfer packet pointer from top-level context buffer to instance */
 		  c->c2.buf = mt->top.c2.buf;
@@ -1464,7 +1483,7 @@ multi_process_incoming_tun (struct multi_thread *mt)
 		  process_incoming_tun (c);
 	      
 		  /* postprocess and set wakeup */
-		  multi_process_post (mt, mt->link_out);
+		  multi_process_post (mt, mt->pending);
 
 		  clear_prefix ();
 		}
@@ -1511,14 +1530,28 @@ multi_process_outgoing_link (struct multi_thread *mt)
 {
   struct multi_instance *mi;
 
-  if (mt->link_out)
+  if (mt->pending)
     {
-      mi = mt->link_out;
-      mt->link_out = NULL;
+      mi = mt->pending;
+#ifdef MULTI_DEBUG_EVENT_LOOP
+      printf ("%s -> UDP [U] l=%d f=%d\n",
+	      id(mi),
+	      mi->context.c2.to_link.len,
+	      mi->context.c2.fragment ? mi->context.c2.fragment->outgoing.len : -1);
+#endif
+
     }
   else
-    mi = multi_bcast_instance (mt->multi);
-
+    {
+      mi = multi_bcast_instance (mt->multi);
+#ifdef MULTI_DEBUG_EVENT_LOOP
+      printf ("%s -> UDP [B] len=%d frag=%d\n",
+	      id(mi),
+	      mi ? mi->context.c2.to_link.len : -1,
+	      (mi && mi->context.c2.fragment) ? mi->context.c2.fragment->outgoing.len : -1);
+#endif
+    }
+  
   if (mi)
     {
       set_prefix (mi);
@@ -1534,10 +1567,14 @@ multi_process_outgoing_link (struct multi_thread *mt)
 static inline void
 multi_process_outgoing_tun (struct multi_thread *mt)
 {
-  struct multi_instance *mi = mt->tun_out;
+  struct multi_instance *mi = mt->pending;
   ASSERT (mi);
+#ifdef MULTI_DEBUG_EVENT_LOOP
+  printf ("%s -> TUN len=%d\n",
+	  id(mi),
+	  mi->context.c2.to_tun.len);
+#endif
   set_prefix (mi);
-  mt->tun_out = NULL;
   process_outgoing_tun (&mi->context);
   multi_process_post (mt, mi);
   clear_prefix ();
@@ -1551,8 +1588,32 @@ multi_process_io (struct multi_thread *mt)
 {
   const unsigned int status = mt->top.c2.event_set_status;
 
-  /* Incoming data on TCP/UDP port */
+#ifdef MULTI_DEBUG_EVENT_LOOP
+  char buf[16];
+  buf[0] = 0;
   if (status & SOCKET_READ)
+    strcat (buf, "SR/");
+  else if (status & SOCKET_WRITE)
+    strcat (buf, "SW/");
+  else if (status & TUN_READ)
+    strcat (buf, "TR/");
+  else if (status & TUN_WRITE)
+    strcat (buf, "TW/");
+  printf ("IO %s\n", buf);
+#endif
+
+  /* TCP/UDP port ready to accept write */
+  if (status & SOCKET_WRITE)
+    {
+      multi_process_outgoing_link (mt);
+    }
+  /* TUN device ready to accept write */
+  else if (status & TUN_WRITE)
+    {
+      multi_process_outgoing_tun (mt);
+    }
+  /* Incoming data on TCP/UDP port */
+  else if (status & SOCKET_READ)
     {
       read_incoming_link (&mt->top);
       if (!IS_SIG (&mt->top))
@@ -1565,17 +1626,6 @@ multi_process_io (struct multi_thread *mt)
       if (!IS_SIG (&mt->top))
 	multi_process_incoming_tun (mt);
     }
-  /* TUN device ready to accept write */
-  else if (status & TUN_WRITE)
-    {
-      multi_process_outgoing_tun (mt);
-    }
-  /* TCP/UDP port ready to accept write -- we put this last in the list so
-     that broadcast/multicast forwards don't cause client receive starvation */
-  else if (status & SOCKET_WRITE)
-    {
-      multi_process_outgoing_link (mt);
-    }
 }
 
 /*
@@ -1585,6 +1635,10 @@ multi_process_io (struct multi_thread *mt)
 static inline void
 multi_process_timeout (struct multi_thread *mt)
 {
+#ifdef MULTI_DEBUG_EVENT_LOOP
+  printf ("%s -> TIMEOUT\n", id(mt->earliest_wakeup));
+#endif
+
   /* instance marked for wakeup? */
   if (mt->earliest_wakeup)
     {
@@ -1644,12 +1698,18 @@ static inline unsigned int
 p2mp_iow_flags (const struct multi_thread *mt)
 {
   unsigned int flags = 0;
-  if (mt->link_out)
-    flags |= IOW_TO_LINK;
-  if (mt->tun_out)
-    flags |= IOW_TO_TUN;
-  if (mbuf_defined (mt->multi->mbuf))
+  if (mt->pending)
+    {
+      if (TUN_OUT (&mt->pending->context))
+	flags |= IOW_TO_TUN;
+      if (LINK_OUT (&mt->pending->context))
+	flags |= IOW_TO_LINK;
+    }
+  else if (mbuf_defined (mt->multi->mbuf))
     flags |= IOW_MBUF;
+  else
+    flags |= IOW_READ;
+
   return flags;
 }
 
@@ -1673,16 +1733,13 @@ process_per_second_timers (struct multi_thread *thread)
 
 /*
  * Top level event loop for single-threaded operation.
+ * UDP mode.
  */
-void
-tunnel_server_single_threaded (struct context *top)
+static void
+tunnel_server_single_threaded_udp (struct context *top)
 {
   struct multi_context multi;
   struct multi_thread *thread;
-
-  ASSERT (top->options.proto == PROTO_UDPv4
-	  || top->options.proto == PROTO_TCPv4_SERVER);
-  ASSERT (top->options.mode == MODE_SERVER);
 
   top->mode = CM_TOP;
   context_clear_2 (top);
@@ -1727,6 +1784,39 @@ tunnel_server_single_threaded (struct context *top)
   close_instance (top);
   multi_uninit (&multi);
   top->first_time = false;
+}
+
+/*
+ * Top level event loop for single-threaded operation.
+ * TCP mode.
+ */
+static void
+tunnel_server_single_threaded_tcp (struct context *top)
+{
+  //struct multi_context multi;
+  //struct multi_thread *thread;
+
+  msg (M_FATAL, "Sorry, TCP support in server mode is not finished yet");
+}
+
+/*
+ * Top level event loop for single-threaded operation.
+ */
+void
+tunnel_server_single_threaded (struct context *top)
+{
+  ASSERT (top->options.mode == MODE_SERVER);
+
+  switch (top->options.proto) {
+  case PROTO_UDPv4:
+    tunnel_server_single_threaded_udp (top);
+    break;
+  case PROTO_TCPv4_SERVER:
+    tunnel_server_single_threaded_tcp (top);
+    break;
+  default:
+    ASSERT (0);
+  }
 }
 
 #ifdef USE_PTHREAD

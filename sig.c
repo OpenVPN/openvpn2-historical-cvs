@@ -33,7 +33,7 @@
 
 #include "buffer.h"
 #include "error.h"
-#include "io.h"
+#include "win32.h"
 #include "openvpn.h"
 
 #include "memdbg.h"
@@ -126,9 +126,9 @@ pre_init_signal_catch (void)
    */
   signal (SIGINT, signal_handler_exit);
   signal (SIGTERM, signal_handler_exit);
-  signal (SIGHUP, signal_handler_exit);
-  signal (SIGUSR1, signal_handler_exit);
-  signal (SIGUSR2, signal_handler_exit);
+  signal (SIGHUP, SIG_IGN);
+  signal (SIGUSR1, SIG_IGN);
+  signal (SIGUSR2, SIG_IGN);
   signal (SIGPIPE, SIG_IGN);
 #endif /* HAVE_SIGNAL_H */
 }

@@ -30,12 +30,20 @@
 #include "occ.h"
 #include "ping.h"
 
+#define TUN_OUT(c)      (BLEN(&(c)->c2.to_tun) > 0)
+#define LINK_OUT(c)     (BLEN(&(c)->c2.to_link) > 0)
+#define ANY_OUT(c)      (TUN_OUT(c) || LINK_OUT(c))
+
+#define TO_LINK_FRAG(c) ((c)->c2.fragment && fragment_outgoing_defined ((c)->c2.fragment))
+#define TO_LINK_DEF(c)  (LINK_OUT(c) || TO_LINK_FRAG(c))
+
 #define IOW_TO_LINK         (1<<0)
 #define IOW_TO_TUN          (1<<1)
-#define IOW_SHAPER          (1<<2)
-#define IOW_CHECK_RESIDUAL  (1<<3)
-#define IOW_FRAG            (1<<4)
-#define IOW_MBUF            (1<<5)
+#define IOW_READ            (1<<2)
+#define IOW_SHAPER          (1<<3)
+#define IOW_CHECK_RESIDUAL  (1<<4)
+#define IOW_FRAG            (1<<5)
+#define IOW_MBUF            (1<<6)
 
 void io_wait (struct context *c, unsigned int flags);
 

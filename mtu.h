@@ -26,7 +26,7 @@
 #ifndef MTU_H
 #define MTU_H
 
-struct gc_arena;
+#include "buffer.h"
 
 /*
  * 
@@ -199,6 +199,11 @@ int translate_mtu_discover_type_name (const char *name);
 #define SET_MTU_UPPER_BOUND (1<<1) /* only decrease dynamic MTU */
 
 void frame_set_mtu_dynamic (struct frame *frame, int mtu, unsigned int flags);
+
+/*
+ * allocate a buffer for socket or tun layer
+ */
+void alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tuntap_buffer);
 
 /*
  * EXTENDED_SOCKET_ERROR_CAPABILITY functions -- print extra error info

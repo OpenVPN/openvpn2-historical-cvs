@@ -353,13 +353,56 @@ void
 redirect_stdout_stderr (const char *file, bool append)
 {
 #if defined(WIN32)
-  msg (M_WARN, "WARNING: The --log option is not directly supported on Windows, however you can use the " PACKAGE_NAME " service wrapper (" PACKAGE "serv.exe) to accomplish the same function -- see the Windows README.");
+  if (!std_redir)
+    {
+      HANDLE log_handle;
+      int log_fd;
+      struct security_attributes sa;
+
+      init_security_attributes_allow_all (&sa);
+
+      log_handle = CreateFile (file,
+			       GENERIC_WRITE,
+			       FILE_SHARE_READ,
+			       &sa.sa,
+			       append ? OPEN_ALWAYS : CREATE_ALWAYS,
+			       FILE_ATTRIBUTE_NORMAL,
+			       NULL);
+
+      if (log_handle == INVALID_HANDLE_VALUE)
+	msg (M_ERR, "Error: cannot open --log file: %s", file);
+
+      /* append to logfile? */
+      if (append)
+	{
+	  if (SetFilePointer (log_handle, 0, NULL, FILE_END) == INVALID_SET_FILE_POINTER)
+	    msg (M_ERR, "Error: cannot seek to end of --log file: %s", file);
+	}
+      
+      /* set up for redirection */
+      if (!SetStdHandle (STD_OUTPUT_HANDLE, log_handle)
+	  || !SetStdHandle (STD_ERROR_HANDLE, log_handle))
+	msg (M_ERR, "Error: cannot redirect stdout/stderr to --log file: %s", file);
+
+      /* direct stdout/stderr to point to log_handle */
+      log_fd = _open_osfhandle ((intptr_t)log_handle, _O_TEXT);
+      if (log_fd == -1)
+	msg (M_ERR, "Error: --log redirect failed due to _open_osfhandle failure");
+      
+      /* open log_handle as FILE stream */
+      ASSERT (msgfp == NULL);
+      msgfp = _fdopen (log_fd, "w");
+      if (msgfp == NULL)
+	msg (M_ERR, "Error: --log redirect failed due to _fdopen");
+
+      std_redir = true;
+    }
 #elif defined(HAVE_DUP2)
   if (!std_redir)
     {
-      int out  = open (file,
-		   O_CREAT | O_WRONLY | (append ? O_APPEND : O_TRUNC),
-		   S_IRUSR | S_IWUSR);
+      int out = open (file,
+		      O_CREAT | O_WRONLY | (append ? O_APPEND : O_TRUNC),
+		      S_IRUSR | S_IWUSR);
 
       if (out < 0)
 	msg (M_ERR, "Error redirecting stdout/stderr to --log file: %s", file);

@@ -26,6 +26,8 @@
 #ifndef EVENT_H
 #define EVENT_H
 
+#include "win32.h"
+
 #define EVENT_READ     (1<<0)
 #define EVENT_WRITE    (1<<1)
 
@@ -34,11 +36,6 @@
 #define EVENT_METHOD_FAST         (1<<2)
 
 #ifdef WIN32
-
-struct rw_handle {
-  HANDLE read;
-  HANDLE write;
-};
 
 typedef const struct rw_handle *event_t;
 
@@ -87,6 +84,7 @@ struct event_set
  *                      simultaneously set with event_ctl
  * maxevents on output: may be modified down, depending on limitations
  *                      of underlying API
+ * flags:               EVENT_METHOD_x flags
  */
 struct event_set *event_set_init (int *maxevents, unsigned int flags);
 
@@ -126,5 +124,34 @@ event_set_return_init (struct event_set_return *esr)
   esr->rwflags = 0;
   esr->arg = NULL;
 }
+
+#ifdef WIN32
+
+static inline void
+wait_signal (struct event_set *es, void *arg)
+{
+  if (HANDLE_DEFINED (win32_signal.in.read))
+    event_ctl (es, &win32_signal.in, EVENT_READ, arg);
+}
+
+static inline void
+get_signal (volatile int *sig)
+{
+  *sig = win32_signal_get (&win32_signal);
+}
+
+#else
+
+static inline void
+wait_signal (struct event_set *es, void *arg)
+{
+}
+
+static inline void
+get_signal (volatile int *sig)
+{
+}
+
+#endif
 
 #endif

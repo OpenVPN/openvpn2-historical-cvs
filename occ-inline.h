@@ -46,7 +46,7 @@ check_send_occ_req (struct context *c)
   if (event_timeout_defined (&c->c2.occ_interval)
       && event_timeout_trigger (&c->c2.occ_interval,
 				&c->c2.timeval,
-				(!c->c2.to_link.len && c->c2.occ_op < 0) ? ETT_DEFAULT : 0))
+				(!TO_LINK_DEF(c) && c->c2.occ_op < 0) ? ETT_DEFAULT : 0))
     check_send_occ_req_dowork (c);
 }
 
@@ -60,7 +60,7 @@ check_send_occ_load_test (struct context *c)
   if (event_timeout_defined (&c->c2.occ_mtu_load_test_interval)
       && event_timeout_trigger (&c->c2.occ_mtu_load_test_interval,
 				&c->c2.timeval,
-				(!c->c2.to_link.len && c->c2.occ_op < 0) ? ETT_DEFAULT : 0))
+				(!TO_LINK_DEF(c) && c->c2.occ_op < 0) ? ETT_DEFAULT : 0))
     check_send_occ_load_test_dowork (c);
 }
 
@@ -71,8 +71,7 @@ static inline void
 check_send_occ_msg (struct context *c)
 {
   void check_send_occ_msg_dowork (struct context *c);
-  if (c->c2.occ_op >= 0 && !c->c2.to_link.len
-      && (!c->c2.fragment || !fragment_outgoing_defined (c->c2.fragment)))
+  if (c->c2.occ_op >= 0 && !TO_LINK_DEF(c))
     check_send_occ_msg_dowork (c);
 }
 

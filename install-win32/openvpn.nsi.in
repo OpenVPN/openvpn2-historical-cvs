@@ -11,7 +11,7 @@
 !include "MUI.nsh"
 !include "setpath.nsi"
 
-!define MASTER "z:\openvpn\exp\openvpn"
+!define MASTER "x:\openvpn\exp\openvpn"
 
 !define HOME "c:\src\openvpn"
 !define BIN "${HOME}\bin"
@@ -57,6 +57,9 @@
   !define SOURCE_ZIP_DEST "openvpn-${MUI_VERSION}.zip"
   !define SOURCE_ZIP_SRC "${MASTER}\${SOURCE_ZIP_DEST}"
 
+# For testing only
+#!define SOURCE_ZIP_SRC "c:\src\openvpn\install-win32\null.zip"
+
 ;--------------------------------
 ;Modern UI Configuration
 
@@ -70,7 +73,7 @@
   !define MUI_FINISHPAGE
   !define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\INSTALL-win32.txt"
   !define MUI_FINISHPAGE_NOAUTOCLOSE
-  !define MUI_FINISHPAGE_NOREBOOTSUPPORT
+  !define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
   
   !define MUI_ABORTWARNING
   
@@ -156,6 +159,17 @@ StrCmp $R0 "" +1 +2
 DeleteRegKey /ifempty "${ROOT}" "${SUBKEY}"
 Pop $R0
 !macroend
+
+;------------------------------------------
+;Set reboot flag based on tapinstall return
+
+Function CheckReboot
+  IntCmp $R0 1 "" noreboot noreboot
+  IntOp $R0 0 & 0
+  SetRebootFlag true
+  DetailPrint "REBOOT flag set"
+ noreboot:
+FunctionEnd
 
 ;--------------------------------
 ;Installer Sections
@@ -317,13 +331,14 @@ Section -post
     Call StrStr
     Pop $R0
 
-    IntCmp $5 0 +1 tapinstall_check_error tapinstall_check_error
+    IntCmp $5 0 "" tapinstall_check_error tapinstall_check_error
     IntCmp $R0 -1 tapinstall
 
  ;tapupdate:
     DetailPrint "TAP-Win32 UPDATE"
     nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" update "$INSTDIR\driver\OemWin2k.inf" ${TAP}'
     Pop $R0 # return value/error/timeout
+    Call CheckReboot
     IntOp $5 $5 | $R0
     DetailPrint "tapinstall update returned: $R0"
     Goto tapinstall_check_error
@@ -332,17 +347,21 @@ Section -post
     DetailPrint "TAP-Win32 REMOVE OLD TAP"
     nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" remove TAP'
     Pop $R0 # return value/error/timeout
+    DetailPrint "tapinstall remove TAP returned: $R0"
     nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" remove TAPDEV'
     Pop $R0 # return value/error/timeout
+    DetailPrint "tapinstall remove TAPDEV returned: $R0"
 
     DetailPrint "TAP-Win32 INSTALL (${TAP})"
     nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" install "$INSTDIR\driver\OemWin2k.inf" ${TAP}'
     Pop $R0 # return value/error/timeout
+    Call CheckReboot
     IntOp $5 $5 | $R0
     DetailPrint "tapinstall install returned: $R0"
 
  tapinstall_check_error:
-    IntCmp $5 +1 notap
+    DetailPrint "tapinstall cumulative status: $5"
+    IntCmp $5 0 notap
     MessageBox MB_OK "An error occurred installing the TAP-Win32 device driver."
 
  notap:

@@ -1274,6 +1274,24 @@ void
 open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
 {
   open_tun_generic (dev, dev_type, dev_node, ipv6, true, true, tt);
+
+  /* Enable multicast on the interface */
+  if (tt->fd >= 0)
+    {
+      struct tuninfo info;
+
+      if (ioctl (tt->fd, TUNGIFINFO, &info) < 0) {
+	msg (M_WARN | M_ERRNO, "Can't get interface info: %s",
+	  strerror(errno));
+      }
+
+      info.flags |= IFF_MULTICAST;
+
+      if (ioctl (tt->fd, TUNSIFINFO, &info) < 0) {
+	msg (M_WARN | M_ERRNO, "Can't set interface info: %s",
+	  strerror(errno));
+      }
+    }
 }
 
 void

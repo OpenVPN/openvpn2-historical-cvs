@@ -47,7 +47,6 @@ openvpn_SOURCES = \
 	init.c init.h \
 	integer.h \
         interval.c interval.h \
-	io.c io.h \
 	list.c list.h \
 	lzo.c lzo.h \
 	mbuf.c mbuf.h \

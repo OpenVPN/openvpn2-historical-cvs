@@ -112,6 +112,7 @@ fragment_free (struct fragment_master *f)
   fragment_list_buf_free (&f->incoming);
   free_buf (&f->outgoing);
   free_buf (&f->outgoing_return);
+  free (f);
 }
 
 void
@@ -347,9 +348,9 @@ fragment_outgoing (struct fragment_master *f, struct buffer *buf,
 /* return true (and set buf) if we have an outgoing fragment which is ready to send */
 bool
 fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
-			     const struct frame* frame)
+			const struct frame* frame)
 {
-  if (f->outgoing.len)
+  if (fragment_outgoing_defined (f))
     {
       /* get fragment size, and determine if it is the last fragment */
       int size = f->outgoing_frag_size;

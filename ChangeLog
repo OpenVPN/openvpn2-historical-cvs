@@ -1,7 +1,33 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.33 2004/06/15 00:00:55 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.34 2004/06/24 03:48:27 jimyonan Exp $
+
+2004.06.23 -- Version 2.0-beta6
+
+* Fixed Windows installer to intelligently put
+  up a reboot dialog only if tapinstall tells
+  us that it's really necessary.
+* Fixed "Assertion failed at fragment.c:309"
+  bug when --mode server and --fragment are used
+  together.
+* Ignore HUP, USR1, and USR2 signals during
+  initialization.  Prior versions would abort.
+* Fixed bug on OS X: "Assertion failed at event.c:406".
+* Added --service option to Windows version, for use
+  when OpenVPN is being programmatically instantiated
+  by another process (see man page for info).
+* --log and --log-append options now work on Windows.
+* Update OpenBSD INSTALL notes (Janne Johansson).
+* Enable multicast on tun interface when running on
+  OpenBSD (Pavlin Radoslavov).
+* Fixed recent --test-crypto breakage, where options
+  such as --cipher were not being parsed correctly.
+* Modified options compatibility string by removing
+  ifconfig substring if it is empty.  Incremented
+  options compatibility string version number to 4.
+* Fixed typo in --tls-timeout option parsing
+  (Mikael Lönnroth).
 
 2004.06.13 -- Version 2.0-beta5
 

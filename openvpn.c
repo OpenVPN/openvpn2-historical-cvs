@@ -148,12 +148,12 @@ main (int argc, char *argv[])
 	  /* sanity check on options */
 	  options_postprocess (&c.options, c.first_time);
 
+	  /* misc stuff */
+	  pre_setup (&c.options);
+
 	  /* test crypto? */
 	  if (do_test_crypto (&c.options))
 	    break;
-
-	  /* misc stuff */
-	  pre_setup (&c.options);
 
 	  /* finish context init */
 	  context_init_1 (&c);

@@ -304,6 +304,11 @@ struct options
 
   /* special state parms */
   int foreign_option_index;
+
+#ifdef WIN32
+  const char *exit_event_name;
+  bool exit_event_initial_state;
+#endif
 };
 
 #define streq(x, y) (!strcmp((x), (y)))

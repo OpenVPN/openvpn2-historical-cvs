@@ -1,6 +1,6 @@
 Installation instructions for OpenVPN, a Secure Tunneling Daemon
 
-Copyright (C) 2002 by James Yonan. This program is free software;
+Copyright (C) 2002-2004 by James Yonan. This program is free software;
 you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation; either version 2 of the License, or
@@ -40,7 +40,7 @@ SUPPORTED PLATFORMS:
 SUPPORTED PROCESSOR ARCHITECTURES:
    In general, OpenVPN is word size and endian independent, so
    most processors should be supported.  Architectures known to
-   work include Intel x86, Alpha, Sparc, and ARM.
+   work include Intel x86, Alpha, Sparc, Amd64 and ARM.
 
 REQUIRES:
   (1) TUN and/or TAP driver to allow user-space programs to control
@@ -223,7 +223,10 @@ TUN/TAP Driver Configuration:
 
 * OpenBSD:
 
-  OpenBSD ships with tun0 and tun1 installed by default.
+  OpenBSD ships with tun0 and tun1 installed by default on pre-3.5 systems,
+  while 3.5 and later have dynamically created tun* devices so you only need
+  to create an empty /etc/hostname.tun0 (tun1, tun2 and so on) for each tun
+  you plan to use to create the device(s) at boot.
 
 * Mac OS X:
 
@@ -268,14 +271,19 @@ CAVEATS & BUGS:
 * Pthread support is not yet stable on OpenBSD or any platform that implements
   threads in user-space without supporting true preemptive scheduling
   between threads.  Pthread implementations which are compatible with Linux
-  or Solaris implementations should work fine with OpenVPN.
+  or Solaris implementations should work fine with OpenVPN. Newer OpenBSD
+  seems to work with threads, but until we're certain they work 100% it's
+  better to have them disabled for now. The OpenBSD OpenVPN-port disables 
+  pthreads by default.
 
 * If run through a firewall using OpenBSDs packet filter PF and the
   filter rules include a "scrub" directive, you may get problems talking
   to Linux hosts over the tunnel, since the scrubbing will kill packets
   sent from Linux hosts if they are fragmented. This is usually seen as
   tunnels where small packets and pings get through but large packets
-  and "regular traffic" don't.
+  and "regular traffic" don't. To circumvent this, add "no-df" to
+  the scrub directive so that the packet filter will let fragments with
+  the "dont fragment"-flag set through anyway.
 
 * Mixing OFB or CFB cipher modes with static key mode is not recommended,
   and is flagged as an error on OpenVPN versions 1.2.1 and greater.

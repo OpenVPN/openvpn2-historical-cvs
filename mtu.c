@@ -33,11 +33,22 @@
 
 #include "common.h"
 #include "buffer.h"
-#include "mtu.h"
 #include "error.h"
 #include "integer.h"
+#include "mtu.h"
 
 #include "memdbg.h"
+
+/* allocate a buffer for socket or tun layer */
+void
+alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tuntap_buffer)
+{
+  /* allocate buffer for overlapped I/O */
+  *buf = alloc_buf (BUF_SIZE (frame));
+  ASSERT (buf_init (buf, FRAME_HEADROOM (frame)));
+  buf->len = tuntap_buffer ? MAX_RW_SIZE_TUN (frame) : MAX_RW_SIZE_LINK (frame);
+  ASSERT (buf_safe (buf, 0));
+}
 
 void
 frame_finalize (struct frame *frame,

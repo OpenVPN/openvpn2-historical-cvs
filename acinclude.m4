@@ -1,7 +1,7 @@
 dnl Special Autoconf Macros for OpenVPN
 
 dnl OPENVPN_ADD_LIBS(LIB)
-AC_DEFUN(OPENVPN_ADD_LIBS, [
+AC_DEFUN([OPENVPN_ADD_LIBS], [
   LIBS="$1 $LIBS"
 ])
 
@@ -12,7 +12,7 @@ dnl If it does, defines HAVE_CPP_VARARG_MACRO_GCC to 1.
 dnl
 dnl @version
 dnl @author James Yonan <jim@yonan.net>, Matthias Andree <matthias.andree@web.de>
-AC_DEFUN(AX_CPP_VARARG_MACRO_GCC, [dnl
+AC_DEFUN([AX_CPP_VARARG_MACRO_GCC], [dnl
     AS_VAR_PUSHDEF([VAR],[ax_cv_cpp_vararg_macro_gcc])dnl
     AC_CACHE_CHECK([for GNU GCC vararg macro support], VAR, [dnl
       AC_COMPILE_IFELSE([
@@ -34,7 +34,7 @@ dnl If it does, defines HAVE_CPP_VARARG_MACRO_ISO to 1.
 dnl
 dnl @version
 dnl @author James Yonan <jim@yonan.net>, Matthias Andree <matthias.andree@web.de>
-AC_DEFUN(AX_CPP_VARARG_MACRO_ISO, [dnl
+AC_DEFUN([AX_CPP_VARARG_MACRO_ISO], [dnl
     AS_VAR_PUSHDEF([VAR],[ax_cv_cpp_vararg_macro_iso])dnl
     AC_CACHE_CHECK([for ISO C 1999 vararg macro support], VAR, [dnl
       AC_COMPILE_IFELSE([

@@ -79,7 +79,7 @@ struct fragment_master {
   int outgoing_frag_id;            /* each fragment in a datagram is numbered 0 to MAX_FRAGS-1 */ 
 
   struct buffer outgoing;          /* outgoing datagram, free if current_frag_id == 0 */
-  struct buffer outgoing_return;   /* buffer to return outgoing fragment to code in openvpn.c */
+  struct buffer outgoing_return;   /* buffer to return outgoing fragment */
 
   /* incoming fragments from remote */
   struct fragment_list incoming;

@@ -95,8 +95,7 @@ struct multi_context {
  */
 struct multi_thread {
   struct multi_context *multi; /* shared between all threads */
-  struct multi_instance *link_out;
-  struct multi_instance *tun_out;
+  struct multi_instance *pending;
   struct multi_instance *earliest_wakeup;  
   struct context_buffers *context_buffers;
   time_t per_second_trigger;
@@ -119,6 +118,9 @@ struct multi_route
   time_t last_reference;
 };
 
+/*
+ * top level function, called by openvpn.c
+ */
 void tunnel_server_single_threaded (struct context *top);
 
 #ifdef USE_PTHREAD

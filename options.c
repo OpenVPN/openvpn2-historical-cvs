@@ -377,7 +377,12 @@ static const char usage_message[] =
   "--tap-sleep n   : Sleep for n seconds after TAP adapter open before\n"
   "                  attempting to set adapter properties.\n"
   "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n" 
-  "--pause-exit    : When run from a console window, pause before exiting.\n"
+  "--pause-exit         : When run from a console window, pause before exiting.\n"
+  "--service ex [0|1]   : For use when OpenVPN is being instantiated by a\n"
+  "                       service, and should not be used directly by end-users.\n"
+  "                       ex is the name of an event object which, when\n"
+  "                       signaled, will cause OpenVPN to exit.  A second\n"
+  "                       optional parameter controls the initial state of ex.\n"
 #endif
   "\n"
   "Generate a random key (only for non-TLS static key encryption mode):\n"
@@ -1079,7 +1084,7 @@ options_postprocess (struct options *options, bool first_time)
       if (options->shaper)
 	msg (M_USAGE, "Options error: --shaper cannot be used with --mode server");
 
-#if 0
+#if 1 // JYFIXME -- should we allow --mode server --proto tcp?
       if (!(options->proto == PROTO_UDPv4 || options->proto == PROTO_TCPv4_SERVER))
 	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp or --proto tcp-server");
 #else
@@ -1299,7 +1304,7 @@ options_string (const struct options *o,
   struct buffer out = alloc_buf (256);
   bool tt_local = false;
 
-  buf_printf (&out, "V3");
+  buf_printf (&out, "V4");
 
   /*
    * Tunnel Options
@@ -1329,10 +1334,11 @@ options_string (const struct options *o,
     }
 
   if (tt && !PUSH_DEFINED(o) && !PULL_DEFINED(o))
-    buf_printf (&out,
-		",ifconfig %s",
-		ifconfig_options_string (tt, remote, o->ifconfig_nowarn, gc));
-
+    {
+      const char *ios = ifconfig_options_string (tt, remote, o->ifconfig_nowarn, gc);
+      if (ios && strlen (ios))
+	buf_printf (&out, ",ifconfig %s", ios);
+    }
   if (tt_local)
     {
       free (tt);
@@ -2802,6 +2808,17 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       set_pause_exit_win32 ();
     }
+  else if (streq (p[0], "service") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->exit_event_name = p[1];
+      if (p[2])
+	{
+	  ++i;
+	  options->exit_event_initial_state = (atoi(p[2]) != 0);
+	}
+    }
 #else
   else if (streq (p[0], "dhcp-option") && p[1])
     {
@@ -3036,7 +3053,7 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->tls_remote = p[1];
     }
-  else if (streq (p[0], "tls_timeout") && p[1])
+  else if (streq (p[0], "tls-timeout") && p[1])
     {
       ++i;
       VERIFY_PERMISSION (OPT_P_TLS_PARMS);

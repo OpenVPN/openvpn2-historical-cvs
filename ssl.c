@@ -2631,7 +2631,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	    }
 
 	  msg (D_TLS_ERRORS,
-	       "TLS Error: Unknown data channel key ID or IP address received from %s: %d (see FAQ for more info on this error)",
+	       "TLS Error: Unknown data channel key ID or IP address received from %s: %d (This usually means that the local and remote OpenVPN dynamic keys are out of sync)",
 	       print_sockaddr (from, &gc), key_id);
 	  goto error;
 	}

@@ -147,6 +147,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-key\-method\fR\ \fIm\fR\ ]
 [\ \fB\-\-key\fR\ \fIfile\fR\ ]
 [\ \fB\-\-keysize\fR\ \fIn\fR\ ]
+[\ \fB\-\-learn\-address\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-link\-mtu\fR\ \fIn\fR\ ]
 [\ \fB\-\-local\fR\ \fIhost\fR\ ]
 [\ \fB\-\-log\-append\fR\ \fIfile\fR\ ]
@@ -197,6 +198,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-route\-up\fR\ ]
 [\ \fB\-\-route\fR\ \fInetwork\ [netmask]\ [gateway]\ [metric]\fR\ ]
 [\ \fB\-\-rport\fR\ \fIport\fR\ ]
+[\ \fB\-\-service\fR\ \fIexit\-event\ [0|1]\fR\ ]
 [\ \fB\-\-secret\fR\ \fIfile\ [direction]\fR\ ]
 [\ \fB\-\-secret\fR\ \fIfile\fR\ ]
 [\ \fB\-\-setenv\fR\ \fIname\ value\fR\ ]
@@ -2944,6 +2946,38 @@ Put up a "press any key to continue" message on the console prior
 to OpenVPN program exit.  This option is automatically used by the
 Windows explorer when OpenVPN is run on a configuration
 file using the right-click explorer menu.
+.TP
+.B --service exit-event [0|1]
+Should be used when OpenVPN is being automatically executed by another
+program in such
+a context that no interaction with the user via display or keyboard
+is possible.  In general, end-users should never need to explicitly
+use this option, as it is automatically added by the OpenVPN service wrapper
+when a given OpenVPN configuration is being run as a service.
+
+.B exit-event
+is the name of a Windows global event object, and OpenVPN will continuously
+monitor the state of this event object and exit when it becomes signaled.
+
+The second parameter indicates the initial state of
+.B exit-event
+and normally defaults to 0.
+
+Multiple OpenVPN processes can be simultaneously executed with the same
+.B exit-event
+parameter.  In any case, the controlling process can signal
+.B exit-event,
+causing all such OpenVPN processes to exit.
+
+When executing an OpenVPN process using the
+.B --service
+directive, OpenVPN will probably not have a console
+window to output status/error
+messages, therefore it is useful to use
+.B --log
+or
+.B --log-append
+to write these messages to a file.
 .SH SCRIPTING AND ENVIRONMENTAL VARIABLES
 Starting with 1.5-beta7, OpenVPN now exports a series
 of environmental variables for use by
@@ -2981,6 +3015,10 @@ mode on client instance shutdown.
 .TP
 .B --down
 Executed after TCP/UDP and TUN/TAP close.
+.TP
+.B --learn-address
+Executed whenever an IPv4 address/route or MAC address is added to OpenVPN's
+internal routing table.
 .SS Environmental Variables
 Once set, a variable is persisted
 indefinitely until it is reset by a new value or a restart,

@@ -65,6 +65,7 @@ multi_init (struct multi_context *m, struct context *t)
 static void
 multi_get_timeout (struct multi_context *m, struct timeval *dest)
 {
+  struct gc_arena gc = gc_new (); // JYFIXME
   struct timeval tv, current;
   int i;
 
@@ -80,7 +81,7 @@ multi_get_timeout (struct multi_context *m, struct timeval *dest)
 #if 1 // JYFIXME
       if (mi->defined)
 	{
-	  msg (M_INFO, "[%d] WAKEUP %s", i, tv_string (&mi->wakeup));
+	  msg (M_INFO, "[%d] WAKEUP %s", i, tv_string (&mi->wakeup, &gc));
 	}
 #endif
       if (mi->defined && (!m->earliest_wakeup || tv_lt (&mi->wakeup, &tv)))
@@ -94,8 +95,8 @@ multi_get_timeout (struct multi_context *m, struct timeval *dest)
     {
       ASSERT (!gettimeofday (&current, NULL));
 #if 1 // JYFIXME
-      msg (M_INFO, "CURRENT %s", tv_string (&current));
-      msg (M_INFO, "EARLIEST %s", tv_string (&tv));
+      msg (M_INFO, "CURRENT %s", tv_string (&current, &gc));
+      msg (M_INFO, "EARLIEST %s", tv_string (&tv, &gc));
 #endif
       tv_delta (dest, &current, &tv);
     }
@@ -104,6 +105,8 @@ multi_get_timeout (struct multi_context *m, struct timeval *dest)
       dest->tv_sec = BIG_TIMEOUT;
       dest->tv_usec = 0;
     }
+
+  gc_free (&gc);
 }
 
 void
@@ -303,7 +306,6 @@ multi_inherit_context (struct context *dest, const struct context *src)
   /* c1 init */
   clear_tuntap (&dest->c1.tuntap);
   packet_id_persist_init (&dest->c1.pid_persist);
-  clear_route_list (&dest->c1.route_list);
 
   /* inherit SSL context */
   dest->c1.ks.ssl_ctx = src->c1.ks.ssl_ctx;
@@ -311,6 +313,7 @@ multi_inherit_context (struct context *dest, const struct context *src)
 
   /* options */
   dest->options = src->options;
+  context_gc_detach (dest, true);
 #ifdef USE_PTHREAD
   dest->options.tls_thread = false; // JYFIXME -- point-to-multipoint doesn't support a threaded control channel yet
 #endif

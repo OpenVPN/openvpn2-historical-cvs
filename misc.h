@@ -29,6 +29,7 @@
 #include "basic.h"
 #include "common.h"
 #include "integer.h"
+#include "buffer.h"
 
 /* socket descriptor passed by inetd/xinetd server to us */
 #define INETD_SOCKET_DESCRIPTOR 0
@@ -106,18 +107,18 @@ int openvpn_system (const char *command);
 /* interpret the status code returned by system() */
 bool system_ok(int);
 int system_executed (int stat);
-const char *system_error_message (int);
+const char *system_error_message (int, struct gc_arena *gc);
 
 /* run system() with error check, return true if success,
    false if error, exit if error and fatal==true */
 bool system_check (const char* command, const char* error_message, bool fatal);
 
 /* format a time_t as ascii, or use current time if 0 */
-const char* time_string (time_t t, bool show_usec);
+const char* time_string (time_t t, bool show_usec, struct gc_arena *gc);
 
 #ifdef HAVE_STRERROR
 /* a thread-safe version of strerror */
-const char* strerror_ts (int errnum);
+const char* strerror_ts (int errnum, struct gc_arena *gc);
 #endif
 
 /* Set standard file descriptors to /dev/null */
@@ -134,7 +135,6 @@ void save_inetd_socket_descriptor (void);
 void init_random_seed(void);
 
 /* set/delete environmental variable */
-#define MAX_ENV_STRINGS 200
 void setenv_str (const char *name, const char *value);
 void setenv_int (const char *name, int value);
 void setenv_del (const char *name);
@@ -145,6 +145,9 @@ unsigned int count_bits(unsigned int );
 
 /* make cp safe to be passed to system() or set as an environmental variable */
 void safe_string (char *cp);
+
+/* go to sleep for n milliseconds */
+void sleep_milliseconds (unsigned int n);
 
 /* an analogue to the random() function, but use OpenSSL functions if available */
 #ifdef USE_CRYPTO

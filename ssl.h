@@ -401,6 +401,10 @@ struct tls_multi
    * Our session objects.
    */
   struct tls_session session[TM_SIZE];
+  
+#ifdef USE_PTHREAD
+  openvpn_thread_t work_thread_id;
+#endif
 };
 
 void init_ssl_lib (void);
@@ -543,7 +547,9 @@ int tls_thread_rec_buf (struct thread_parms *state,
 #define PD_TLS                     (1<<9)
 #define PD_VERBOSE                 (1<<10)
 
-const char *protocol_dump (struct buffer *buffer, unsigned int flags);
+const char *protocol_dump (struct buffer *buffer,
+			   unsigned int flags,
+			   struct gc_arena *gc);
 
 /*
  * debugging code

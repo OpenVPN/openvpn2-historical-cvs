@@ -99,9 +99,9 @@ static int roll(int low, int high) {
   return ret;
 }
 
-static bool initialized;
-static bool up;
-static time_t next;
+static bool initialized; /* GLOBAL */
+static bool up;          /* GLOBAL */
+static time_t next;      /* GLOBAL */
 
 /*
  * Return false if we should drop a packet.

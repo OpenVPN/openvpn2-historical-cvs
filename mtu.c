@@ -109,9 +109,12 @@ frame_subtract_extra (struct frame *frame, const struct frame *src)
 }
 
 void
-frame_print (const struct frame *frame, int level, const char *prefix)
+frame_print (const struct frame *frame,
+	     int level,
+	     const char *prefix)
 {
-  struct buffer out = alloc_buf_gc (256);
+  struct gc_arena gc = gc_new ();
+  struct buffer out = alloc_buf_gc (256, &gc);
   if (prefix)
     buf_printf (&out, "%s ", prefix);
   buf_printf (&out, "[");
@@ -124,6 +127,7 @@ frame_print (const struct frame *frame, int level, const char *prefix)
   buf_printf (&out, " ]");
 
   msg (level, "%s", out.data);
+  gc_free (&gc);
 }
 
 #define MTUDISC_NOT_SUPPORTED_MSG "--mtu-disc is not supported on this OS"
@@ -179,7 +183,7 @@ struct probehdr
 };
 
 const char *
-format_extended_socket_error (int fd, int* mtu)
+format_extended_socket_error (int fd, int *mtu, struct gc_arena *gc)
 {
   int res;
   struct probehdr rcvbuf;
@@ -188,8 +192,8 @@ format_extended_socket_error (int fd, int* mtu)
   struct cmsghdr *cmsg;
   struct sock_extended_err *e;
   struct sockaddr_in addr;
-  struct buffer out = alloc_buf_gc (512);
-  char cbuf[512];
+  struct buffer out = alloc_buf_gc (512, gc);
+  char *cbuf = (char *) gc_malloc (512, false, gc);
 
   *mtu = 0;
 
@@ -204,7 +208,7 @@ format_extended_socket_error (int fd, int* mtu)
       msg.msg_iovlen = 1;
       msg.msg_flags = 0;
       msg.msg_control = cbuf;
-      msg.msg_controllen = sizeof (cbuf);
+      msg.msg_controllen = 512; /* size of cbuf */
 
       res = recvmsg (fd, &msg, MSG_ERRQUEUE);
       if (res < 0)

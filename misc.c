@@ -355,7 +355,7 @@ openvpn_chdir (const char* dir)
  *  dup inetd/xinetd socket descriptor and save
  */
 
-int inetd_socket_descriptor = -1;
+int inetd_socket_descriptor = -1; /* GLOBAL */
 
 void
 save_inetd_socket_descriptor (void)
@@ -433,9 +433,9 @@ system_executed (int stat)
  * Print an error message based on the status code returned by system().
  */
 const char *
-system_error_message (int stat)
+system_error_message (int stat, struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (512);
+  struct buffer out = alloc_buf_gc (512, gc);
 #ifdef WIN32
   if (stat == -1)
     buf_printf (&out, "shell command did not execute -- ");
@@ -465,17 +465,21 @@ system_error_message (int stat)
 bool
 system_check (const char* command, const char* error_message, bool fatal)
 {
+  struct gc_arena gc = gc_new ();
   const int stat = openvpn_system (command);
+  int ret = false;
+
   if (system_ok (stat))
-    return true;
+    ret = true;
   else
     {
       if (error_message)
 	msg ((fatal ? M_FATAL : M_WARN), "%s: %s",
 	     error_message,
-	     system_error_message (stat));
-      return false;
+	     system_error_message (stat, &gc));
     }
+  gc_free (&gc);
+  return ret;
 }
 
 /*
@@ -506,10 +510,10 @@ init_random_seed(void)
 
 /* format a time_t as ascii, or use current time if 0 */
 
-const char*
-time_string (time_t t, bool show_usec)
+const char *
+time_string (time_t t, bool show_usec, struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (64);
+  struct buffer out = alloc_buf_gc (64, gc);
   struct timeval tv;
 
   if (t)
@@ -542,13 +546,13 @@ time_string (time_t t, bool show_usec)
 /* thread-safe strerror */
 
 const char *
-strerror_ts (int errnum)
+strerror_ts (int errnum, struct gc_arena *gc)
 {
 #ifdef HAVE_STRERROR
-  struct buffer out = alloc_buf_gc (256);
+  struct buffer out = alloc_buf_gc (256, gc);
 
   mutex_lock (L_STRERR);
-  buf_printf (&out, "%s", openvpn_strerror (errnum));
+  buf_printf (&out, "%s", openvpn_strerror (errnum, gc));
   mutex_unlock (L_STRERR);
   return BSTR (&out);
 #else
@@ -565,7 +569,13 @@ strerror_ts (int errnum)
  */
 
 #ifdef HAVE_PUTENV
-static char *estrings[MAX_ENV_STRINGS];
+
+struct env_item {
+  char *string;
+  struct env_item *next;
+};
+
+static struct env_item *global_env = NULL; /* GLOBAL */
 
 static bool
 env_string_equal (const char *s1, const char *s2)
@@ -586,30 +596,37 @@ env_string_equal (const char *s1, const char *s2)
 static void
 remove_env (char *str)
 {
-  int i;
-  for (i = 0; i < (int) SIZE (estrings); ++i)
+  struct env_item *current, *prev;
+
+  ASSERT (str);
+
+  for (current = global_env, prev = NULL; current != NULL; current = current->next)
     {
-      if (estrings[i] && env_string_equal (estrings[i], str))
+      if (env_string_equal (current->string, str))
 	{
-	  free (estrings[i]);
-	  estrings[i] = NULL;
+	  if (prev)
+	    prev->next = current->next;
+	  else
+	    global_env = current->next;
+	  free (current->string);
+	  free (current);
+	  break;
 	}
+      prev = current;
     }
 }
 
 static void
 add_env (char *str)
 {
-  int i;
-  for (i = 0; i < (int) SIZE (estrings); ++i)
-    {
-      if (!estrings[i])
-	{
-	  estrings[i] = str;
-	  return;
-	}
-    }
-  msg (M_FATAL, PACKAGE_NAME " environmental variable cache is full (a maximum of %d variables is allowed) -- try increasing MAX_ENV_STRINGS size in misc.h", MAX_ENV_STRINGS);
+  struct env_item *item = (struct env_item *) malloc (sizeof (struct env_item));
+  
+  ASSERT (item);
+  ASSERT (str);
+
+  item->string = str;
+  item->next = global_env;
+  global_env = item;
 }
 
 static void
@@ -652,9 +669,8 @@ setenv_str (const char *name, const char *value)
    char *str = out.data;
    int status;
    
-   buf_printf (&out, "%s %s", name, value);
+   buf_printf (&out, "%s=%s", name, value);
    safe_string (str);
-   str[strlen(name)] = '=';
    mutex_lock (L_PUTENV);
    status = putenv (str);
    mutex_unlock (L_PUTENV);
@@ -693,7 +709,6 @@ safe_string (char *cp)
     }
 }
 
-
 /*
  * taken from busybox networking/ifupdown.c
  */
@@ -718,4 +733,20 @@ count_netmask_bits(const char *dotted_quad)
   result += count_bits(c);
   result += count_bits(d);
   return ((int)result);
+}
+
+/*
+ * Go to sleep for n milliseconds.
+ */
+void
+sleep_milliseconds (unsigned int n)
+{
+#ifdef WIN32
+  Sleep (n);
+#else
+  struct timeval tv;
+  tv.tv_sec = n / 1000;
+  tv.tv_usec = (n % 1000) * 1000;
+  select (0, NULL, NULL, NULL, &tv);
+#endif
 }

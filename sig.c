@@ -39,7 +39,7 @@
 
 /* Handle signals */
 
-struct signal_info siginfo_static;
+struct signal_info siginfo_static; /* GLOBAL */
 
 const char *
 signal_description (int signum, const char *sigtext)
@@ -153,6 +153,7 @@ post_init_signal_catch (void)
 void
 print_status (const struct context *c)
 {
+  struct gc_arena gc = gc_new ();
   msg (M_INFO, "Current " PACKAGE_NAME " Statistics:");
   msg (M_INFO, " TUN/TAP read bytes:   " counter_format,
        c->c2.tun_read_bytes);
@@ -170,6 +171,7 @@ print_status (const struct context *c)
 #endif
 #ifdef WIN32
   msg (M_INFO, " TAP-WIN32 driver status: %s",
-       tap_win32_getinfo (&c->c1.tuntap));
+       tap_win32_getinfo (&c->c1.tuntap, &gc));
 #endif
+  gc_free (&gc);
 }

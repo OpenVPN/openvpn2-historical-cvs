@@ -40,8 +40,8 @@
 
 #include "memdbg.h"
 
-static struct WSAData wsa_state;
-static bool pause_exit_enabled = false;
+static struct WSAData wsa_state;        /* GLOBAL */
+static bool pause_exit_enabled = false; /* GLOBAL */
 
 void
 init_win32 (void)

@@ -29,12 +29,26 @@
 #include "basic.h"
 #include "thread.h"
 
+/* basic buffer class for OpenVPN */
+
 struct buffer
 {
   int capacity;	   /* size of buffer allocated by malloc */
   int offset;	   /* data starts at data + offset, offset > 0 to allow for efficient prepending */
   int len;	   /* length of data that starts at data + offset */
   uint8_t *data;
+};
+
+/* for garbage collection */
+
+struct gc_entry
+{
+  struct gc_entry *next;
+};
+
+struct gc_arena
+{
+  struct gc_entry *list;
 };
 
 #define BPTR(buf)  ((buf)->data + (buf)->offset)
@@ -47,9 +61,11 @@ struct buffer
 
 struct buffer alloc_buf (size_t size);
 struct buffer clone_buf (const struct buffer* buf);
-struct buffer alloc_buf_gc (size_t size);	/* allocate buffer with garbage collection */
+struct buffer alloc_buf_gc (size_t size, struct gc_arena *gc); /* allocate buffer with garbage collection */
 struct buffer clear_buf (void);
 void free_buf (struct buffer *buf);
+
+char *string_alloc (const char *str);
 
 /* inline functions */
 
@@ -164,12 +180,13 @@ void convert_to_one_line (struct buffer *buf);
  */
 char *
 format_hex_ex (const uint8_t *data, int size, int maxoutput,
-	       int space_break, const char* separator);
+	       int space_break, const char* separator,
+	       struct gc_arena *gc);
 
 static inline char *
-format_hex (const uint8_t *data, int size, int maxoutput)
+format_hex (const uint8_t *data, int size, int maxoutput, struct gc_arena *gc)
 {
-  return format_hex_ex(data, size, maxoutput, 4, " ");
+  return format_hex_ex (data, size, maxoutput, 4, " ", gc);
 }
 
 /*
@@ -446,64 +463,40 @@ xor (uint8_t *dest, const uint8_t *src, int len)
  * char ptrs to malloced strings.
  */
 
-struct gc_entry
-{
-  struct gc_entry *back;
-  int level;
-};
-
-struct gc_thread
-{
-  int gc_count;
-  int gc_level;
-  struct gc_entry *gc_stack;
-};
-
-extern struct gc_thread x_gc_thread[N_THREADS];
-
-void *gc_malloc (size_t size);
+void *gc_malloc (size_t size, bool clear, struct gc_arena *a);
+void x_gc_free (struct gc_arena *a);
 
 static inline void
-x_gc_free (void *p) {
-  free (p);
+gc_init (struct gc_arena *a)
+{
+  a->list = NULL;
 }
 
 static inline void
-gc_collect (int level)
+gc_detach (struct gc_arena *a)
 {
-  struct gc_entry *e;
-  struct gc_thread* thread = &x_gc_thread[thread_number()];
-
-  while ((e = thread->gc_stack))
-    {
-      if (e->level < level)
-	break;
-      /*printf("GC FREE " ptr_format " lev=%d\n", e, e->level); */
-      --thread->gc_count;
-      thread->gc_stack = e->back;
-      x_gc_free (e);
-    }
+  gc_init (a);
 }
 
-static inline int
-gc_new_level (void)
+static inline struct gc_arena
+gc_new (void)
 {
-  struct gc_thread* thread = &x_gc_thread[thread_number()];
-  return ++thread->gc_level;
+  struct gc_arena ret;
+  ret.list = NULL;
+  return ret;
 }
 
 static inline void
-gc_free_level (int level)
+gc_free (struct gc_arena *a)
 {
-  struct gc_thread* thread = &x_gc_thread[thread_number()];
-
-  gc_collect (level);
-  thread->gc_level = level - 1;
+  if (a->list)
+    x_gc_free (a);
 }
 
-#if 0
-#define GCCC debug_gc_check_corrupt(__FILE__, __LINE__)
-void debug_gc_check_corrupt (const char *file, int line);
-#endif
+static inline void
+gc_reset (struct gc_arena *a)
+{
+  gc_free (a);
+}
 
 #endif /* BUFFER_H */

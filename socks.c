@@ -39,7 +39,6 @@
 #include "syshead.h"
 
 #include "common.h"
-#include "buffer.h"
 #include "misc.h"
 #include "io.h"
 #include "socket.h"
@@ -49,19 +48,20 @@
 #include "memdbg.h"
 
 
-void socks_adjust_frame_parameters (struct frame *frame, int proto)
+void
+socks_adjust_frame_parameters (struct frame *frame, int proto)
 {
   if (proto == PROTO_UDPv4)
     frame_add_to_extra_link (frame, 10);
 }
 
-void
-init_socks_proxy (struct socks_proxy_info *p,
-		  const char *server,
-		  int port,
-		  bool retry)
+struct socks_proxy_info *
+new_socks_proxy (const char *server,
+		 int port,
+		 bool retry,
+		 struct gc_arena *gc)
 {
-  CLEAR (*p);
+  struct socks_proxy_info *p = (struct socks_proxy_info *) gc_malloc (sizeof (struct socks_proxy_info), true, gc);
   ASSERT (server);
   ASSERT (legal_ipv4_port (port));
 
@@ -69,6 +69,8 @@ init_socks_proxy (struct socks_proxy_info *p,
   p->port = port;
   p->retry = retry;
   p->defined = true;
+
+  return p;
 }
 
 static bool

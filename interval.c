@@ -37,9 +37,9 @@
 
 /* return a string describing a struct timeval */
 const char *
-tv_string (const struct timeval *tv)
+tv_string (const struct timeval *tv, struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (64);
+  struct buffer out = alloc_buf_gc (64, gc);
   buf_printf (&out, "[%d/%d]", (int)tv->tv_sec, (int)tv->tv_usec);
   return BSTR (&out);
 }

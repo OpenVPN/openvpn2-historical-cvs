@@ -37,16 +37,27 @@
 #include "tun.h"
 
 /*
- * Maximum number of parameters to an options,
+ * Maximum number of parameters associated with an option,
  * including the option name itself.
  */
 #define MAX_PARMS 5
 
 extern const char title_string[];
 
+#if P2MP
+/* parameters to be pushed to peer */
+#define MAX_PUSH_LIST_LEN 1024
+struct push_list {
+  /* newline delimited options, like config file */
+  char options[MAX_PUSH_LIST_LEN];
+};
+#endif
+
 /* Command line options */
 struct options
 {
+  struct gc_arena gc;
+
   /* first config file */
   const char *config;
 
@@ -168,7 +179,7 @@ struct options
   bool route_noexec;
   int route_delay;
   bool route_delay_defined;
-  struct route_option_list routes;
+  struct route_option_list *routes;
 
   /* http proxy */
   const char *http_proxy_server;
@@ -184,6 +195,14 @@ struct options
 
   /* Enable options consistency check between peers */
   bool occ;
+
+#if P2MP
+  struct push_list *push_list;
+  bool pull; /* client pull of config options from server */
+  bool ifconfig_pool_defined;
+  in_addr_t ifconfig_pool_start;
+  in_addr_t ifconfig_pool_end;
+#endif
 
 #ifdef USE_CRYPTO
   /* Cipher parms */
@@ -253,6 +272,8 @@ void notnull (const char *arg, const char *description);
 void usage_small (void);
 
 void init_options (struct options *o);
+void uninit_options (struct options *o);
+
 void setenv_settings (const struct options *o);
 void show_settings (const struct options *o);
 
@@ -265,7 +286,8 @@ const char *options_string_version (const char* s);
 char *options_string (const struct options *o,
 		      const struct frame *frame,
 		      const struct tuntap *tt,
-		      bool remote);
+		      bool remote,
+		      struct gc_arena *gc);
 
 int options_cmp_equal (char *actual, const char *expected, size_t actual_n);
 

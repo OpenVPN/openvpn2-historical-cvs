@@ -26,6 +26,8 @@
 #ifndef PROXY_H
 #define PROXY_H
 
+#include "buffer.h"
+
 /* HTTP CONNECT authentication methods */
 #define HTTP_AUTH_NONE  0
 #define HTTP_AUTH_BASIC 1
@@ -43,12 +45,12 @@ struct http_proxy_info {
   char password[128];
 };
 
-void init_http_proxy (struct http_proxy_info *p,
-		      const char *server,
-		      int port,
-		      bool retry,
-		      const char *auth_method,
-		      const char *auth_file);
+struct http_proxy_info *new_http_proxy (const char *server,
+					int port,
+					bool retry,
+					const char *auth_method,
+					const char *auth_file,
+					struct gc_arena *gc);
 
 void establish_http_proxy_passthru (struct http_proxy_info *p,
 				    socket_descriptor_t sd, /* already open to proxy */

@@ -282,6 +282,7 @@ socket_listen_accept (socket_descriptor_t sd,
 		      bool nowait,
 		      volatile int *signal_received)
 {
+  struct gc_arena gc = gc_new ();
   socklen_t remote_len = sizeof (*remote);
   struct sockaddr_in remote_verify = *remote;
   int new_sd = -1;
@@ -289,7 +290,7 @@ socket_listen_accept (socket_descriptor_t sd,
   if (do_listen)
     {
       msg (M_INFO, "Listening for incoming TCP connection on %s", 
-	   print_sockaddr (local));
+	   print_sockaddr (local, &gc));
       if (listen (sd, 1))
 	msg (M_SOCKERR, "listen() failed");
     }
@@ -312,7 +313,10 @@ socket_listen_accept (socket_descriptor_t sd,
 
       GET_SIGNAL (*signal_received);
       if (*signal_received)
-	return sd;
+	{
+	  gc_free (&gc);
+	  return sd;
+	}
 
       if (status < 0)
 	msg (D_LINK_ERRORS | M_ERRNO_SOCK, "select() failed");
@@ -355,7 +359,7 @@ socket_listen_accept (socket_descriptor_t sd,
 	    {
 	      msg (M_WARN,
 		   "NOTE: Rejected connection attempt from %s due to --remote setting",
-		   print_sockaddr (remote));
+		   print_sockaddr (remote, &gc));
 	      if (openvpn_close_socket (new_sd))
 		msg (M_SOCKERR, "close socket failed (new_sd)");
 	    }
@@ -368,7 +372,9 @@ socket_listen_accept (socket_descriptor_t sd,
   if (!nowait && openvpn_close_socket (sd))
     msg (M_SOCKERR, "close socket failed (sd)");
   msg (M_INFO, "TCP connection established with %s", 
-       print_sockaddr (remote));
+       print_sockaddr (remote, &gc));
+
+  gc_free (&gc);
   return new_sd;
 }
 
@@ -380,8 +386,10 @@ socket_connect (socket_descriptor_t *sd,
 		const int connect_retry_seconds,
 		volatile int *signal_received)
 {
+  struct gc_arena gc = gc_new ();
+
   msg (M_INFO, "Attempting to establish TCP connection with %s", 
-       print_sockaddr (remote));
+       print_sockaddr (remote, &gc));
   while (true)
     {
       const int status = connect (*sd, (struct sockaddr *) remote,
@@ -389,7 +397,7 @@ socket_connect (socket_descriptor_t *sd,
 
       GET_SIGNAL (*signal_received);
       if (*signal_received)
-	return;
+	goto done;
 
       if (!status)
 	break;
@@ -405,7 +413,10 @@ socket_connect (socket_descriptor_t *sd,
     }
 
   msg (M_INFO, "TCP connection established with %s", 
-       print_sockaddr (remote));
+       print_sockaddr (remote, &gc));
+
+ done:
+  gc_free (&gc);
 }
 
 /* For stream protocols, allocate a buffer to build up packet.
@@ -443,6 +454,8 @@ frame_adjust_path_mtu (struct frame *frame, int pmtu, int proto)
 static void
 resolve_bind_local (struct link_socket *sock)
 {
+  struct gc_arena gc = gc_new ();
+
   /* resolve local address if undefined */
   if (!addr_defined (&sock->lsa->local))
     {
@@ -468,10 +481,11 @@ resolve_bind_local (struct link_socket *sock)
 	{
 	  const int errnum = openvpn_errno_socket ();
 	  msg (M_FATAL, "Socket bind failed on local address %s: %s",
-	       print_sockaddr (&sock->lsa->local),
-	       strerror_ts (errnum));
+	       print_sockaddr (&sock->lsa->local, &gc),
+	       strerror_ts (errnum, &gc));
 	}
     }
+  gc_free (&gc);
 }
 
 static void
@@ -480,6 +494,8 @@ resolve_remote (struct link_socket *sock,
 		const char **remote_dynamic,
 		volatile int *signal_received)
 {
+  struct gc_arena gc = gc_new ();
+
   if (!sock->did_resolve_remote)
     {
       /* resolve remote address if undefined */
@@ -532,7 +548,7 @@ resolve_remote (struct link_socket *sock,
 		    signal_received);
 
 	      if (!status || (signal_received && *signal_received))
-		return;
+		goto done;
 	    }
 
 	  sock->lsa->remote.sin_port = htons (sock->remote_port);
@@ -542,7 +558,7 @@ resolve_remote (struct link_socket *sock,
       if (addr_defined (&sock->lsa->actual))
 	{
 	  msg (M_INFO, "Preserving recently used remote address: %s",
-	       print_sockaddr (&sock->lsa->actual));
+	       print_sockaddr (&sock->lsa->actual, &gc));
 	  if (remote_dynamic)
 	    *remote_dynamic = NULL;
 	}
@@ -552,6 +568,9 @@ resolve_remote (struct link_socket *sock,
       /* remember that we finished */
       sock->did_resolve_remote = true;
     }
+
+ done:
+  gc_free (&gc);
 }
 
 void
@@ -674,6 +693,7 @@ link_socket_init_phase2 (struct link_socket *sock,
 			 const struct frame *frame,
 			 volatile int *signal_received)
 {
+  struct gc_arena gc = gc_new ();
   const char *remote_dynamic = NULL;
   bool remote_changed = false;
 
@@ -703,14 +723,14 @@ link_socket_init_phase2 (struct link_socket *sock,
 				signal_received);
       ASSERT (!remote_changed);
       if (*signal_received)
-	return;
+	goto done;
     }
   else
     {
       resolve_remote (sock, 2, &remote_dynamic, signal_received);
 
       if (*signal_received)
-	return;
+	goto done;
 
       /* TCP client/server */
       if (sock->proto == PROTO_TCPv4_SERVER)
@@ -732,7 +752,7 @@ link_socket_init_phase2 (struct link_socket *sock,
 			  signal_received);
 
 	  if (*signal_received)
-	    return;
+	    goto done;
 
 	  if (sock->http_proxy)
 	    {
@@ -760,7 +780,7 @@ link_socket_init_phase2 (struct link_socket *sock,
 			  signal_received);
 
 	  if (*signal_received)
-	    return;
+	    goto done;
 
 	  establish_socks_proxy_udpassoc (sock->socks_proxy,
 					  sock->ctrl_sd,
@@ -768,7 +788,7 @@ link_socket_init_phase2 (struct link_socket *sock,
 					  signal_received);
 
 	  if (*signal_received)
-	    return;
+	    goto done;
 
 	  sock->remote_host = sock->proxy_dest_host;
 	  sock->remote_port = sock->proxy_dest_port;
@@ -779,11 +799,11 @@ link_socket_init_phase2 (struct link_socket *sock,
 	  resolve_remote (sock, 1, NULL, signal_received);
 
 	  if (*signal_received)
-	    return;
+	    goto done;
 	}
       
       if (*signal_received)
-	return;
+	goto done;
 
       if (remote_changed)
 	{
@@ -816,12 +836,15 @@ link_socket_init_phase2 (struct link_socket *sock,
     msg (M_INFO, "%s link local%s: %s",
 	 proto2ascii (sock->proto, true),
 	 (sock->bind_local ? " (bound)" : ""),
-	 print_sockaddr_ex (&sock->lsa->local, sock->bind_local, ":"));
+	 print_sockaddr_ex (&sock->lsa->local, sock->bind_local, ":", &gc));
 
   /* print active remote address */
   msg (M_INFO, "%s link remote: %s",
        proto2ascii (sock->proto, true),
-       print_sockaddr_ex (&sock->lsa->actual, addr_defined (&sock->lsa->actual), ":"));
+       print_sockaddr_ex (&sock->lsa->actual, addr_defined (&sock->lsa->actual), ":", &gc));
+
+ done:
+  gc_free (&gc);
 }
 
 /* for stream protocols, allow for packet length prefix */
@@ -848,11 +871,12 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
 	  && (!addr_match_proto (addr, &lsa->actual, sock->proto)
 	      || !sock->set_outgoing_initial))
 	{
+	  struct gc_arena gc = gc_new ();
 	  lsa->actual = *addr; // JYFIXME: skip this line for --force-dest
 	  sock->set_outgoing_initial = true;
 	  mutex_unlock (L_SOCK);
 	  setenv_sockaddr ("trusted", &lsa->actual);
-	  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual));
+	  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual, &gc));
 	  if (sock->ipchange_command)
 	    {
 	      char command[512];
@@ -861,11 +885,12 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
 	      buf_set_write (&out, (uint8_t *)command, sizeof (command));
 	      buf_printf (&out, "%s %s",
 			  sock->ipchange_command,
-			  print_sockaddr_ex (&lsa->actual, true, " "));
+			  print_sockaddr_ex (&lsa->actual, true, " ", &gc));
 	      msg (D_TLS_DEBUG, "executing ip-change command: %s", command);
 	      system_check (command, "ip-change command failed", false);
 	    }
 	  mutex_lock (L_SOCK);
+	  gc_free (&gc);
 	}
     }
   mutex_unlock (L_SOCK);
@@ -891,6 +916,9 @@ link_socket_incoming_addr (struct buffer *buf,
 			   const struct link_socket *sock,
 			   const struct sockaddr_in *from_addr)
 {
+  struct gc_arena gc;
+  gc_init (&gc);
+
   mutex_lock (L_SOCK);
   if (buf->len > 0)
     {
@@ -907,17 +935,19 @@ link_socket_incoming_addr (struct buffer *buf,
 bad:
   msg (D_LINK_ERRORS,
        "NOTE: Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
-       print_sockaddr (from_addr),
+       print_sockaddr (from_addr, &gc),
        (int)from_addr->sin_family,
-       print_sockaddr (&sock->lsa->remote));
+       print_sockaddr (&sock->lsa->remote, &gc));
   buf->len = 0;
   mutex_unlock (L_SOCK);
+  gc_free (&gc);
   return;
 
 good:
   msg (D_READ_WRITE, "IP Address OK from %s",
-       print_sockaddr (from_addr));
+       print_sockaddr (from_addr, &gc));
   mutex_unlock (L_SOCK);
+  gc_free (&gc);
   return;
 }
 
@@ -1107,15 +1137,15 @@ stream_buf_close (struct stream_buf* sb)
  */
 
 const char *
-print_sockaddr (const struct sockaddr_in *addr)
+print_sockaddr (const struct sockaddr_in *addr, struct gc_arena *gc)
 {
-  return print_sockaddr_ex(addr, true, ":");
+  return print_sockaddr_ex(addr, true, ":", gc);
 }
 
 const char *
-print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* separator)
+print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* separator, struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (64);
+  struct buffer out = alloc_buf_gc (64, gc);
   const int port = ntohs (addr->sin_port);
 
   mutex_lock (L_INET_NTOA);
@@ -1137,10 +1167,10 @@ print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* sep
  * to an ascii dotted quad.
  */
 const char *
-print_in_addr_t (in_addr_t addr, bool empty_if_undef)
+print_in_addr_t (in_addr_t addr, bool empty_if_undef, struct gc_arena *gc)
 {
   struct in_addr ia;
-  struct buffer out = alloc_buf_gc (64);
+  struct buffer out = alloc_buf_gc (64, gc);
 
   if (addr || !empty_if_undef)
     {
@@ -1209,9 +1239,9 @@ proto2ascii (int proto, bool display_form)
 }
 
 const char *
-proto2ascii_all ()
+proto2ascii_all (struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (256);
+  struct buffer out = alloc_buf_gc (256, gc);
   int i;
 
   ASSERT (PROTO_N == SIZE (proto_names));
@@ -1394,12 +1424,14 @@ socket_recv_queue (struct link_socket *sock, int maxsize)
 	    }
 	  else /* error occurred */
 	    {
+	      struct gc_arena gc = gc_new ();
 	      ASSERT (SetEvent (sock->reads.overlapped.hEvent));
 	      sock->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      sock->reads.status = status;
 	      msg (D_WIN32_IO, "WIN32 I/O: Socket Receive error [%d]: %s",
 		   (int) wsabuf[0].len,
-		   strerror_win32 (status));
+		   strerror_win32 (status, &gc));
+	      gc_free (&gc);
 	    }
 	}
     }
@@ -1490,13 +1522,16 @@ socket_send_queue (struct link_socket *sock, struct buffer *buf, const struct so
 	    }
 	  else /* error occurred */
 	    {
+	      struct gc_arena gc = gc_new ();
 	      ASSERT (SetEvent (sock->writes.overlapped.hEvent));
 	      sock->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      sock->writes.status = status;
 
 	      msg (D_WIN32_IO, "WIN32 I/O: Socket Send error [%d]: %s",
 		   (int) wsabuf[0].len,
-		   strerror_win32 (status));
+		   strerror_win32 (status, &gc));
+
+	      gc_free (&gc);
 	    }
 	}
     }

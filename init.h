@@ -63,4 +63,7 @@ void close_instance (struct context *c);
 
 bool do_test_crypto (const struct options *o);
 
+void context_gc_detach (struct context *c, bool options_only);
+void context_gc_free (struct context *c);
+
 #endif

@@ -84,6 +84,9 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 		 const struct frame* frame,
 		 const time_t current)
 {
+  struct gc_arena gc;
+  gc_init (&gc);
+
   if (buf->len > 0 && opt->key_ctx_bi)
     {
       struct key_ctx *ctx = &opt->key_ctx_bi->encrypt;
@@ -135,10 +138,10 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 
 	  /* set the IV pseudo-randomly */
 	  if (opt->use_iv)
-	    msg (D_PACKET_CONTENT, "ENCRYPT IV: %s", format_hex (iv_buf, iv_size, 0));
+	    msg (D_PACKET_CONTENT, "ENCRYPT IV: %s", format_hex (iv_buf, iv_size, 0, &gc));
 
 	  msg (D_PACKET_CONTENT, "ENCRYPT FROM: %s",
-	       format_hex (BPTR (buf), BLEN (buf), 80));
+	       format_hex (BPTR (buf), BLEN (buf), 80, &gc));
 
 	  /* cipher_ctx was already initialized with key & keylen */
 	  ASSERT (EVP_CipherInit_ov (ctx->cipher, NULL, NULL, iv_buf, DO_ENCRYPT));
@@ -164,7 +167,7 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	    }
 
 	  msg (D_PACKET_CONTENT, "ENCRYPT TO: %s",
-	       format_hex (BPTR (&work), BLEN (&work), 80));
+	       format_hex (BPTR (&work), BLEN (&work), 80, &gc));
 	}
       else				/* No Encryption */
 	{
@@ -193,6 +196,7 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 
       *buf = work;
     }
+  gc_free (&gc);
   return;
 }
 
@@ -211,6 +215,8 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 		 const time_t current)
 {
   static const char error_prefix[] = "Authenticate/Decrypt packet error";
+  struct gc_arena gc;
+  gc_init (&gc);
 
   if (buf->len > 0 && opt->key_ctx_bi)
     {
@@ -270,7 +276,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 
 	  /* show the IV's initial state */
 	  if (opt->use_iv)
-	    msg (D_PACKET_CONTENT, "DECRYPT IV: %s", format_hex (iv_buf, iv_size, 0));
+	    msg (D_PACKET_CONTENT, "DECRYPT IV: %s", format_hex (iv_buf, iv_size, 0, &gc));
 
 	  if (buf->len < 1)
 	    CRYPT_ERROR ("missing payload");
@@ -294,7 +300,7 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	  work.len += outlen;
 
 	  msg (D_PACKET_CONTENT, "DECRYPT TO: %s",
-	       format_hex (BPTR (&work), BLEN (&work), 80));
+	       format_hex (BPTR (&work), BLEN (&work), 80, &gc));
 
 	  /* Get packet ID from plaintext buffer or IV, depending on cipher mode */
 	  {
@@ -348,16 +354,19 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	  else
 	    {
 	      msg (D_CRYPT_ERRORS, "%s: bad packet ID (may be a replay): %s -- see the man page entry for --no-replay and --replay-window for more info",
-		   error_prefix, packet_id_net_print (&pin, true));
+		   error_prefix, packet_id_net_print (&pin, true, &gc));
 	      goto error_exit;
 	    }
 	}
       *buf = work;
     }
+
+  gc_free (&gc);
   return true;
 
  error_exit:
   buf->len = 0;
+  gc_free (&gc);
   return false;
 }
 
@@ -417,6 +426,8 @@ init_cipher (EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
 	     struct key *key, const struct key_type *kt, int enc,
 	     const char *prefix)
 {
+  struct gc_arena gc = gc_new ();
+
   EVP_CIPHER_CTX_init (ctx);
   if (!EVP_CipherInit_ov (ctx, cipher, NULL, NULL, enc))
     msg (M_SSLERR, "EVP cipher init #1");
@@ -436,17 +447,21 @@ init_cipher (EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
   ASSERT (EVP_CIPHER_CTX_key_length (ctx) <= kt->cipher_length);
 
   msg (D_SHOW_KEYS, "%s: CIPHER KEY: %s", prefix,
-       format_hex (key->cipher, kt->cipher_length, 0));
+       format_hex (key->cipher, kt->cipher_length, 0, &gc));
   msg (D_CRYPTO_DEBUG, "%s: CIPHER block_size=%d iv_size=%d",
        prefix,
        EVP_CIPHER_CTX_block_size (ctx),
        EVP_CIPHER_CTX_iv_length (ctx));
+
+  gc_free (&gc);
 }
 
 static void
 init_hmac (HMAC_CTX *ctx, const EVP_MD *digest,
 	   struct key *key, const struct key_type *kt, const char *prefix)
 {
+  struct gc_arena gc = gc_new ();
+
   HMAC_CTX_init (ctx);
   HMAC_Init_ex (ctx, key->hmac, kt->hmac_length, digest, NULL);
   msg (D_HANDSHAKE,
@@ -457,11 +472,13 @@ init_hmac (HMAC_CTX *ctx, const EVP_MD *digest,
   ASSERT (HMAC_size (ctx) <= kt->hmac_length);
 
   msg (D_SHOW_KEYS, "%s: HMAC KEY: %s", prefix,
-       format_hex (key->hmac, kt->hmac_length, 0));
+       format_hex (key->hmac, kt->hmac_length, 0, &gc));
   msg (D_CRYPTO_DEBUG, "%s: HMAC size=%d block_size=%d",
        prefix,
        EVP_MD_size (digest),
        EVP_MD_block_size (digest));
+
+  gc_free (&gc);
 }
 
 /* build a key_type */
@@ -555,7 +572,8 @@ init_key_ctx (struct key_ctx *ctx, struct key *key,
     }
 }
 
-void free_key_ctx (struct key_ctx *ctx)
+void
+free_key_ctx (struct key_ctx *ctx)
 {
   if (ctx->cipher)
     {
@@ -571,7 +589,8 @@ void free_key_ctx (struct key_ctx *ctx)
     }
 }
 
-void free_key_ctx_bi (struct key_ctx_bi *ctx)
+void
+free_key_ctx_bi (struct key_ctx_bi *ctx)
 {
   free_key_ctx(&ctx->encrypt);
   free_key_ctx(&ctx->decrypt);
@@ -650,7 +669,7 @@ fixup_key_DES (struct key *key, const struct key_type *kt, int ndc)
 }
 
 static bool
-key_is_zero(struct key *key, const struct key_type *kt)
+key_is_zero (struct key *key, const struct key_type *kt)
 {
   int i;
   for (i = 0; i < kt->cipher_length; ++i)
@@ -699,6 +718,7 @@ check_key (struct key *key, const struct key_type *kt)
 void
 fixup_key (struct key *key, const struct key_type *kt)
 {
+  struct gc_arena gc = gc_new ();
   if (kt->cipher)
     {
       const struct key orig = *key;
@@ -711,21 +731,22 @@ fixup_key (struct key *key, const struct key_type *kt)
 	{
 	  if (memcmp (orig.cipher, key->cipher, kt->cipher_length))
 	    msg (D_CRYPTO_DEBUG, "CRYPTO INFO: fixup_key: before=%s after=%s",
-		 format_hex (orig.cipher, kt->cipher_length, 0),
-		 format_hex (key->cipher, kt->cipher_length, 0));
+		 format_hex (orig.cipher, kt->cipher_length, 0, &gc),
+		 format_hex (key->cipher, kt->cipher_length, 0, &gc));
 	}
     }
+  gc_free (&gc);
 }
 
 void
-check_replay_iv_consistency(const struct key_type *kt, bool packet_id, bool use_iv)
+check_replay_iv_consistency (const struct key_type *kt, bool packet_id, bool use_iv)
 {
   if (cfb_ofb_mode (kt) && !(packet_id && use_iv))
     msg (M_FATAL, "--no-replay or --no-iv cannot be used with a CFB or OFB mode cipher");
 }
 
 bool
-cfb_ofb_mode(const struct key_type* kt)
+cfb_ofb_mode (const struct key_type* kt)
 {
   if (kt->cipher) {
     const unsigned int mode = EVP_CIPHER_mode (kt->cipher);
@@ -744,6 +765,8 @@ generate_key_random (struct key *key, const struct key_type *kt)
   int cipher_len = MAX_CIPHER_KEY_LENGTH;
   int hmac_len = MAX_HMAC_KEY_LENGTH;
 
+  struct gc_arena gc = gc_new ();
+
   do {
     CLEAR (*key);
     if (kt)
@@ -757,12 +780,14 @@ generate_key_random (struct key *key, const struct key_type *kt)
     ASSERT (RAND_bytes (key->cipher, cipher_len));
     ASSERT (RAND_bytes (key->hmac, hmac_len));
 
-    msg (D_SHOW_KEY_SOURCE, "Cipher source entropy: %s", format_hex (key->cipher, cipher_len, 0));
-    msg (D_SHOW_KEY_SOURCE, "HMAC source entropy: %s", format_hex (key->hmac, hmac_len, 0));
+    msg (D_SHOW_KEY_SOURCE, "Cipher source entropy: %s", format_hex (key->cipher, cipher_len, 0, &gc));
+    msg (D_SHOW_KEY_SOURCE, "HMAC source entropy: %s", format_hex (key->hmac, hmac_len, 0, &gc));
 
     if (kt)
       fixup_key (key, kt);
   } while (kt && !check_key (key, kt));
+
+  gc_free (&gc);
 }
 
 /*
@@ -774,29 +799,32 @@ key2_print (const struct key2* k,
 	    const char* prefix0,
 	    const char* prefix1)
 {
+  struct gc_arena gc = gc_new ();
   ASSERT (k->n == 2);
   msg (D_SHOW_KEY_SOURCE, "%s (cipher): %s",
        prefix0,
-       format_hex (k->keys[0].cipher, kt->cipher_length, 0));
+       format_hex (k->keys[0].cipher, kt->cipher_length, 0, &gc));
   msg (D_SHOW_KEY_SOURCE, "%s (hmac): %s",
        prefix0,
-       format_hex (k->keys[0].hmac, kt->hmac_length, 0));
+       format_hex (k->keys[0].hmac, kt->hmac_length, 0, &gc));
   msg (D_SHOW_KEY_SOURCE, "%s (cipher): %s",
        prefix1,
-       format_hex (k->keys[1].cipher, kt->cipher_length, 0));
+       format_hex (k->keys[1].cipher, kt->cipher_length, 0, &gc));
   msg (D_SHOW_KEY_SOURCE, "%s (hmac): %s",
        prefix1,
-       format_hex (k->keys[1].hmac, kt->hmac_length, 0));
+       format_hex (k->keys[1].hmac, kt->hmac_length, 0, &gc));
+  gc_free (&gc);
 }
 
 void
 test_crypto (const struct crypto_options *co, struct frame* frame)
 {
   int i, j;
-  struct buffer src = alloc_buf_gc (TUN_MTU_SIZE (frame));
-  struct buffer work = alloc_buf_gc (BUF_SIZE (frame));
-  struct buffer encrypt_workspace = alloc_buf_gc (BUF_SIZE (frame));
-  struct buffer decrypt_workspace = alloc_buf_gc (BUF_SIZE (frame));
+  struct gc_arena gc = gc_new ();
+  struct buffer src = alloc_buf_gc (TUN_MTU_SIZE (frame), &gc);
+  struct buffer work = alloc_buf_gc (BUF_SIZE (frame), &gc);
+  struct buffer encrypt_workspace = alloc_buf_gc (BUF_SIZE (frame), &gc);
+  struct buffer decrypt_workspace = alloc_buf_gc (BUF_SIZE (frame), &gc);
   struct buffer buf = clear_buf();
 
   /* init work */
@@ -839,6 +867,7 @@ test_crypto (const struct crypto_options *co, struct frame* frame)
 	}
     }
   msg (M_INFO, PACKAGE_NAME " crypto self-test mode SUCCEEDED.");
+  gc_free (&gc);
 }
 
 #ifdef USE_SSL
@@ -924,8 +953,8 @@ static const char unprintable_char_fmt[] =
 void
 read_key_file (struct key2 *key2, const char *filename, bool must_succeed)
 {
-  const int gc_level = gc_new_level ();
-  struct buffer in = alloc_buf_gc (64);
+  struct gc_arena gc = gc_new ();
+  struct buffer in = alloc_buf_gc (64, &gc);
   int fd, size;
   uint8_t hex_byte[3] = {0, 0, 0};
 
@@ -1082,14 +1111,15 @@ read_key_file (struct key2 *key2, const char *filename, bool must_succeed)
 					 sizeof (key2->keys[i]),
 					 0,
 					 16,
-					 "\n");
+					 "\n",
+					 &gc);
 	printf ("[%d]\n%s\n\n", i, fmt);
       }
   }
 #endif
 
   /* pop our garbage collection level */
-  gc_free_level (gc_level);
+  gc_free (&gc);
 }
 
 int
@@ -1149,14 +1179,14 @@ read_passphrase_hash (const char *passphrase_file,
 int
 write_key_file (const int nkeys, const char *filename)
 {
-  const int gc_level = gc_new_level ();
+  struct gc_arena gc = gc_new ();
 
   int fd, i;
   int nbits = 0;
 
   /* must be large enough to hold full key file */
-  struct buffer out = alloc_buf_gc (2048);
-  struct buffer nbits_head_text = alloc_buf_gc (128);
+  struct buffer out = alloc_buf_gc (2048, &gc);
+  struct buffer nbits_head_text = alloc_buf_gc (128, &gc);
 
   /* how to format the ascii file representation of key */
   const int bytes_per_line = 16;
@@ -1182,7 +1212,8 @@ write_key_file (const int nkeys, const char *filename)
 			   sizeof (key),
 			   0,
 			   bytes_per_line,
-			   "\n");
+			   "\n",
+			   &gc);
 
       /* increment random bits counter */
       nbits += sizeof (key) * 8;
@@ -1211,7 +1242,7 @@ write_key_file (const int nkeys, const char *filename)
   buf_clear (&out);
 
   /* pop our garbage collection level */
-  gc_free_level (gc_level);
+  gc_free (&gc);
 
   return nbits;
 }
@@ -1422,7 +1453,7 @@ void init_crypto_lib ()
 
 #define NONCE_SECRET_LEN 16
 
-static uint8_t nonce_data [SHA_DIGEST_LENGTH + NONCE_SECRET_LEN];
+static uint8_t nonce_data [SHA_DIGEST_LENGTH + NONCE_SECRET_LEN]; /* GLOBAL */
 
 void
 prng_init (void)
@@ -1460,11 +1491,11 @@ get_random()
 }
 
 const char *
-md5sum(uint8_t *buf, int len, int n_print_chars)
+md5sum (uint8_t *buf, int len, int n_print_chars, struct gc_arena *gc)
 {
   uint8_t digest[MD5_DIGEST_LENGTH];
   MD5 (buf, len, digest);
-  return format_hex (digest, MD5_DIGEST_LENGTH, n_print_chars);
+  return format_hex (digest, MD5_DIGEST_LENGTH, n_print_chars, gc);
 }
 
 #ifndef USE_SSL

@@ -91,12 +91,12 @@ packet_id_persist_init (struct packet_id_persist *p)
 struct context_1
 {
   struct link_socket_addr link_socket_addr;
-  struct tuntap tuntap;
   struct key_schedule ks;
+  struct tuntap tuntap;
   struct packet_id_persist pid_persist;
-  struct route_list route_list;
-  struct http_proxy_info http_proxy;
-  struct socks_proxy_info socks_proxy;
+  struct route_list *route_list;
+  struct http_proxy_info *http_proxy;
+  struct socks_proxy_info *socks_proxy;
 };
 
 /*
@@ -105,6 +105,9 @@ struct context_1
  */
 struct context_2
 {
+  /* garbage collection arena for context_2 scope */
+  struct gc_arena gc;
+
   /* our global wait event */
   struct event_wait event_wait;
 
@@ -308,6 +311,10 @@ struct context
 # define CM_CHILD   2 /* child context of a CM_TOP */
   int mode;
 
+  /* garbage collection for context scope
+     allocations */
+  struct gc_arena gc;
+
   /* signal info */
   struct signal_info *sig;
 
@@ -328,20 +335,20 @@ struct context
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 #define TLS_MODE (c->c2.tls_multi != NULL)
 #define PROTO_DUMP_FLAGS (check_debug_level (D_LINK_RW_VERBOSE) ? (PD_SHOW_DATA|PD_VERBOSE) : 0)
-#define PROTO_DUMP(buf) protocol_dump(buf, \
+#define PROTO_DUMP(buf, gc) protocol_dump((buf), \
 				      PROTO_DUMP_FLAGS | \
 				      (c->c2.tls_multi ? PD_TLS : 0) | \
-				      (c->options.tls_auth_file ? c->c1.ks.key_type.hmac_length : 0) \
-				      )
+				      (c->options.tls_auth_file ? c->c1.ks.key_type.hmac_length : 0), \
+				      gc)
 #else
 #define TLS_MODE (false)
-#define PROTO_DUMP(buf) format_hex (BPTR (buf), BLEN (buf), 80)
+#define PROTO_DUMP(buf, gc) format_hex (BPTR (buf), BLEN (buf), 80, gc)
 #endif
 
 #ifdef USE_CRYPTO
-#define MD5SUM(buf, len) md5sum(buf, len, 0)
+#define MD5SUM(buf, len, gc) md5sum((buf), (len), 0, (gc))
 #else
-#define MD5SUM(buf, len) "[unavailable]"
+#define MD5SUM(buf, len, gc) "[unavailable]"
 #endif
 
 #endif

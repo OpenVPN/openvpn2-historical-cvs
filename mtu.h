@@ -26,6 +26,8 @@
 #ifndef MTU_H
 #define MTU_H
 
+struct gc_arena;
+
 /*
  * 
  * Packet maninipulation routes such as encrypt, decrypt, compress, decompress
@@ -177,7 +179,10 @@ void frame_finalize (struct frame *frame,
 		     int tun_mtu);
 
 void frame_subtract_extra (struct frame *frame, const struct frame *src);
-void frame_print (const struct frame *frame, int level, const char *prefix);
+
+void frame_print (const struct frame *frame,
+		  int level,
+		  const char *prefix);
 
 void set_mtu_discover_type (int sd, int mtu_type);
 int translate_mtu_discover_type_name (const char *name);
@@ -200,7 +205,7 @@ void frame_set_mtu_dynamic (struct frame *frame, int mtu, unsigned int flags);
 #if EXTENDED_SOCKET_ERROR_CAPABILITY
 
 void set_sock_extended_error_passing (int sd);
-const char *format_extended_socket_error (int fd, int* mtu);
+const char *format_extended_socket_error (int fd, int *mtu, struct gc_arena *gc);
 
 #endif
 

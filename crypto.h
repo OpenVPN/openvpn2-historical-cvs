@@ -310,7 +310,7 @@ void prng_bytes (uint8_t *output, int len);
 
 void test_crypto (const struct crypto_options *co, struct frame* f);
 
-const char *md5sum(uint8_t *buf, int len, int n_print_chars);
+const char *md5sum(uint8_t *buf, int len, int n_print_chars, struct gc_arena *gc);
 
 void show_available_ciphers (void);
 

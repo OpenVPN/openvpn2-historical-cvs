@@ -92,9 +92,11 @@ overlapped_io_close (struct overlapped_io *o)
 }
 
 const char *
-overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix)
+overlapped_io_state_ascii (const struct overlapped_io *o,
+			   const char* prefix,
+			   struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (16);
+  struct buffer out = alloc_buf_gc (16, gc);
   buf_printf (&out, "%s", prefix);
   switch (o->iostate)
     {
@@ -117,7 +119,7 @@ overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix)
  * event object if we are running as a service.
  */
 
-struct win32_signal win32_signal;
+struct win32_signal win32_signal; /* GLOBAL */
 
 static void
 win32_signal_open (struct win32_signal *ws)
@@ -272,7 +274,7 @@ win32_pause (void)
 
 /* window functions */
 
-static char old_window_title [256] = { 0 };
+static char old_window_title [256] = { 0 }; /* GLOBAL */
 
 void
 save_window_title ()
@@ -299,9 +301,11 @@ generate_window_title (const char *title)
 {
   if (!win32_signal.service)
     {
-      struct buffer out = alloc_buf_gc (256);
+      struct gc_arena gc = gc_new ();
+      struct buffer out = alloc_buf_gc (256, &gc);
       buf_printf (&out, "[%s] " PACKAGE_NAME " " VERSION " F4:EXIT F1:USR1 F2:USR2 F3:HUP", title);
       SetConsoleTitle (BSTR (&out));
+      gc_free (&gc);
     }
 }
 
@@ -384,7 +388,7 @@ semaphore_close (struct semaphore *s)
  * shell commands from simultaneous instantiation.
  */
 
-struct semaphore netcmd_semaphore;
+struct semaphore netcmd_semaphore; /* GLOBAL */
 
 void
 netcmd_semaphore_init (void)
@@ -417,7 +421,7 @@ netcmd_semaphore_release (void)
 char *
 getpass (const char *prompt)
 {
-  static char input[256];
+  static char input[256]; /* GLOBAL */
   HANDLE in;
   HANDLE err;
   DWORD  count;

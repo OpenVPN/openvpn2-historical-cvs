@@ -56,10 +56,10 @@
 
 #ifdef MEASURE_TLS_HANDSHAKE_STATS
 
-static int tls_handshake_success;
-static int tls_handshake_error;
-static int tls_packets_generated;
-static int tls_packets_sent;
+static int tls_handshake_success; /* GLOBAL */
+static int tls_handshake_error;   /* GLOBAL */
+static int tls_packets_generated; /* GLOBAL */
+static int tls_packets_sent;      /* GLOBAL */
 
 #define INCR_SENT       ++tls_packets_sent
 #define INCR_GENERATED  ++tls_packets_generated
@@ -85,10 +85,10 @@ show_tls_performance_stats(void)
 
 #ifdef BIO_DEBUG
 
-static FILE *biofp;
-static bool biofp_toggle;
-static time_t biofp_last_open;
-static const int biofp_reopen_interval = 600;
+static FILE *biofp;                            /* GLOBAL */
+static bool biofp_toggle;                      /* GLOBAL */
+static time_t biofp_last_open;                 /* GLOBAL */
+static const int biofp_reopen_interval = 600;  /* GLOBAL */
 
 static void
 close_biofp()
@@ -186,7 +186,7 @@ tls_init_control_channel_frame_parameters(const struct frame *data_channel_frame
  * pointer back to parent.
  */
 
-static int mydata_index;
+static int mydata_index; /* GLOBAL */
 
 static void
 ssl_set_mydata_index ()
@@ -809,17 +809,17 @@ session_index_name (int index)
  * For debugging.
  */
 static const char *
-print_key_id (struct tls_multi *multi)
+print_key_id (struct tls_multi *multi, struct gc_arena *gc)
 {
   int i;
-  struct buffer out = alloc_buf_gc (256);
+  struct buffer out = alloc_buf_gc (256, gc);
 
   for (i = 0; i < KEY_SCAN_SIZE; ++i)
     {
       struct key_state *ks = multi->key_scan[i];
       buf_printf (&out, " [key#%d state=%s id=%d sid=%s]", i,
 		  state_name (ks->state), ks->key_id,
-		  session_id_print (&ks->session_id_remote));
+		  session_id_print (&ks->session_id_remote, gc));
     }
 
   return BSTR (&out);
@@ -1119,6 +1119,8 @@ static inline void tls_session_set_self_referential_pointers (struct tls_session
 static void
 tls_session_init (struct tls_multi *multi, struct tls_session *session)
 {
+  struct gc_arena gc = gc_new ();
+
   msg (D_TLS_DEBUG, "tls_session_init: entry");
 
   CLEAR (*session);
@@ -1160,7 +1162,9 @@ tls_session_init (struct tls_multi *multi, struct tls_session *session)
   key_state_init (session, &session->key[KS_PRIMARY], time (NULL));
 
   msg (D_TLS_DEBUG, "tls_session_init: new session object, sid=%s",
-       session_id_print (&session->session_id));
+       session_id_print (&session->session_id, &gc));
+
+  gc_free (&gc);
 }
 
 static void
@@ -1433,6 +1437,8 @@ read_control_auth (struct buffer *buf,
 		   const struct sockaddr_in *from,
 		   const time_t current)
 {
+  struct gc_arena gc = gc_new ();
+
   if (co->key_ctx_bi->decrypt.hmac)
     {
       struct buffer null = clear_buf ();
@@ -1442,7 +1448,8 @@ read_control_auth (struct buffer *buf,
 	{
 	  msg (D_TLS_ERRORS,
 	       "TLS Error: cannot locate HMAC in incoming packet from %s",
-	       print_sockaddr (from));
+	       print_sockaddr (from, &gc));
+	  gc_free (&gc);
 	  return false;
 	}
 
@@ -1453,7 +1460,8 @@ read_control_auth (struct buffer *buf,
 	{
 	  msg (D_TLS_ERRORS,
 	       "TLS Error: incoming packet authentication failed from %s",
-	       print_sockaddr (from));
+	       print_sockaddr (from, &gc));
+	  gc_free (&gc);
 	  return false;
 	}
 
@@ -1463,6 +1471,7 @@ read_control_auth (struct buffer *buf,
      already read it */
   buf_advance (buf, SID_SIZE + 1);
 
+  gc_free (&gc);
   return true;
 }
 
@@ -1474,18 +1483,22 @@ static void
 key_source_print (const struct key_source *k,
 		  const char *prefix)
 {
+  struct gc_arena gc = gc_new ();
+
   msg (D_SHOW_KEY_SOURCE,
        "%s pre_master: %s",
        prefix,
-       format_hex (k->pre_master, sizeof (k->pre_master), 0));
+       format_hex (k->pre_master, sizeof (k->pre_master), 0, &gc));
   msg (D_SHOW_KEY_SOURCE,
        "%s random1: %s",
        prefix,
-       format_hex (k->random1, sizeof (k->random1), 0));
+       format_hex (k->random1, sizeof (k->random1), 0, &gc));
   msg (D_SHOW_KEY_SOURCE,
        "%s random2: %s",
        prefix,
-       format_hex (k->random2, sizeof (k->random2), 0));
+       format_hex (k->random2, sizeof (k->random2), 0, &gc));
+
+  gc_free (&gc);
 }
 
 static void
@@ -1524,6 +1537,7 @@ tls1_P_hash(const EVP_MD *md,
 	    uint8_t *out,
 	    int olen)
 {
+  struct gc_arena gc = gc_new ();
   int chunk,n;
   unsigned int j;
   HMAC_CTX ctx;
@@ -1533,8 +1547,8 @@ tls1_P_hash(const EVP_MD *md,
   const int olen_orig = olen;
   const uint8_t *out_orig = out;
 	
-  msg (D_SHOW_KEY_SOURCE, "tls1_P_hash sec: %s", format_hex (sec, sec_len, 0));
-  msg (D_SHOW_KEY_SOURCE, "tls1_P_hash seed: %s", format_hex (seed, seed_len, 0));
+  msg (D_SHOW_KEY_SOURCE, "tls1_P_hash sec: %s", format_hex (sec, sec_len, 0, &gc));
+  msg (D_SHOW_KEY_SOURCE, "tls1_P_hash seed: %s", format_hex (seed, seed_len, 0, &gc));
 
   chunk=EVP_MD_size(md);
 
@@ -1572,7 +1586,8 @@ tls1_P_hash(const EVP_MD *md,
   HMAC_CTX_cleanup(&ctx_tmp);
   CLEAR (A1);
 
-  msg (D_SHOW_KEY_SOURCE, "tls1_P_hash out: %s", format_hex (out_orig, olen_orig, 0));
+  msg (D_SHOW_KEY_SOURCE, "tls1_P_hash out: %s", format_hex (out_orig, olen_orig, 0, &gc));
+  gc_free (&gc);
 }
 
 static void
@@ -1583,14 +1598,14 @@ tls1_PRF(uint8_t *label,
 	 uint8_t *out1,
 	 int olen)
 {
+  struct gc_arena gc = gc_new ();
   const EVP_MD *md5 = EVP_md5();
   const EVP_MD *sha1 = EVP_sha1();
   int len,i;
   const uint8_t *S1,*S2;
   uint8_t *out2;
 
-  out2 = (uint8_t *) malloc (olen);
-  ASSERT (out2);
+  out2 = (uint8_t *) gc_malloc (olen, false, &gc);
 
   len=slen/2;
   S1=sec;
@@ -1605,9 +1620,10 @@ tls1_PRF(uint8_t *label,
     out1[i]^=out2[i];
 
   memset (out2, 0, olen);
-  free (out2);
 
-  msg (D_SHOW_KEY_SOURCE, "tls1_PRF out[%d]: %s", olen, format_hex (out1, olen, 0));
+  msg (D_SHOW_KEY_SOURCE, "tls1_PRF out[%d]: %s", olen, format_hex (out1, olen, 0, &gc));
+
+  gc_free (&gc);
 }
 
 static void
@@ -1831,6 +1847,7 @@ tls_process (struct tls_multi *multi,
 	     interval_t *wakeup,
 	     time_t current)
 {
+  struct gc_arena gc = gc_new ();
   struct buffer *buf;
   bool state_change = false;
   bool active = false;
@@ -1902,7 +1919,7 @@ tls_process (struct tls_multi *multi,
 		  ks->state = S_PRE_START;
 		  state_change = true;
 		  msg (D_TLS_DEBUG, "Initial Handshake, sid=%s",
-		       session_id_print (&session->session_id));
+		       session_id_print (&session->session_id, &gc));
 		}
 	    }
 
@@ -2322,6 +2339,7 @@ tls_process (struct tls_multi *multi,
 
     msg (D_TLS_DEBUG, "tls_process: timeout set to %d", *wakeup);
 
+    gc_free (&gc);
     return active;
   }
 
@@ -2329,6 +2347,7 @@ error:
   ks->state = S_ERROR;
   msg (D_TLS_ERRORS, "TLS Error: TLS handshake failed");
   INCR_ERROR;
+  gc_free (&gc);
   return false;
 }
 
@@ -2350,10 +2369,13 @@ tls_multi_process (struct tls_multi *multi,
 		   interval_t *wakeup,
 		   time_t current)
 {
+  struct gc_arena gc = gc_new ();
   int i;
   bool active = false;
 
+  msg (D_TLS_DEBUG, "TLSMP: pre lock");
   mutex_lock (L_TLS);
+  msg (D_TLS_DEBUG, "TLSMP: post lock");
 
   /*
    * Process each session object having state of S_INITIAL or greater,
@@ -2375,9 +2397,9 @@ tls_multi_process (struct tls_multi *multi,
 	   "tls_multi_process: i=%d state=%s, mysid=%s, stored-sid=%s, stored-ip=%s",
 	   i,
 	   state_name (ks->state),
-	   session_id_print (&session->session_id),
-	   session_id_print (&ks->session_id_remote),
-	   print_sockaddr (&ks->remote_addr));
+	   session_id_print (&session->session_id, &gc),
+	   session_id_print (&ks->session_id_remote, &gc),
+	   print_sockaddr (&ks->remote_addr, &gc));
 
       if (ks->state >= S_INITIAL && addr_defined (&ks->remote_addr))
 	{
@@ -2425,6 +2447,7 @@ tls_multi_process (struct tls_multi *multi,
 
   mutex_unlock (L_TLS);
 
+  gc_free (&gc);
   return active;
 }
 
@@ -2451,7 +2474,6 @@ local_sock_fatal (int status)
 static void *
 thread_func (void *arg)
 {
-  const int gc_level = gc_new_level ();
   const struct thread_parms *parm = (struct thread_parms*) arg;
   struct buffer buf;
 
@@ -2487,12 +2509,13 @@ thread_func (void *arg)
 
       CLEAR (ret);
   
-      /* do a quick garbage collect */
-      gc_collect (gc_level);
+      msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: pre-tls_multi_process"); // JYFIXME
 
       /* do one SSL/TLS process pass */
       tls_multi_process (parm->multi, &buf, &ret.to_link_addr,
 			 parm->link_socket, &wakeup, current);
+
+      msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: post-tls_multi_process"); // JYFIXME
 
       /* determine events to wait for */
       FD_ZERO (&writes);
@@ -2573,7 +2596,6 @@ thread_func (void *arg)
  exit:
   msg (D_TLS_THREAD_DEBUG, "TLS_THREAD: exiting");
   close (parm->sd[TLS_THREAD_WORKER]);
-  gc_free_level (gc_level);
   return NULL;
 }
 
@@ -2641,7 +2663,7 @@ tls_thread_create (struct thread_parms *state,
   set_nonblock (state->sd[TLS_THREAD_WORKER]);
   set_cloexec (state->sd[TLS_THREAD_MAIN]);
   set_cloexec (state->sd[TLS_THREAD_WORKER]);
-  work_thread_create (thread_func, (void*)state);
+  multi->work_thread_id = openvpn_thread_create (thread_func, (void*)state);
 }
 
 /*
@@ -2673,7 +2695,7 @@ void
 tls_thread_close (struct thread_parms *state)
 {
   tls_thread_send_command (state, TTCMD_EXIT, true);
-  work_thread_join ();
+  openvpn_thread_join (state->multi->work_thread_id);
   tls_thread_flush (state);
   close (state->sd[TLS_THREAD_MAIN]);
 }
@@ -2711,8 +2733,6 @@ tls_thread_rec_buf (struct thread_parms *state, struct tt_ret* ttr, bool do_chec
 /*
  * Send a payload over the TLS control channel.
  * Called externally.
- *
- * Must be called with L_TLS lock held.
  */
 
 bool
@@ -2736,7 +2756,7 @@ tls_send_payload (struct tls_multi *multi,
 	ret = true;
     }
 
-  mutex_lock (L_TLS);
+  mutex_unlock (L_TLS);
   return ret;
 }
 
@@ -2762,7 +2782,7 @@ tls_rec_payload (struct tls_multi *multi,
       ks->plaintext_read_buf.len = 0;
     }
 
-  mutex_lock (L_TLS);
+  mutex_unlock (L_TLS);
   return ret;
 }
 
@@ -2803,6 +2823,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		 struct crypto_options *opt,
 		 time_t current)
 {
+  struct gc_arena gc = gc_new ();
   bool ret = false;
 
   if (buf->len > 0)
@@ -2837,14 +2858,15 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  ks->n_bytes += buf->len;
 		  msg (D_TLS_DEBUG,
 		       "tls_pre_decrypt: data channel, key_id=%d, IP=%s",
-		       key_id, print_sockaddr (from));
+		       key_id, print_sockaddr (from, &gc));
+		  gc_free (&gc);
 		  return ret;
 		}
 	    }
 
 	  msg (D_TLS_ERRORS,
 	       "TLS Error: Unknown data channel key ID or IP address received from %s: %d (see FAQ for more info on this error)",
-	       print_sockaddr (from), key_id);
+	       print_sockaddr (from, &gc), key_id);
 	  goto error;
 	}
       else			  /* control channel packet */
@@ -2858,7 +2880,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	    {
 	      msg (D_TLS_ERRORS,
 		   "TLS Error: unknown opcode received from %s op=%d",
-		   print_sockaddr (from), op);
+		   print_sockaddr (from, &gc), op);
 	      goto error;
 	    }
 
@@ -2873,7 +2895,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		{
 		  msg (D_TLS_ERRORS,
 		       "TLS Error: client->client or server->server connection attempted from %s",
-		       print_sockaddr (from));
+		       print_sockaddr (from, &gc));
 		  goto error;
 		}
 	    }
@@ -2882,7 +2904,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	   * Authenticate Packet
 	   */
 	  msg (D_TLS_DEBUG, "tls_pre_decrypt: control channel, op=%s, IP=%s",
-	       packet_opcode_name (op), print_sockaddr (from));
+	       packet_opcode_name (op), print_sockaddr (from, &gc));
 
 	  /* get remote session-id */
 	  {
@@ -2892,7 +2914,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	      {
 		msg (D_TLS_ERRORS,
 		     "TLS Error: session-id not found in packet from %s",
-		     print_sockaddr (from));
+		     print_sockaddr (from, &gc));
 		goto error;
 	      }
 	  }
@@ -2907,11 +2929,11 @@ tls_pre_decrypt (struct tls_multi *multi,
 		   "tls_pre_decrypt: initial packet test, i=%d state=%s, mysid=%s, rec-sid=%s, rec-ip=%s, stored-sid=%s, stored-ip=%s",
 		   i,
 		   state_name (ks->state),
-		   session_id_print (&session->session_id),
-		   session_id_print (&sid),
-		   print_sockaddr (from),
-		   session_id_print (&ks->session_id_remote),
-		   print_sockaddr (&ks->remote_addr));
+		   session_id_print (&session->session_id, &gc),
+		   session_id_print (&sid, &gc),
+		   print_sockaddr (from, &gc),
+		   session_id_print (&ks->session_id_remote, &gc),
+		   print_sockaddr (&ks->remote_addr, &gc));
 
 	      if (session_id_equal (&ks->session_id_remote, &sid))
 		/* found a match */
@@ -2919,12 +2941,12 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  if (i == TM_LAME_DUCK) {
 		    msg (D_TLS_ERRORS,
 			 "TLS ERROR: received control packet with stale session-id=%s",
-			 session_id_print (&sid));
+			 session_id_print (&sid, &gc));
 		    goto error;
 		  }
 		  msg (D_TLS_DEBUG,
 		       "tls_pre_decrypt: found match, session[%d], sid=%s",
-		       i, session_id_print (&sid));
+		       i, session_id_print (&sid, &gc));
 		  break;
 		}
 	    }
@@ -2951,8 +2973,8 @@ tls_pre_decrypt (struct tls_multi *multi,
 		{
 		  msg (D_TLS_DEBUG_LOW,
 		       "TLS: tls_pre_decrypt: first response to initial packet from %s, sid=%s",
-		       print_sockaddr (from),
-		       session_id_print (&sid));
+		       print_sockaddr (from, &gc),
+		       session_id_print (&sid, &gc));
 		  do_burst = true;
 		  new_link = true;
 		  i = TM_ACTIVE;
@@ -2987,7 +3009,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	       */
 	      msg (D_TLS_DEBUG_LOW,
 		   "TLS: tls_pre_decrypt: new session incoming connection from %s",
-		   print_sockaddr (from));
+		   print_sockaddr (from, &gc));
 
 	      new_link = true;
 	      i = TM_UNTRUSTED;
@@ -3005,7 +3027,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		{
 		  msg (D_TLS_ERRORS,
 		       "TLS Error: Unroutable control packet received from %s (si=%d op=%s)",
-		       print_sockaddr (from),
+		       print_sockaddr (from, &gc),
 		       i,
 		       packet_opcode_name (op));
 		  goto error;
@@ -3017,7 +3039,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	      if (!new_link && !addr_port_match (&ks->remote_addr, from))
 		{
 		  msg (D_TLS_ERRORS, "TLS Error: Received control packet from unexpected IP addr: %s",
-		      print_sockaddr (from));
+		      print_sockaddr (from, &gc));
 		  goto error;
 		}
 
@@ -3034,7 +3056,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 
 		  msg (D_TLS_DEBUG,
 		       "tls_pre_decrypt: received P_CONTROL_SOFT_RESET_V1 s=%d sid=%s",
-		       i, session_id_print (&sid));
+		       i, session_id_print (&sid, &gc));
 		}
 	      else
 		{
@@ -3049,7 +3071,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 
 		  msg (D_TLS_DEBUG,
 		       "tls_pre_decrypt: received control channel packet s#=%d sid=%s",
-		       i, session_id_print (&sid));
+		       i, session_id_print (&sid, &gc));
 		}
 	    }
 	  
@@ -3060,7 +3082,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	    {
 	      msg (D_TLS_ERRORS,
 		   "TLS Error: Cannot accept new session request from %s due to --single-session",
-		   print_sockaddr (from));
+		   print_sockaddr (from, &gc));
 	      goto error;
 	    }
 
@@ -3094,7 +3116,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	      {
 		msg (D_TLS_ERRORS,
 		     "TLS Error: Existing session control channel packet from unknown IP address: %s",
-		     print_sockaddr (from));
+		     print_sockaddr (from, &gc));
 		goto error;
 	      }
 
@@ -3114,7 +3136,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 	      {
 		msg (D_TLS_ERRORS,
 		     "TLS ERROR: local/remote key IDs out of sync (%d/%d) ID: %s",
-		     ks->key_id, key_id, print_key_id (multi));
+		     ks->key_id, key_id, print_key_id (multi, &gc));
 		goto error;
 	      }
 	      
@@ -3170,6 +3192,7 @@ tls_pre_decrypt (struct tls_multi *multi,
   opt->packet_id = NULL;
   opt->pid_persist = NULL;
   opt->packet_id_long_form = false;
+  gc_free (&gc);
   return ret;
 
  error:
@@ -3189,6 +3212,7 @@ tls_pre_decrypt_dynamic (const struct tls_multi *multi,
 			 const struct buffer *buf,
 			 time_t current)
 {
+  struct gc_arena gc = gc_new ();
   bool ret = false;
 
   if (buf->len > 0)
@@ -3211,7 +3235,7 @@ tls_pre_decrypt_dynamic (const struct tls_multi *multi,
 	  msg (D_TLS_ERRORS,
 	       "TLS Error: Unknown opcode (%d) received from %s -- make sure the connecting client is using the --dynamic option",
 	       op,
-	       print_sockaddr (from));
+	       print_sockaddr (from, &gc));
 	  goto error;
 	}
 
@@ -3220,7 +3244,7 @@ tls_pre_decrypt_dynamic (const struct tls_multi *multi,
 	  msg (D_TLS_ERRORS,
 	       "TLS Error: Unknown key ID (%d) received from %s -- 0 was expected",
 	       key_id,
-	       print_sockaddr (from));
+	       print_sockaddr (from, &gc));
 	  goto error;
 	}
 
@@ -3229,7 +3253,7 @@ tls_pre_decrypt_dynamic (const struct tls_multi *multi,
 	  msg (D_TLS_ERRORS,
 	       "TLS Error: Large packet (size %d) received from %s -- a packet no larger than %d bytes was expected",
 	       buf->len,
-	       print_sockaddr (from),
+	       print_sockaddr (from, &gc),
 	       EXPANDED_SIZE_DYNAMIC (&multi->opt.frame));
 	  goto error;
 	}
@@ -3273,6 +3297,7 @@ tls_pre_decrypt_dynamic (const struct tls_multi *multi,
       }
     }
  error:
+  gc_free (&gc);
   return ret;
 }
 
@@ -3299,8 +3324,13 @@ tls_pre_encrypt (struct tls_multi *multi,
 	      return;
 	    }
 	}
-      msg (D_TLS_NO_SEND_KEY, "TLS Warning: no data channel send key available: %s",
-	   print_key_id (multi));
+
+      {
+	struct gc_arena gc = gc_new ();
+	msg (D_TLS_NO_SEND_KEY, "TLS Warning: no data channel send key available: %s",
+	     print_key_id (multi, &gc));
+	gc_free (&gc);
+      }
     }
 
   buf->len = 0;
@@ -3334,9 +3364,9 @@ tls_post_encrypt (struct tls_multi *multi, struct buffer *buf)
  * into a garbage collectable string which is returned.
  */
 const char *
-protocol_dump (struct buffer *buffer, unsigned int flags)
+protocol_dump (struct buffer *buffer, unsigned int flags, struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (256);
+  struct buffer out = alloc_buf_gc (256, gc);
   struct buffer buf = *buffer;
 
   uint8_t c;
@@ -3375,7 +3405,7 @@ protocol_dump (struct buffer *buffer, unsigned int flags)
     if (!session_id_read (&sid, &buf))
       goto done;
     if (flags & PD_VERBOSE)
-	buf_printf (&out, " sid=%s", session_id_print (&sid));
+	buf_printf (&out, " sid=%s", session_id_print (&sid, gc));
   }
 
   /*
@@ -3391,17 +3421,17 @@ protocol_dump (struct buffer *buffer, unsigned int flags)
       if (!buf_read (&buf, tls_auth_hmac, tls_auth_hmac_size))
 	goto done;
       if (flags & PD_VERBOSE)
-	buf_printf (&out, " tls_hmac=%s", format_hex (tls_auth_hmac, tls_auth_hmac_size, 0));
+	buf_printf (&out, " tls_hmac=%s", format_hex (tls_auth_hmac, tls_auth_hmac_size, 0, gc));
 
       if (!packet_id_read (&pin, &buf, true))
 	goto done;
-      buf_printf(&out, " pid=%s", packet_id_net_print (&pin, (flags & PD_VERBOSE)));
+      buf_printf(&out, " pid=%s", packet_id_net_print (&pin, (flags & PD_VERBOSE), gc));
     }
 
   /*
    * ACK list
    */
-  buf_printf (&out, " %s", reliable_ack_print(&buf, (flags & PD_VERBOSE)));
+  buf_printf (&out, " %s", reliable_ack_print(&buf, (flags & PD_VERBOSE), gc));
 
   if (op == P_ACK_V1)
     goto done;
@@ -3419,7 +3449,7 @@ protocol_dump (struct buffer *buffer, unsigned int flags)
 
 print_data:
   if (flags & PD_SHOW_DATA)
-    buf_printf (&out, " DATA %s", format_hex (BPTR (&buf), BLEN (&buf), 80));
+    buf_printf (&out, " DATA %s", format_hex (BPTR (&buf), BLEN (&buf), 80, gc));
   else
     buf_printf (&out, " DATA len=%d", buf.len);
 

@@ -93,8 +93,8 @@ struct link_socket
 # define SOCKET_SET_WRITE(w, s)  { wait_add ((w), (s)->writes.overlapped.hEvent); }
 # define SOCKET_ISSET(w, s, set) ( wait_trigger ((w), (s)->set.overlapped.hEvent))
 # define SOCKET_SETMAXFD(w, s)
-# define SOCKET_READ_STAT(w, s)  (overlapped_io_state_ascii (&((s)->reads),  "sr"))
-# define SOCKET_WRITE_STAT(w, s) (overlapped_io_state_ascii (&((s)->writes), "sw"))
+# define SOCKET_READ_STAT(w, s, gc)  (overlapped_io_state_ascii (&((s)->reads),  "sr", (gc)))
+# define SOCKET_WRITE_STAT(w, s, gc) (overlapped_io_state_ascii (&((s)->writes), "sw", (gc)))
   struct overlapped_io reads;
   struct overlapped_io writes;
 #else
@@ -104,8 +104,8 @@ struct link_socket
 # define SOCKET_SET_WRITE(w, s) {  FD_SET   ((s)->sd, &((w)->writes)); }
 # define SOCKET_ISSET(w, s, set)   (FD_ISSET ((s)->sd, &((w)->set)))
 # define SOCKET_SETMAXFD(w, s)  {  wait_update_maxfd ((w), (s)->sd); }
-# define SOCKET_READ_STAT(w, s)    (SOCKET_ISSET ((w), (s), reads) ?  "SR" : "sr")
-# define SOCKET_WRITE_STAT(w, s)   (SOCKET_ISSET ((w), (s), writes) ? "SW" : "sw")
+# define SOCKET_READ_STAT(w, s, gc)    (SOCKET_ISSET ((w), (s), reads) ?  "SR" : "sr")
+# define SOCKET_WRITE_STAT(w, s, gc)   (SOCKET_ISSET ((w), (s), writes) ? "SW" : "sw")
 #endif
 
   socket_descriptor_t sd;
@@ -236,11 +236,15 @@ void link_socket_close (struct link_socket *sock);
 
 const char *print_sockaddr_ex (const struct sockaddr_in *addr,
 			       bool do_port,
-			       const char* separator);
+			       const char* separator,
+			       struct gc_arena *gc);
 
-const char *print_sockaddr (const struct sockaddr_in *addr);
+const char *print_sockaddr (const struct sockaddr_in *addr,
+			    struct gc_arena *gc);
 
-const char *print_in_addr_t (in_addr_t addr, bool empty_if_undef);
+const char *print_in_addr_t (in_addr_t addr,
+			     bool empty_if_undef,
+			     struct gc_arena *gc);
 
 void setenv_sockaddr (const char *name_prefix,
 		      const struct sockaddr_in *addr);
@@ -279,7 +283,7 @@ in_addr_t getaddr (unsigned int flags,
 
 int ascii2proto (const char* proto_name);
 const char *proto2ascii (int proto, bool display_form);
-const char *proto2ascii_all ();
+const char *proto2ascii_all (struct gc_arena *gc);
 int proto_remote (int proto, bool remote);
 
 /*

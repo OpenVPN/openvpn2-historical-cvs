@@ -40,54 +40,50 @@
 #define L_STRERR    5
 #define L_PUTENV    6
 #define L_PRNG      7
-#define N_MUTEXES   8
+#define L_GC_MALLOC 8
+#define N_MUTEXES   9
 
 #ifdef USE_PTHREAD
 
-extern pthread_t x_main_thread_id;
-extern pthread_t x_work_thread_id;
-extern pthread_mutex_t x_lock_cs[N_MUTEXES];
-extern bool x_lock_cs_init;
+typedef pthread_t openvpn_thread_t;
 
-#define MAIN_THREAD 0
-#define WORK_THREAD 1
-#define N_THREADS   2
+extern bool pthread_initialized;
+extern pthread_mutex_t pthread_lock[N_MUTEXES];
 
-#define MUTEX_DEFINE_STATIC(lock)  static pthread_mutex_t lock
 #define MUTEX_DEFINE(lock)         pthread_mutex_t lock
 #define MUTEX_INIT(lock)           pthread_mutex_init (&lock, NULL)
 #define MUTEX_DESTROY(lock)        pthread_mutex_destroy (&lock)
 #define MUTEX_LOCK(lock)           pthread_mutex_lock (&lock)
 #define MUTEX_UNLOCK(lock)         pthread_mutex_unlock (&lock)
 
-static inline int
-thread_number(void)
+static inline bool
+openvpn_thread_enabled (void)
 {
-  return (!x_main_thread_id || pthread_self () == x_main_thread_id) ? MAIN_THREAD : WORK_THREAD;
+  return pthread_initialized;
+}
+
+static inline openvpn_thread_t
+openvpn_thread_self (void)
+{
+  return pthread_initialized ? pthread_self() : 0;
 }
 
 static inline void
 mutex_lock (int type)
 {
-  if (x_lock_cs_init)
-    {
-      pthread_mutex_lock (&(x_lock_cs[type]));
-    }
+  if (pthread_initialized)
+    pthread_mutex_lock (&pthread_lock[type]);
 }
 
 static inline void
 mutex_unlock (int type)
 {
-  if (x_lock_cs_init)
+  if (pthread_initialized)
     {
-      pthread_mutex_unlock (&(x_lock_cs[type]));
-
-#if 0
+      pthread_mutex_unlock (&pthread_lock[type]);
+#if 1 // JYFIXME
       /* DEBUGGING -- if race conditions exist, make them more likely to occur */
-      {
-	if (thread_number() == WORK_THREAD)
-	  sleep (0);
-      }
+      sleep (0);
 #endif
     }
 }
@@ -95,54 +91,60 @@ mutex_unlock (int type)
 static inline void
 mutex_cycle (int type)
 {
-  if (x_lock_cs_init)
+  if (pthread_initialized)
     {
-      pthread_mutex_unlock (&(x_lock_cs[type]));
+      pthread_mutex_unlock (&pthread_lock[type]);
       sleep (0);
-      pthread_mutex_lock (&(x_lock_cs[type]));
+      pthread_mutex_lock (&pthread_lock[type]);
     }
 }
 
-void thread_init(void);
-void thread_cleanup(void);
+void openvpn_thread_init (void);
+void openvpn_thread_cleanup (void);
 
-void work_thread_create (void *(*start_routine) (void *), void* arg);
-void work_thread_join (void);
+openvpn_thread_t openvpn_thread_create (void *(*start_routine) (void *), void* arg);
+void openvpn_thread_join (openvpn_thread_t id);
 
 #else /* USE_PTHREAD */
 
-#define N_THREADS 1
+typedef int openvpn_thread_t;
 
-#define MUTEX_DEFINE_STATIC(lock)
 #define MUTEX_DEFINE(lock)
 #define MUTEX_INIT(lock)
 #define MUTEX_DESTROY(lock)
 #define MUTEX_LOCK(lock)
 #define MUTEX_UNLOCK(lock)
 
-static inline void
-thread_init(void)
+static inline bool
+openvpn_thread_enabled (void)
 {
+  return false;
 }
 
-static inline void
-thread_cleanup(void)
-{
-}
-
-static inline int
-thread_number(void)
+static inline openvpn_thread_t
+openvpn_thread_self (void)
 {
   return 0;
 }
 
 static inline void
-work_thread_create (void *(*start_routine) (void *), void* arg)
+openvpn_thread_init (void)
 {
 }
 
 static inline void
-work_thread_join (void)
+openvpn_thread_cleanup (void)
+{
+}
+
+static inline openvpn_thread_t
+openvpn_thread_create (void *(*start_routine) (void *), void* arg)
+{
+  return 0;
+}
+
+static inline void
+work_thread_join (openvpn_thread_t id)
 {
 }
 

@@ -40,8 +40,6 @@
 static void
 tunnel_point_to_point (struct context *c)
 {
-  const int gc_level = gc_new_level ();
-
   c->mode = CM_P2P;
   context_clear_2 (c);
 
@@ -57,9 +55,6 @@ tunnel_point_to_point (struct context *c)
       pre_select (c);
       if (IS_SIG (c))
 	break;
-
-      /* garbage collect */
-      gc_collect (gc_level);
 
       /* set up and do the select() */
       single_select (c);
@@ -89,7 +84,6 @@ tunnel_point_to_point (struct context *c)
   /* tear down tunnel instance (unless --persist-tun) */
   close_instance (c);
   c->first_time = false;
-  gc_free_level (gc_level);
 }
 
 #if P2MP
@@ -114,7 +108,6 @@ tunnel_point_to_point (struct context *c)
 static void
 tunnel_nonforking_udp_server (struct context *top)
 {
-  const int gc_level = gc_new_level ();
   struct multi_context multi;
 
   ASSERT (top->options.proto == PROTO_UDPv4);
@@ -135,9 +128,6 @@ tunnel_nonforking_udp_server (struct context *top)
   /* per-packet event loop */
   while (true)
     {
-      /* garbage collect */
-      gc_collect (gc_level);
-
       /* set up and do the select() */
       multi_select (&multi, top);
       TNUS_SIG ();
@@ -158,7 +148,6 @@ tunnel_nonforking_udp_server (struct context *top)
   close_instance (top);
   multi_uninit (&multi);
   top->first_time = false;
-  gc_free_level (gc_level);
 }
 
 #endif
@@ -167,7 +156,6 @@ int
 main (int argc, char *argv[])
 {
   struct context c;
-  const int gc_level = gc_new_level ();
 
   /* signify first time for components which can
      only be initialized once per program instantiation. */
@@ -184,6 +172,9 @@ main (int argc, char *argv[])
     {
       /* zero context struct but leave first_time member alone */
       context_clear_all_except_first_time (&c);
+
+      /* initialize garbage collector scoped to context object */
+      gc_init (&c.gc);
 
       /* static signal info object */
       c.sig = &siginfo_static;
@@ -248,16 +239,15 @@ main (int argc, char *argv[])
 	}
       while (c.sig->signal_received == SIGUSR1);
 
-      gc_collect (gc_level);
-
+      uninit_options (&c.options);
+      gc_reset (&c.gc);
     }
   while (c.sig->signal_received == SIGHUP);
 
   /* uninitialize program-wide statics */
   uninit_static ();
 
-  /* pop our garbage collection level */
-  gc_free_level (gc_level);
+  context_gc_free (&c);
 
   openvpn_exit (OPENVPN_EXIT_STATUS_GOOD);  /* exit point */
   return 0;			            /* NOTREACHED */

@@ -32,7 +32,6 @@
 #include "syshead.h"
 
 #include "common.h"
-#include "buffer.h"
 #include "misc.h"
 #include "io.h"
 #include "socket.h"
@@ -186,7 +185,7 @@ send_crlf (socket_descriptor_t sd)
 }
 
 static uint8_t *
-make_base64_string (const uint8_t *str)
+make_base64_string (const uint8_t *str, struct gc_arena *gc)
 {
   static const char base64_table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -199,7 +198,7 @@ make_base64_string (const uint8_t *str)
   /* make base64 string */
   src_len = strlen (str);
   dst_len = (src_len + 2) / 3 * 4;
-  buf = gc_malloc (dst_len + 1);
+  buf = gc_malloc (dst_len + 1, false, gc);
   bits = data = 0;
   src = str;
   dst = buf;
@@ -229,23 +228,24 @@ make_base64_string (const uint8_t *str)
 }
 
 static const char *
-username_password_as_base64 (const struct http_proxy_info *p)
+username_password_as_base64 (const struct http_proxy_info *p,
+			     struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (strlen (p->username) + strlen (p->password) + 2);
+  struct buffer out = alloc_buf_gc (strlen (p->username) + strlen (p->password) + 2, gc);
   ASSERT (strlen (p->username) > 0);
   buf_printf (&out, "%s:%s", p->username, p->password);
-  return make_base64_string (BSTR (&out));
+  return make_base64_string (BSTR (&out), gc);
 }
 
-void
-init_http_proxy (struct http_proxy_info *p,
-		 const char *server,
-		 int port,
-		 bool retry,
-		 const char *auth_method,
-		 const char *auth_file)
+struct http_proxy_info *
+new_http_proxy (const char *server,
+		int port,
+		bool retry,
+		const char *auth_method,
+		const char *auth_file,
+		struct gc_arena *gc)
 {
-  CLEAR (*p);
+  struct http_proxy_info *p = (struct http_proxy_info *) gc_malloc (sizeof (struct http_proxy_info), true, gc);
   ASSERT (server);
   ASSERT (legal_ipv4_port (port));
 
@@ -294,6 +294,7 @@ init_http_proxy (struct http_proxy_info *p,
     }
 
   p->defined = true;
+  return p;
 }
 
 void
@@ -304,6 +305,7 @@ establish_http_proxy_passthru (struct http_proxy_info *p,
 			       struct buffer *lookahead,
 			       volatile int *signal_received)
 {
+  struct gc_arena gc = gc_new ();
   char buf[128];
   int status;
   int nparms;
@@ -324,7 +326,7 @@ establish_http_proxy_passthru (struct http_proxy_info *p,
 
     case HTTP_AUTH_BASIC:
       openvpn_snprintf (buf, sizeof(buf), "Proxy-Authorization: Basic %s",
-			username_password_as_base64 (p));
+			username_password_as_base64 (p, &gc));
       msg (D_PROXY, "Attempting Basic Proxy-Authorization");
       msg (D_SHOW_KEYS, "Send to HTTP proxy: '%s'", buf);
       sleep (1);
@@ -386,11 +388,13 @@ establish_http_proxy_passthru (struct http_proxy_info *p,
     msg (M_INFO, "HTTP PROXY: lookahead: %s", format_hex (BPTR (lookahead), BLEN (lookahead), 0));
 #endif
 
+  gc_free (&gc);
   return;
 
  error:
   /* on error, should we exit or restart? */
   if (!*signal_received)
     *signal_received = (p->retry ? SIGUSR1 : SIGTERM);
+  gc_free (&gc);
   return;
 }

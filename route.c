@@ -36,7 +36,6 @@
 #include "syshead.h"
 
 #include "common.h"
-#include "buffer.h"
 #include "error.h"
 #include "route.h"
 #include "misc.h"
@@ -45,30 +44,30 @@
 
 #include "memdbg.h"
 
-#if defined(TARGET_FREEBSD)
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-
-struct {
-  struct rt_msghdr m_rtm;
-  char       m_space[512];
-} m_rtmsg;
-
-#endif
-
 static void add_route (struct route *r);
 static void delete_route (const struct route *r);
 static bool get_default_gateway (in_addr_t *ret);
 
-static const char *
-route_string (const struct route *r)
+struct route_option_list *
+new_route_option_list (struct gc_arena *a)
 {
-  struct buffer out = alloc_buf_gc (256);
+  return (struct route_option_list *) gc_malloc (sizeof (struct route_option_list), true, a);
+}
+
+struct route_list *
+new_route_list (struct gc_arena *a)
+{
+  return (struct route_list *) gc_malloc (sizeof (struct route_option_list), true, a);
+}
+
+static const char *
+route_string (const struct route *r, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (256, gc);
   buf_printf (&out, "ROUTE network %s netmask %s gateway %s",
-	      print_in_addr_t (r->network, false),
-	      print_in_addr_t (r->netmask, false),
-	      print_in_addr_t (r->gateway, false)
+	      print_in_addr_t (r->network, false, gc),
+	      print_in_addr_t (r->netmask, false, gc),
+	      print_in_addr_t (r->gateway, false, gc)
 	      );
   if (r->metric_defined)
     buf_printf (&out, " metric %d", r->metric);
@@ -88,12 +87,14 @@ is_route_parm_defined (const char *parm)
 static void
 setenv_route_addr (const char *key, const in_addr_t addr, int i)
 {
+  struct gc_arena gc = gc_new ();
   char name[128];
   if (i >= 0)
     openvpn_snprintf (name, sizeof (name), "route_%s_%d", key, i);
   else
     openvpn_snprintf (name, sizeof (name), "route_%s", key);
-  setenv_str (name, print_in_addr_t (addr, false));
+  setenv_str (name, print_in_addr_t (addr, false, &gc));
+  gc_free (&gc);
 }
 
 static bool
@@ -499,8 +500,10 @@ print_route_options (const struct route_option_list *rol,
 static void
 print_route (const struct route *r, int level)
 {
+  struct gc_arena gc = gc_new ();
   if (r->defined)
-    msg (level, "%s", route_string (r));
+    msg (level, "%s", route_string (r, &gc));
+  gc_free (&gc);
 }
 
 void
@@ -540,7 +543,7 @@ setenv_routes (const struct route_list *rl)
 static void
 add_route (struct route *r)
 {
-  int gc_level;
+  struct gc_arena gc;
   struct buffer buf;
   const char *network;
   const char *netmask;
@@ -550,11 +553,12 @@ add_route (struct route *r)
   if (!r->defined)
     return;
 
-  gc_level = gc_new_level ();
-  buf = alloc_buf_gc (256);
-  network = print_in_addr_t (r->network, false);
-  netmask = print_in_addr_t (r->netmask, false);
-  gateway = print_in_addr_t (r->gateway, false);
+  gc_init (&gc);
+  buf = alloc_buf_gc (256, &gc);
+
+  network = print_in_addr_t (r->network, false, &gc);
+  netmask = print_in_addr_t (r->netmask, false, &gc);
+  gateway = print_in_addr_t (r->gateway, false, &gc);
 
 #if defined(TARGET_LINUX)
 #ifdef CONFIG_FEATURE_IPROUTE
@@ -648,13 +652,13 @@ add_route (struct route *r)
 #endif
 
   r->defined = status;
-  gc_free_level (gc_level);
+  gc_free (&gc);
 }
 
 static void
 delete_route (const struct route *r)
 {
-  int gc_level;
+  struct gc_arena gc;
   struct buffer buf;
   const char *network;
   const char *netmask;
@@ -663,11 +667,12 @@ delete_route (const struct route *r)
   if (!r->defined)
     return;
 
-  gc_level = gc_new_level ();
-  buf = alloc_buf_gc (256);
-  network = print_in_addr_t (r->network, false);
-  netmask = print_in_addr_t (r->netmask, false);
-  gateway = print_in_addr_t (r->gateway, false);
+  gc_init (&gc);
+
+  buf = alloc_buf_gc (256, &gc);
+  network = print_in_addr_t (r->network, false, &gc);
+  netmask = print_in_addr_t (r->netmask, false, &gc);
+  gateway = print_in_addr_t (r->gateway, false, &gc);
 
 #if defined(TARGET_LINUX)
 #ifdef CONFIG_FEATURE_IPROUTE
@@ -727,7 +732,7 @@ delete_route (const struct route *r)
   msg (M_FATAL, "Sorry, but I don't know how to do 'route' commands on this operating system.  Try putting your routes in a --route-up script");
 #endif
 
-  gc_free_level (gc_level);
+  gc_free (&gc);
 }
 
 /*
@@ -740,16 +745,19 @@ delete_route (const struct route *r)
 static bool
 get_default_gateway (in_addr_t *ret)
 {
+  struct gc_arena gc = gc_new ();
+
   ULONG size = 0;
   DWORD status;
+  bool ret_bool = false;
 
   if ((status = GetIpForwardTable (NULL, &size, TRUE)) == ERROR_INSUFFICIENT_BUFFER)
     {
       int i;
-      PMIB_IPFORWARDTABLE routes = (PMIB_IPFORWARDTABLE) gc_malloc (size);
+      PMIB_IPFORWARDTABLE routes = (PMIB_IPFORWARDTABLE) gc_malloc (size, false, &gc);
       ASSERT (routes);
       if ((status = GetIpForwardTable (routes, &size, TRUE)) != NO_ERROR)
-	return false;
+	goto done;
 
       for (i = 0; i < routes->dwNumEntries; ++i)
 	{
@@ -758,22 +766,26 @@ get_default_gateway (in_addr_t *ret)
 	  const in_addr_t mask = ntohl (row->dwForwardMask);
 	  const in_addr_t gw = ntohl (row->dwForwardNextHop);
 
-#if 0
+#if 1 // JYFIXME
 	  msg (M_INFO, "route[%d] %s %s %s",
 	       i,
-	       print_in_addr_t ((in_addr_t) net, false),
-	       print_in_addr_t ((in_addr_t) mask, false),
-	       print_in_addr_t ((in_addr_t) gw, false));
+	       print_in_addr_t ((in_addr_t) net, false, &gc),
+	       print_in_addr_t ((in_addr_t) mask, false, &gc),
+	       print_in_addr_t ((in_addr_t) gw, false, &gc));
 #endif
 
 	  if (!net && !mask)
 	    {
 	      *ret = gw;
-	      return true;
+	      ret_bool = true;
+	      break;
 	    }
 	}
     }
-  return false;
+
+ done:
+  gc_free (&gc);
+  return ret_bool;
 }
 
 #elif defined(TARGET_LINUX)
@@ -781,6 +793,7 @@ get_default_gateway (in_addr_t *ret)
 static bool
 get_default_gateway (in_addr_t *ret)
 {
+  struct gc_arena gc = gc_new ();
   FILE *fp = fopen ("/proc/net/route", "r");
   if (fp)
     {
@@ -802,16 +815,17 @@ get_default_gateway (in_addr_t *ret)
 		  const in_addr_t net = ntohl (net_x);
 		  const in_addr_t mask = ntohl (mask_x);
 		  const in_addr_t gw = ntohl (gw_x);
-#if 0
+#if 1 // JYFIXME
 		  msg (M_INFO, "route %s %s %s",
-		       print_in_addr_t ((in_addr_t) net, false),
-		       print_in_addr_t ((in_addr_t) mask, false),
-		       print_in_addr_t ((in_addr_t) gw, false));
+		       print_in_addr_t ((in_addr_t) net, false, &gc),
+		       print_in_addr_t ((in_addr_t) mask, false, &gc),
+		       print_in_addr_t ((in_addr_t) gw, false, &gc));
 #endif
 		  if (!net && !mask)
 		    {
 		      fclose (fp);
 		      *ret = gw;
+		      gc_free (&gc);
 		      return true;
 		    }
 		}
@@ -820,10 +834,69 @@ get_default_gateway (in_addr_t *ret)
 	}
       fclose (fp);
     }
+
+  gc_free (&gc);
   return false;
 }
 
 #elif defined(TARGET_FREEBSD)
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+/* all of this is taken from <net/route.h> in FreeBSD */
+#define RTA_DST     0x1
+#define RTA_GATEWAY 0x2
+#define RTA_NETMASK 0x4
+
+#define RTM_GET     0x4
+#define RTM_VERSION 5
+
+#define RTF_UP      0x1
+#define RTF_GATEWAY 0x2
+
+/*
+ * These numbers are used by reliable protocols for determining
+ * retransmission behavior and are included in the routing structure.
+ */
+struct rt_metrics {
+        u_long  rmx_locks;      /* Kernel must leave these values alone */
+        u_long  rmx_mtu;        /* MTU for this path */
+        u_long  rmx_hopcount;   /* max hops expected */
+        u_long  rmx_expire;     /* lifetime for route, e.g. redirect */
+        u_long  rmx_recvpipe;   /* inbound delay-bandwidth product */
+        u_long  rmx_sendpipe;   /* outbound delay-bandwidth product */
+        u_long  rmx_ssthresh;   /* outbound gateway buffer limit */
+        u_long  rmx_rtt;        /* estimated round trip time */
+        u_long  rmx_rttvar;     /* estimated rtt variance */
+        u_long  rmx_pksent;     /* packets sent using this route */
+        u_long  rmx_filler[4];  /* will be used for T/TCP later */
+};
+
+
+/*
+ * Structures for routing messages.
+ */
+struct rt_msghdr {
+        u_short rtm_msglen;     /* to skip over non-understood messages */
+        u_char  rtm_version;    /* future binary compatibility */
+        u_char  rtm_type;       /* message type */
+        u_short rtm_index;      /* index for associated ifp */
+        int     rtm_flags;      /* flags, incl. kern & message, e.g. DONE */
+        int     rtm_addrs;      /* bitmask identifying sockaddrs in msg */
+        pid_t   rtm_pid;        /* identify sender */
+        int     rtm_seq;        /* for sender to identify action */
+        int     rtm_errno;      /* why failed */
+        int     rtm_use;        /* from rtentry */
+        u_long  rtm_inits;      /* which metrics we are initializing */
+        struct  rt_metrics rtm_rmx; /* metrics themselves */
+};
+
+struct {
+  struct rt_msghdr m_rtm;
+  char       m_space[512];
+} m_rtmsg;
 
 #define ROUNDUP(a) \
         ((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
@@ -831,6 +904,7 @@ get_default_gateway (in_addr_t *ret)
 static bool
 get_default_gateway (in_addr_t *ret)
 {
+  struct gc_arena gc = gc_new ();
   int s, seq, l, pid, rtm_addrs, i;
   struct sockaddr so_dst, so_mask;
   char *cp = m_rtmsg.m_space; 
@@ -872,13 +946,15 @@ get_default_gateway (in_addr_t *ret)
 
   s = socket(PF_ROUTE, SOCK_RAW, 0);
 
-  if (write(s, (char *)&m_rtmsg, l) < 0) {
-                warn("writing to routing socket");
-                return false;
-  }
+  if (write(s, (char *)&m_rtmsg, l) < 0)
+    {
+      warn("writing to routing socket");
+      gc_free (&gc);
+      return false;
+    }
 
   do {
-        l = read(s, (char *)&m_rtmsg, sizeof(m_rtmsg));
+    l = read(s, (char *)&m_rtmsg, sizeof(m_rtmsg));
   } while (l > 0 && (rtm.rtm_seq != seq || rtm.rtm_pid != pid));
                         
 
@@ -886,30 +962,37 @@ get_default_gateway (in_addr_t *ret)
 
   cp = ((char *)(rtm_aux + 1));
   if (rtm_aux->rtm_addrs) {
-        for (i = 1; i; i <<= 1)
-             if (i & rtm_aux->rtm_addrs) {
-                   sa = (struct sockaddr *)cp;
-		   if( i == RTA_GATEWAY )
-                      gate = sa;
-                   ADVANCE(cp, sa);
-	     }
+    for (i = 1; i; i <<= 1)
+      if (i & rtm_aux->rtm_addrs) {
+	sa = (struct sockaddr *)cp;
+	if (i == RTA_GATEWAY )
+	  gate = sa;
+	ADVANCE(cp, sa);
+      }
   }
   else
-	return false;
+    {
+      gc_free (&gc);
+      return false;
+    }
 
 
-  if( gate != NULL )
-  {
-	*ret = ntohl(((struct sockaddr_in *)gate)->sin_addr.s_addr);
+  if (gate != NULL )
+    {
+      *ret = ntohl(((struct sockaddr_in *)gate)->sin_addr.s_addr);
 #if 1
-        msg (M_INFO, "gw %s",
-                 print_in_addr_t ((in_addr_t) *ret, false));
+      msg (M_INFO, "gw %s",
+	   print_in_addr_t ((in_addr_t) *ret, false, &gc));
 #endif
 
-	return true;
-  }
+      gc_free (&gc);
+      return true;
+    }
   else
-	return false;
+    {
+      gc_free (&gc);
+      return false;
+    }
 }
 
 

@@ -94,15 +94,8 @@ typedef uint16_t net_time_t;
 /*
  * Printf formats for special types
  */
-#if SIZEOF_UNSIGNED_LONG == 4
-#define packet_id_format "%lu"
-typedef unsigned long packet_id_print_type;
-#elif SIZEOF_UNSIGNED_INT == 4
 #define packet_id_format "%u"
 typedef unsigned int packet_id_print_type;
-#else
-#error "cannot figure proper format to print uint32_t"
-#endif
 
 /*
  * Maximum allowed backtrack in
@@ -250,7 +243,7 @@ void packet_id_persist_save (struct packet_id_persist *p);
 void packet_id_persist_load_obj (const struct packet_id_persist *p, struct packet_id* pid);
 
 /* return an ascii string representing a packet_id_persist object */
-const char *packet_id_persist_print (const struct packet_id_persist *p);
+const char *packet_id_persist_print (const struct packet_id_persist *p, struct gc_arena *gc);
 
 /*
  * Inline functions.
@@ -274,7 +267,7 @@ packet_id_persist_save_obj (struct packet_id_persist *p, const struct packet_id*
     }
 }
 
-const char* packet_id_net_print(const struct packet_id_net *pin, bool print_timestamp);
+const char* packet_id_net_print(const struct packet_id_net *pin, bool print_timestamp, struct gc_arena *gc);
 
 #ifdef PID_TEST
 void packet_id_interactive_test();

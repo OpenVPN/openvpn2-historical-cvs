@@ -33,6 +33,7 @@
 
 #include "buffer.h"
 #include "error.h"
+#include "thread.h"
 
 #include "memdbg.h"
 
@@ -51,13 +52,13 @@ alloc_buf (size_t size)
 }
 
 struct buffer
-alloc_buf_gc (size_t size)
+alloc_buf_gc (size_t size, struct gc_arena *gc)
 {
   struct buffer buf;
   buf.capacity = (int)size;
   buf.offset = 0;
   buf.len = 0;
-  buf.data = (uint8_t *) gc_malloc (size);
+  buf.data = (uint8_t *) gc_malloc (size, false, gc);
   if (size)
     *buf.data = 0;
   return buf;
@@ -198,39 +199,41 @@ buf_write_string_file (const struct buffer *buf, const char *filename, int fd)
  * Garbage collection
  */
 
-struct gc_thread x_gc_thread[N_THREADS];
-
 void *
-gc_malloc (size_t size)
+gc_malloc (size_t size, bool clear, struct gc_arena *a)
 {
-  struct gc_thread* thread = &x_gc_thread[thread_number()];
-  size_t s = sizeof (struct gc_entry) + size;
-  struct gc_entry *e = (struct gc_entry *) malloc (s);
-  ++thread->gc_count;
+  struct gc_entry *e = (struct gc_entry *) malloc (size + sizeof (struct gc_entry));
+  void *ret;
+
+  ASSERT (a);
   ASSERT (e);
-  e->level = thread->gc_level;
-  e->back = thread->gc_stack;
-  thread->gc_stack = e;
-  /*printf("GC MALLOC " ptr_format " size=%d lev=%d\n", e, s, e->level); */
-  return (char *) e + sizeof (struct gc_entry);
+  ret = (char *) e + sizeof (struct gc_entry);
+  if (clear)
+    memset (ret, 0, size);
+  mutex_lock (L_GC_MALLOC);
+  e->next = a->list;
+  a->list = e;
+  mutex_unlock (L_GC_MALLOC);
+  return ret;
 }
 
-#if 0
 void
-debug_gc_check_corrupt (const char *file, int line)
+x_gc_free (struct gc_arena *a)
 {
-  struct gc_thread* thread = &x_gc_thread[thread_number()];
-  const struct gc_entry *stack = thread->gc_stack;
-  const struct gc_entry *e;
-  while (e = stack)
+  struct gc_entry *e;
+  ASSERT (a);
+  mutex_lock (L_GC_MALLOC);
+  e = a->list;
+  a->list = NULL;
+  mutex_unlock (L_GC_MALLOC);
+  
+  while (e != NULL)
     {
-      if (e->level > thread->gc_level)
-	printf ("GC CORRUPT " ptr_format " lev=%d back=" ptr_format " file=%s line=%d\n",
-		e, e->level, e->back, file, line);
-      stack = e->back;
+      struct gc_entry *next = e->next;
+      free (e);
+      e = next;
     }
 }
-#endif
 
 /*
  * Hex dump -- Output a binary buffer to a hex string and return it.
@@ -238,10 +241,12 @@ debug_gc_check_corrupt (const char *file, int line)
 
 char *
 format_hex_ex (const uint8_t *data, int size, int maxoutput,
-	       int space_break, const char* separator)
+	       int space_break, const char* separator,
+	       struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (maxoutput ? maxoutput :
-				    ((size * 2) + (size / space_break) + 2));
+				    ((size * 2) + (size / space_break) + 2),
+				    gc);
   int i;
   for (i = 0; i < size; ++i)
     {
@@ -288,4 +293,21 @@ chomp (char *str)
 	  }
       }
   } while (modified);
+}
+
+/*
+ * Allocate a string
+ */
+char *
+string_alloc (const char *str)
+{
+  if (str)
+    {
+      const int n = strlen (str) + 1;
+      char *ret = (char *) malloc (n);
+      memcpy (ret, str, n);
+      return ret;
+    }
+  else
+    return NULL;
 }

@@ -43,8 +43,8 @@
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 
-static pthread_mutex_t *ssl_lock_cs;
-static long *ssl_lock_count;
+static pthread_mutex_t *ssl_lock_cs;  /* GLOBAL */
+static long *ssl_lock_count;          /* GLOBAL */
 
 static void
 ssl_pthreads_locking_callback (int mode, int type, char *file, int line)
@@ -106,41 +106,34 @@ ssl_thread_cleanup (void)
 
 #endif /* defined(USE_CRYPTO) && defined(USE_SSL) */
 
-pthread_t x_main_thread_id;
-pthread_t x_work_thread_id;
-pthread_mutex_t x_lock_cs[N_MUTEXES];
-bool x_lock_cs_init;
+pthread_mutex_t pthread_lock[N_MUTEXES];  /* GLOBAL */
+bool pthread_initialized;                 /* GLOBAL */
 
-void
-work_thread_create (void *(*start_routine) (void *), void* arg)
+openvpn_thread_t
+openvpn_thread_create (void *(*start_routine) (void *), void* arg)
 {
-  ASSERT (x_main_thread_id);
-  ASSERT (!x_work_thread_id);
-  ASSERT (!pthread_create (&x_work_thread_id, NULL, start_routine, arg));
-  msg (D_THREAD_DEBUG, "CREATE THREAD ID=%lu", (unsigned long)x_work_thread_id);
+  openvpn_thread_t ret;
+  ASSERT (pthread_initialized);
+  ASSERT (!pthread_create (&ret, NULL, start_routine, arg));
+  msg (D_THREAD_DEBUG, "CREATE THREAD ID=%lu", (unsigned long)ret);
+  return ret;
 }
 
 void
-work_thread_join ()
+openvpn_thread_join (openvpn_thread_t id)
 {
-  if (x_work_thread_id)
-    {
-      pthread_join (x_work_thread_id, NULL);
-      x_work_thread_id = 0;
-    }
+  ASSERT (pthread_initialized);
+  pthread_join (id, NULL);
 }
 
 void
-thread_init ()
+openvpn_thread_init ()
 {
   int i;
 
-  ASSERT (!x_main_thread_id);
-  ASSERT (!x_work_thread_id);
+  ASSERT (!pthread_initialized);
 
   msg (M_INFO, "PTHREAD support initialized");
-
-  x_main_thread_id = pthread_self ();
 
   /* initialize OpenSSL library locking */
 #if defined(USE_CRYPTO) && defined(USE_SSL)
@@ -148,17 +141,16 @@ thread_init ()
 #endif
   
   /* initialize static mutexes */
-  ASSERT (!x_lock_cs_init);
   for (i = 0; i < N_MUTEXES; i++)
-    ASSERT (!pthread_mutex_init (&(x_lock_cs[i]), NULL));
-  x_lock_cs_init = true;
+    ASSERT (!pthread_mutex_init (&pthread_lock[i], NULL));
+
+  pthread_initialized = true;
 }
 
 void
-thread_cleanup ()
+openvpn_thread_cleanup ()
 {
-  ASSERT (!x_work_thread_id);
-  if (x_main_thread_id)
+  if (pthread_initialized)
     {
       int i;
 
@@ -168,14 +160,10 @@ thread_cleanup ()
 #endif
 
       /* destroy static mutexes */
-      if (x_lock_cs_init)
-	{
-	  x_lock_cs_init = false;
-	  for (i = 0; i < N_MUTEXES; i++)
-	    ASSERT (!pthread_mutex_destroy (&(x_lock_cs[i])));
-	}
+      for (i = 0; i < N_MUTEXES; i++)
+	ASSERT (!pthread_mutex_destroy (&pthread_lock[i]));
 
-      x_main_thread_id = 0;
+      pthread_initialized = false;
     }
 }
 

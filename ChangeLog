@@ -1,7 +1,16 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.11 2004/03/16 13:29:28 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.12 2004/03/19 10:42:33 jimyonan Exp $
+
+2004.03.19 -- Version 2.0-test12
+
+* Added the key multi-client UDP server options,
+  --mode, --push, --pull, and --ifconfig-pool.
+* Revamped GC (garbage collection) code to not rely
+  on any global data.
+* Modifications to thread.[ch] to allow a more
+  flexible thread model.
 
 2004.03.16 -- Version 2.0-test11
 

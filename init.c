@@ -73,27 +73,46 @@ context_init_1 (struct context *c)
   clear_tuntap (&c->c1.tuntap);
   CLEAR (c->c1.ks);
   packet_id_persist_init (&c->c1.pid_persist);
-  clear_route_list (&c->c1.route_list);
-  CLEAR (c->c1.http_proxy);
-  CLEAR (c->c1.socks_proxy);
+  c->c1.route_list = NULL;
+  c->c1.http_proxy = NULL;
+  c->c1.socks_proxy = NULL;
 
   if (c->options.http_proxy_server)
     {
-      init_http_proxy (&c->c1.http_proxy,
-		       c->options.http_proxy_server,
-		       c->options.http_proxy_port,
-		       c->options.http_proxy_retry,
-		       c->options.http_proxy_auth_method,
-		       c->options.http_proxy_auth_file);
+      c->c1.http_proxy = new_http_proxy (c->options.http_proxy_server,
+					 c->options.http_proxy_port,
+					 c->options.http_proxy_retry,
+					 c->options.http_proxy_auth_method,
+					 c->options.http_proxy_auth_file,
+					 &c->gc);
     }
 
   if (c->options.socks_proxy_server)
     {
-      init_socks_proxy (&c->c1.socks_proxy,
-			c->options.socks_proxy_server,
-			c->options.socks_proxy_port,
-			c->options.socks_proxy_retry);
+      c->c1.socks_proxy = new_socks_proxy (c->options.socks_proxy_server,
+					   c->options.socks_proxy_port,
+					   c->options.socks_proxy_retry,
+					   &c->gc);
     }
+}
+
+void
+context_gc_detach (struct context *c, bool options_only)
+{
+  if (!options_only)
+    {
+      gc_detach (&c->c2.gc);
+      gc_detach (&c->gc);
+    }
+  gc_detach (&c->options.gc);
+}
+
+void
+context_gc_free (struct context *c)
+{
+  gc_free (&c->c2.gc);
+  gc_free (&c->options.gc);
+  gc_free (&c->gc);
 }
 
 bool
@@ -138,7 +157,7 @@ init_static (void)
 void
 uninit_static (void)
 {
-  thread_cleanup ();
+  openvpn_thread_cleanup ();
 
 #ifdef USE_CRYPTO
   free_ssl_lib ();
@@ -292,6 +311,18 @@ pre_setup (const struct options *options)
 }
 
 /*
+ * Allocate a route list structure if at least one
+ * --route option was specified.
+ */
+static void
+do_alloc_route_list (struct context *c)
+{
+  if (c->options.routes)
+    c->c1.route_list = new_route_list (&c->c2.gc);
+}
+
+
+/*
  * Initialize the route list, resolving any DNS names in route
  * options and saving routes in the environment.
  */
@@ -309,7 +340,7 @@ do_init_route_list (const struct options *options,
     gw = options->route_default_gateway;
 
   if (!init_route_list (route_list,
-			&options->routes,
+			options->routes,
 			gw, link_socket_current_remote (link_socket)))
     {
       if (fatal)
@@ -346,14 +377,17 @@ bool
 do_open_tun (const struct options *options,
 	     struct frame *frame,
 	     struct link_socket *link_socket,
-	     struct tuntap *tuntap, struct route_list *route_list)
+	     struct tuntap *tuntap,
+	     struct route_list *route_list)
 {
+  struct gc_arena gc = gc_new ();
   bool ret = false;
 
   if (!tuntap_defined (tuntap))
     {
       /* parse and resolve the route option list */
-      do_init_route_list (options, route_list, link_socket, true);
+      if (route_list)
+	do_init_route_list (options, route_list, link_socket, true);
 
       /* do ifconfig */
       if (!options->ifconfig_noexec
@@ -363,7 +397,8 @@ do_open_tun (const struct options *options,
 	     by open_tun */
 	  const char *guess = guess_tuntap_dev (options->dev,
 						options->dev_type,
-						options->dev_node);
+						options->dev_node,
+						&gc);
 	  do_ifconfig (tuntap, guess, TUN_MTU_SIZE (frame));
 	}
 
@@ -374,19 +409,19 @@ do_open_tun (const struct options *options,
       /* do ifconfig */
       if (!options->ifconfig_noexec
 	  && ifconfig_order () == IFCONFIG_AFTER_TUN_OPEN)
-	do_ifconfig (tuntap, tuntap->actual, TUN_MTU_SIZE (frame));
+	do_ifconfig (tuntap, tuntap->actual_name, TUN_MTU_SIZE (frame));
 
       /* run the up script */
       run_script (options->up_script,
-		  tuntap->actual,
+		  tuntap->actual_name,
 		  TUN_MTU_SIZE (frame),
 		  EXPANDED_SIZE (frame),
-		  print_in_addr_t (tuntap->local, true),
-		  print_in_addr_t (tuntap->remote_netmask, true),
+		  print_in_addr_t (tuntap->local, true, &gc),
+		  print_in_addr_t (tuntap->remote_netmask, true, &gc),
 		  "init", NULL, "up");
 
       /* possibly add routes */
-      if (!options->route_delay_defined)
+      if (!options->route_delay_defined && route_list)
 	do_route (options, route_list);
 
       /*
@@ -411,18 +446,19 @@ do_open_tun (const struct options *options,
   else
     {
       msg (M_INFO, "Preserving previous TUN/TAP instance: %s",
-	   tuntap->actual);
+	   tuntap->actual_name);
 
       /* run the up script if user specified --up-restart */
       if (options->up_restart)
 	run_script (options->up_script,
-		    tuntap->actual,
+		    tuntap->actual_name,
 		    TUN_MTU_SIZE (frame),
 		    EXPANDED_SIZE (frame),
-		    print_in_addr_t (tuntap->local, true),
-		    print_in_addr_t (tuntap->remote_netmask, true),
+		    print_in_addr_t (tuntap->local, true, &gc),
+		    print_in_addr_t (tuntap->remote_netmask, true, &gc),
 		    "restart", NULL, "up");
     }
+  gc_free (&gc);
   return ret;
 }
 
@@ -888,15 +924,18 @@ static void
 do_init_socket_1 (struct context *c)
 {
   link_socket_init_phase1 (&c->c2.link_socket,
-			   c->options.local, c->options.remote,
-			   c->options.local_port, c->options.remote_port,
+			   c->options.local,
+			   c->options.remote,
+			   c->options.local_port,
+			   c->options.remote_port,
 			   c->options.proto,
-			   c->c1.http_proxy.defined ? &c->c1.
-			   http_proxy : NULL,
-			   c->c1.socks_proxy.defined ? &c->c1.
-			   socks_proxy : NULL, c->options.bind_local,
-			   c->options.remote_float, c->options.inetd,
-			   &c->c1.link_socket_addr, c->options.ipchange,
+			   c->c1.http_proxy,
+			   c->c1.socks_proxy,
+			   c->options.bind_local,
+			   c->options.remote_float,
+			   c->options.inetd,
+			   &c->c1.link_socket_addr,
+			   c->options.ipchange,
 			   c->options.resolve_retry_seconds,
 			   c->options.connect_retry_seconds,
 			   c->options.mtu_discover_type);
@@ -947,10 +986,12 @@ do_print_data_channel_mtu_parms (struct context *c)
 static void
 do_compute_occ_strings (struct context *c)
 {
+  struct gc_arena gc = gc_new ();
+
   c->c2.options_string_local =
-    options_string (&c->options, &c->c2.frame, &c->c1.tuntap, false);
+    options_string (&c->options, &c->c2.frame, &c->c1.tuntap, false, &gc);
   c->c2.options_string_remote =
-    options_string (&c->options, &c->c2.frame, &c->c1.tuntap, true);
+    options_string (&c->options, &c->c2.frame, &c->c1.tuntap, true, &gc);
 
   msg (D_SHOW_OCC, "Local Options String: '%s'", c->c2.options_string_local);
   msg (D_SHOW_OCC, "Expected Remote Options String: '%s'",
@@ -960,11 +1001,11 @@ do_compute_occ_strings (struct context *c)
   msg (D_SHOW_OCC_HASH, "Local Options hash (VER=%s): '%s'",
        options_string_version (c->c2.options_string_local),
        md5sum (c->c2.options_string_local,
-	       strlen (c->c2.options_string_local), 9));
+	       strlen (c->c2.options_string_local), 9, &gc));
   msg (D_SHOW_OCC_HASH, "Expected Remote Options hash (VER=%s): '%s'",
        options_string_version (c->c2.options_string_remote),
        md5sum (c->c2.options_string_remote,
-	       strlen (c->c2.options_string_remote), 9));
+	       strlen (c->c2.options_string_remote), 9, &gc));
 #endif
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
@@ -973,6 +1014,8 @@ do_compute_occ_strings (struct context *c)
 				c->c2.options_string_local,
 				c->c2.options_string_remote);
 #endif
+
+  gc_free (&gc);
 }
 
 /*
@@ -1051,7 +1094,7 @@ do_start_tls_thread (struct context *c)
   if (c->c2.tls_multi && c->options.tls_thread)
     {
       if (c->first_time)
-	thread_init ();
+	openvpn_thread_init ();
       tls_thread_create (&c->c2.thread_parms, c->c2.tls_multi,
 			 &c->c2.link_socket, c->options.nice_work,
 			 c->options.mlock);
@@ -1238,16 +1281,16 @@ do_close_link_socket (struct context *c)
 static void
 do_close_tuntap (struct context *c)
 {
+  struct gc_arena gc = gc_new ();
   if (tuntap_defined (&c->c1.tuntap))
     {
       if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_tun))
 	{
-	  char *tuntap_actual =
-	    (char *) gc_malloc (sizeof (c->c1.tuntap.actual));
-	  strcpy (tuntap_actual, c->c1.tuntap.actual);
+	  char *tuntap_actual = string_alloc (c->c1.tuntap.actual_name);
 
 	  /* delete any routes we added */
-	  delete_routes (&c->c1.route_list);
+	  if (c->c1.route_list)
+	    delete_routes (c->c1.route_list);
 
 	  msg (D_CLOSE, "Closing TUN/TAP device");
 	  close_tun (&c->c1.tuntap);
@@ -1258,27 +1301,31 @@ do_close_tuntap (struct context *c)
 		      tuntap_actual,
 		      TUN_MTU_SIZE (&c->c2.frame),
 		      EXPANDED_SIZE (&c->c2.frame),
-		      print_in_addr_t (c->c1.tuntap.local, true),
-		      print_in_addr_t (c->c1.tuntap.remote_netmask, true),
+		      print_in_addr_t (c->c1.tuntap.local, true, &gc),
+		      print_in_addr_t (c->c1.tuntap.remote_netmask, true, &gc),
 		      "init",
 		      signal_description (c->sig->signal_received,
-					  c->sig->signal_text), "down");
+					  c->sig->signal_text),
+		      "down");
+	  free (tuntap_actual);
 	}
       else
 	{
 	  /* run the down script on this restart if --up-restart was specified */
 	  if (c->options.up_restart)
 	    run_script (c->options.down_script,
-			c->c1.tuntap.actual,
+			c->c1.tuntap.actual_name,
 			TUN_MTU_SIZE (&c->c2.frame),
 			EXPANDED_SIZE (&c->c2.frame),
-			print_in_addr_t (c->c1.tuntap.local, true),
-			print_in_addr_t (c->c1.tuntap.remote_netmask, true),
+			print_in_addr_t (c->c1.tuntap.local, true, &gc),
+			print_in_addr_t (c->c1.tuntap.remote_netmask, true, &gc),
 			"restart",
 			signal_description (c->sig->signal_received,
-					    c->sig->signal_text), "down");
+					    c->sig->signal_text),
+			"down");
 	}
     }
+  gc_free (&gc);
 }
 
 /*
@@ -1337,6 +1384,9 @@ void
 init_instance (struct context *c)
 {
   const struct options *options = &c->options;
+
+  /* init garbage collection level */
+  gc_init (&c->c2.gc);
 
   /* signals caught here will abort */
   c->sig->signal_received = 0;
@@ -1416,11 +1466,14 @@ init_instance (struct context *c)
 
       /* open tun/tap device, ifconfig, run up script, etc. */
       if (!options->up_delay || c->mode == CM_TOP)
-	c->c2.did_open_tun = do_open_tun (options,
-					  &c->c2.frame,
-					  &c->c2.link_socket,
-					  &c->c1.tuntap,
-					  &c->c1.route_list);
+	{
+	  do_alloc_route_list (c);
+	  c->c2.did_open_tun = do_open_tun (options,
+					    &c->c2.frame,
+					    &c->c2.link_socket,
+					    &c->c1.tuntap,
+					    c->c1.route_list);
+	}
     }
 
   /* print MTU info */
@@ -1512,6 +1565,9 @@ close_instance (struct context *c)
 
   /* close syslog */
   do_close_syslog (c);
+
+  /* garbage collect */
+  gc_free (&c->c2.gc);
 }
 
 #ifdef USE_CRYPTO
@@ -1527,6 +1583,7 @@ test_crypto_thread (void *arg)
   const struct options *options = &c->options;
 #if defined(USE_PTHREAD) && defined(USE_SSL)
   struct context *child = NULL;
+  openvpn_thread_t child_id = 0;
 #endif
 
   ASSERT (options->test_crypto);
@@ -1537,12 +1594,13 @@ test_crypto_thread (void *arg)
   {
     if (c->first_time && options->tls_thread)
       {
-	thread_init ();
+	openvpn_thread_init ();
 	child = (struct context *) malloc (sizeof (struct context));
 	context_clear (child);
 	child->options = *options;
+	context_gc_detach (child, true);
 	child->first_time = false;
-	work_thread_create (test_crypto_thread, (void *) child);
+	child_id = openvpn_thread_create (test_crypto_thread, (void *) child);
       }
   }
 #endif
@@ -1553,10 +1611,11 @@ test_crypto_thread (void *arg)
 
 #if defined(USE_PTHREAD) && defined(USE_SSL)
   if (c->first_time && options->tls_thread)
-    work_thread_join ();
+    openvpn_thread_join (child_id);
   if (child)
     free (child);
 #endif
+  context_gc_free (c);
   return NULL;
 }
 
@@ -1571,6 +1630,7 @@ do_test_crypto (const struct options *o)
       struct context c;
       context_clear (&c);
       c.options = *o;
+      context_gc_detach (&c, true);
       c.first_time = true;
       test_crypto_thread ((void *) &c);
       return true;

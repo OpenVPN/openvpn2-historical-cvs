@@ -46,12 +46,12 @@
 #include "memdbg.h"
 
 /* Globals */
-unsigned int x_debug_level;
+unsigned int x_debug_level; /* GLOBAL */
 
 /* Mute state */
-static int mute_cutoff;
-static int mute_count;
-static int mute_category;
+static int mute_cutoff;     /* GLOBAL */
+static int mute_count;      /* GLOBAL */
+static int mute_category;   /* GLOBAL */
 
 /*
  * Output mode priorities are as follows:
@@ -65,13 +65,13 @@ static int mute_category;
 
 /* If true, indicates that stdin/stdout/stderr
    have been redirected due to --log */
-static bool std_redir;
+static bool std_redir;      /* GLOBAL */
 
 /* Should messages be written to the syslog? */
-static bool use_syslog;
+static bool use_syslog;     /* GLOBAL */
 
 /* If non-null, messages should be written here (used for debugging only) */
-static FILE *msgfp;
+static FILE *msgfp;         /* GLOBAL */
 
 void
 set_debug_level (int level)
@@ -120,7 +120,7 @@ msg_fp()
 #define SWAP { tmp = m1; m1 = m2; m2 = tmp; }
 #define ERR_BUF_SIZE 1024
 
-int msg_line_num;
+int x_msg_line_num; /* GLOBAL */
 
 void x_msg (unsigned int flags, const char *format, ...)
 {
@@ -128,12 +128,11 @@ void x_msg (unsigned int flags, const char *format, ...)
 #if SYSLOG_CAPABILITY
   int level;
 #endif
-  char msg1[ERR_BUF_SIZE];
-  char msg2[ERR_BUF_SIZE];
   char *m1;
   char *m2;
   char *tmp;
   int e;
+  struct gc_arena gc;
 
   void usage_small (void);
 
@@ -142,6 +141,8 @@ void x_msg (unsigned int flags, const char *format, ...)
   if (!MSG_TEST(flags))
     return;
 #endif
+
+  gc_init (&gc);
 
   if (flags & M_ERRNO_SOCK)
     e = openvpn_errno_socket ();
@@ -163,6 +164,7 @@ void x_msg (unsigned int flags, const char *format, ...)
 	    {
 	      if (!(flags & M_NOLOCK))
 		mutex_unlock (L_MSG);
+	      gc_free (&gc);
 	      return;
 	    }
 	}
@@ -179,8 +181,8 @@ void x_msg (unsigned int flags, const char *format, ...)
 	}
     }
 
-  m1 = msg1;
-  m2 = msg2;
+  m1 = (char *) gc_malloc (ERR_BUF_SIZE, false, &gc);
+  m2 = (char *) gc_malloc (ERR_BUF_SIZE, false, &gc);
 
   va_start (arglist, format);
   vsnprintf (m1, ERR_BUF_SIZE, format, arglist);
@@ -190,7 +192,7 @@ void x_msg (unsigned int flags, const char *format, ...)
   if ((flags & (M_ERRNO|M_ERRNO_SOCK)) && e)
     {
       openvpn_snprintf (m2, ERR_BUF_SIZE, "%s: %s (errno=%d)",
-			m1, strerror_ts (e), e);
+			m1, strerror_ts (e, &gc), e);
       SWAP;
     }
 
@@ -241,19 +243,19 @@ void x_msg (unsigned int flags, const char *format, ...)
 	{
 #ifdef USE_PTHREAD
 	  fprintf (fp, "%s %d[%d]: %s\n",
-		   time_string (0, show_usec),
-		   msg_line_num,
-		   thread_number (),
+		   time_string (0, show_usec, &gc),
+		   x_msg_line_num,
+		   (int) openvpn_thread_self (),
 		   m1);
 #else
 	  fprintf (fp, "%s %d: %s\n",
-		   time_string (0, show_usec),
-		   msg_line_num,
+		   time_string (0, show_usec, &gc),
+		   x_msg_line_num,
 		   m1);
 #endif
 	}
       fflush(fp);
-      ++msg_line_num;
+      ++x_msg_line_num;
     }
 
   if (flags & M_FATAL)
@@ -267,6 +269,8 @@ void x_msg (unsigned int flags, const char *format, ...)
 
   if (flags & M_USAGE_SMALL)
     usage_small ();
+
+  gc_free (&gc);
 }
 
 void
@@ -342,8 +346,9 @@ redirect_stdout_stderr (const char *file, bool append)
  * of I/O operations.
  */
 
-unsigned int x_cs_info_level;
-unsigned int x_cs_verbose_level;
+unsigned int x_cs_info_level;    /* GLOBAL */
+unsigned int x_cs_verbose_level; /* GLOBAL */
+unsigned int x_cs_err_delay_ms;  /* GLOBAL */
 
 void
 reset_check_status ()
@@ -383,12 +388,13 @@ x_check_status (int status,
 
   if (status < 0)
     {
+      struct gc_arena gc = gc_new ();
 #if EXTENDED_SOCKET_ERROR_CAPABILITY
       /* get extended socket error message and possible PMTU hint from OS */
       if (sock)
 	{
 	  int mtu;
-	  extended_msg = format_extended_socket_error (sock->sd, &mtu);
+	  extended_msg = format_extended_socket_error (sock->sd, &mtu, &gc);
 	  if (mtu > 0 && sock->mtu != mtu)
 	    {
 	      sock->mtu = mtu;
@@ -397,7 +403,7 @@ x_check_status (int status,
 	}
 #elif defined(WIN32)
       /* get possible driver error from TAP-Win32 driver */
-      extended_msg = tap_win32_getinfo (tt);
+      extended_msg = tap_win32_getinfo (tt, &gc);
 #endif
       if (my_errno != EAGAIN)
 	{
@@ -406,21 +412,20 @@ x_check_status (int status,
 		 description,
 		 sock ? proto2ascii (sock->proto, true) : "",
 		 extended_msg,
-		 strerror_ts (my_errno),
+		 strerror_ts (my_errno, &gc),
 		 my_errno);
 	  else
 	    msg (x_cs_info_level, "%s %s: %s (code=%d)",
 		 description,
 		 sock ? proto2ascii (sock->proto, true) : "",
-		 strerror_ts (my_errno),
+		 strerror_ts (my_errno, &gc),
 		 my_errno);
 
-#ifdef WIN32
-	  Sleep (100); /* 100 milliseconds */
-#else
-	  sleep (0);   /* not enough granularity, so just relinquish time slice */
-#endif
+	  /* avoid a barrage of errors */
+	  if (x_cs_err_delay_ms)
+	    sleep_milliseconds (x_cs_err_delay_ms);
 	}
+      gc_free (&gc);
     }
 }
 
@@ -436,7 +441,7 @@ openvpn_exit (int status)
 #ifdef WIN32
 
 const char *
-strerror_win32 (DWORD errnum)
+strerror_win32 (DWORD errnum, struct gc_arena *gc)
 {
   /*
    * This code can be omitted, though often the Windows
@@ -549,7 +554,7 @@ strerror_win32 (DWORD errnum)
   /* format a windows error message */
   {
     char message[256];
-    struct buffer out = alloc_buf_gc (256);
+    struct buffer out = alloc_buf_gc (256, gc);
     const int status =  FormatMessage (
 				       FORMAT_MESSAGE_IGNORE_INSERTS
 				       | FORMAT_MESSAGE_FROM_SYSTEM

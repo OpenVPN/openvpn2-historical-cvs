@@ -359,6 +359,7 @@ void
 init_options (struct options *o)
 {
   CLEAR (*o);
+  gc_init (&o->gc);
   o->mode = MODE_POINT_TO_POINT;
   o->proto = PROTO_UDPv4;
   o->connect_retry_seconds = 5;
@@ -401,10 +402,16 @@ init_options (struct options *o)
   o->handshake_window = 60;
   o->transition_window = 3600;
 #ifdef USE_PTHREAD
-  o->tls_thread = false; // JYFIXME -- disable multithreading for test purposes
+  o->tls_thread = true; // JYFIXME -- disable multithreading for test purposes
 #endif
 #endif
 #endif
+}
+
+void
+uninit_options (struct options *o)
+{
+  gc_free (&o->gc);
 }
 
 #define SHOW_PARM(name, value, format) msg(D_SHOW_PARMS, "  " #name " = " format, (value))
@@ -425,19 +432,51 @@ setenv_settings (const struct options *o)
   setenv_int ("remote_port", o->remote_port);
 }
 
+static in_addr_t
+get_ip_addr (const char *ip_string)
+{
+  return getaddr (GETADDR_FATAL
+		  | GETADDR_HOST_ORDER
+		  | GETADDR_FATAL_ON_SIGNAL,
+		  ip_string,
+		  0,
+		  NULL,
+		  NULL);
+}
+
+static char *
+string_substitute (const char *src, int from, int to, struct gc_arena *gc)
+{
+  char *ret = (char *) gc_malloc (strlen (src) + 1, true, gc);
+  char *dest = ret;
+  char c;
+
+  do
+    {
+      c = *src++;
+      if (c == from)
+	c = to;
+      *dest++ = c;
+    }
+  while (c);
+  return ret;
+}
+
 #ifdef WIN32
 
 static void
 show_dhcp_option_addrs (const char *name, const in_addr_t *array, int len)
 {
+  struct gc_arena gc = gc_new ();
   int i;
   for (i = 0; i < len; ++i)
     {
       msg (D_SHOW_PARMS, "  %s[%d] = %s",
 	   name,
 	   i,
-	   print_in_addr_t (array[i], false));
+	   print_in_addr_t (array[i], false, &gc));
     }
+  gc_free (&gc);
 }
 
 static void
@@ -468,16 +507,50 @@ dhcp_option_address_parse (const char *name, const char *parm, in_addr_t *array,
 	 N_DHCP_ADDR,
 	 name);
 
-  array[(*len)++] = getaddr (GETADDR_FATAL
-			   | GETADDR_HOST_ORDER
-			   | GETADDR_FATAL_ON_SIGNAL,
-			   parm,
-			   0,
-			   NULL,
-			   NULL);
+  array[(*len)++] = get_ip_addr (parm);
 }
 
 #endif
+
+#if P2MP
+static void
+show_p2mp_parms (const struct options *o)
+{
+  struct gc_arena gc = gc_new ();
+  if (o->push_list)
+    {
+      const struct push_list *l = o->push_list;
+      const char *printable_push_list = string_substitute (l->options, '\n', '|', &gc);
+      msg (D_SHOW_PARMS, "  push_list = '%s'", printable_push_list);
+    }
+  SHOW_BOOL (pull);
+  SHOW_BOOL (ifconfig_pool_defined);
+  msg (D_SHOW_PARMS, "  ifconfig_pool_start = %s", print_in_addr_t (o->ifconfig_pool_start, false, &gc));
+  msg (D_SHOW_PARMS, "  ifconfig_pool_end = %s", print_in_addr_t (o->ifconfig_pool_end, false, &gc));
+  gc_free (&gc);
+}
+
+static void
+push_option (struct options *o, const char *opt)
+{
+  int len;
+  if (!o->push_list)
+    o->push_list = (struct push_list *) gc_malloc (sizeof (struct push_list), true, &o->gc);
+  len = strlen (o->push_list->options);
+  if (len + strlen (opt) + 1 >= MAX_PUSH_LIST_LEN)
+    msg (M_USAGE, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
+  strcat (o->push_list->options, opt);
+  strcat (o->push_list->options, "\n");
+}
+
+#endif
+
+static void
+rol_check_alloc (struct options *options)
+{
+  if (!options->routes)
+    options->routes = new_route_option_list (&options->gc);
+}
 
 void
 show_settings (const struct options *o)
@@ -594,7 +667,8 @@ show_settings (const struct options *o)
   SHOW_BOOL (route_noexec);
   SHOW_INT (route_delay);
   SHOW_BOOL (route_delay_defined);
-  print_route_options (&o->routes, D_SHOW_PARMS);
+  if (o->routes)
+    print_route_options (o->routes, D_SHOW_PARMS);
 
 #ifdef USE_CRYPTO
   SHOW_STR (shared_secret_file);
@@ -637,6 +711,10 @@ show_settings (const struct options *o)
 
   SHOW_STR (tls_auth_file);
 #endif
+#endif
+
+#if P2MP
+  show_p2mp_parms (o);
 #endif
 
 #ifdef WIN32
@@ -931,7 +1009,8 @@ char *
 options_string (const struct options *o,
 		const struct frame *frame,
 		const struct tuntap *tt,
-		bool remote)
+		bool remote,
+		struct gc_arena *gc)
 {
   struct buffer out = alloc_buf (256);
 
@@ -950,7 +1029,7 @@ options_string (const struct options *o,
   if (tt)
     buf_printf (&out,
 		",ifconfig %s",
-		ifconfig_options_string (tt, remote, o->ifconfig_nowarn));
+		ifconfig_options_string (tt, remote, o->ifconfig_nowarn, gc));
 
 #ifdef USE_LZO
   if (o->comp_lzo)
@@ -1089,24 +1168,6 @@ options_string_version (const char* s)
   return BSTR (&out);
 }
 
-static char *
-comma_to_space (const char *src)
-{
-  char *ret = (char *) gc_malloc (strlen (src) + 1);
-  char *dest = ret;
-  char c;
-
-  do
-    {
-      c = *src++;
-      if (c == ',')
-	c = ' ';
-      *dest++ = c;
-    }
-  while (c);
-  return ret;
-}
-
 static void
 usage (void)
 {
@@ -1185,20 +1246,20 @@ ping_rec_err (void)
   msg (M_USAGE, "Options error: only one of --ping-exit or --ping-restart options may be specified");
 }
 
-static int
+static inline int
 positive (int i)
 {
   return i < 0 ? 0 : i;
 }
 
-static bool
+static inline bool
 space (char c)
 {
   return c == '\0' || isspace (c);
 }
 
 static int
-parse_line (char *line, char *p[], int n, const char *file, int line_num)
+parse_line (char *line, char *p[], int n, const char *file, int line_num, struct gc_arena *gc)
 {
   const int STATE_INITIAL = 0;
   const int STATE_READING_QUOTED_PARM = 1;
@@ -1257,7 +1318,7 @@ parse_line (char *line, char *p[], int n, const char *file, int line_num)
 	  if (state == STATE_DONE)
 	    {
 	      ASSERT (parm_len > 0);
-	      p[ret] = gc_malloc (parm_len + 1);
+	      p[ret] = gc_malloc (parm_len + 1, true, gc);
 	      memcpy (p[ret], parm, parm_len);
 	      p[ret][parm_len] = '\0';
 	      state = 0;
@@ -1328,7 +1389,7 @@ read_config_file (struct options *options, const char* file, int level,
       char *p[MAX_PARMS];
       CLEAR (p);
       ++line_num;
-      if (parse_line (line, p, SIZE (p), file, line_num))
+      if (parse_line (line, p, SIZE (p), file, line_num, &options->gc))
 	{
 	  if (strlen (p[0]) >= 3 && !strncmp (p[0], "--", 2))
 	    p[0] += 2;
@@ -1376,6 +1437,7 @@ static int
 add_option (struct options *options, int i, char *p[],
 	    const char* file, int line, int level)
 {
+  struct gc_arena gc = gc_new ();
   ASSERT (MAX_PARMS >= 5);
 
   if (!file)
@@ -1406,8 +1468,10 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       if (streq (p[1], "p2p"))
 	options->mode = MODE_POINT_TO_POINT;
+#if P2MP
       else if (streq (p[1], "udp-server"))
 	options->mode = MODE_NONFORKING_UDP_SERVER;
+#endif
       else
 	msg (M_USAGE, "Options error: Bad --mode parameter: %s", p[1]);
     }
@@ -1471,7 +1535,7 @@ add_option (struct options *options, int i, char *p[],
   else if (streq (p[0], "ipchange") && p[1])
     {
       ++i;
-      options->ipchange = comma_to_space (p[1]);
+      options->ipchange = string_substitute (p[1], ',', ' ', &options->gc);
     }
   else if (streq (p[0], "float"))
     {
@@ -1706,7 +1770,7 @@ add_option (struct options *options, int i, char *p[],
       if (options->proto < 0)
 	msg (M_USAGE, "Bad protocol: '%s'.  Allowed protocols with --proto option: %s",
 	     p[1],
-	     proto2ascii_all());
+	     proto2ascii_all (&gc));
     }
   else if (streq (p[0], "http-proxy") && p[1] && p[2])
     {
@@ -1802,7 +1866,8 @@ add_option (struct options *options, int i, char *p[],
 	++i;
       if (p[4])
 	++i;
-      add_route_to_option_list (&options->routes, p[1], p[2], p[3], p[4]);
+      rol_check_alloc (options);
+      add_route_to_option_list (options->routes, p[1], p[2], p[3], p[4]);
     }
   else if (streq (p[0], "route-gateway") && p[1])
     {
@@ -1833,7 +1898,8 @@ add_option (struct options *options, int i, char *p[],
     }
   else if (streq (p[0], "redirect-gateway"))
     {
-      options->routes.redirect_default_gateway = true;
+      rol_check_alloc (options);
+      options->routes->redirect_default_gateway = true;
     }
   else if (streq (p[0], "setenv") && p[1] && p[2])
     {
@@ -1853,6 +1919,24 @@ add_option (struct options *options, int i, char *p[],
     {
       options->occ = false;
     }
+#if P2MP
+  else if (streq (p[0], "push") && p[1])
+    {
+      ++i;
+      push_option (options, p[1]);
+    }
+  else if (streq (p[0], "pull"))
+    {
+      options->pull = true;
+    }
+  else if (streq (p[0], "ifconfig-pool") && p[1] && p[2])
+    {
+      i += 2;
+      options->ifconfig_pool_defined = true;
+      options->ifconfig_pool_start = get_ip_addr (p[1]);
+      options->ifconfig_pool_end = get_ip_addr (p[2]);
+    }
+#endif
 #ifdef WIN32
   else if (streq (p[0], "ip-win32") && p[1])
     {
@@ -1866,7 +1950,7 @@ add_option (struct options *options, int i, char *p[],
 	msg (M_USAGE,
 	     "Bad --ip-win32 method: '%s'.  Allowed methods: %s",
 	     p[1],
-	     ipset2ascii_all());
+	     ipset2ascii_all (&gc));
 
       to->ip_win32_type = index;
 
@@ -2149,7 +2233,7 @@ add_option (struct options *options, int i, char *p[],
   else if (streq (p[0], "tls-verify") && p[1])
     {
       ++i;
-      options->tls_verify = comma_to_space (p[1]);
+      options->tls_verify = string_substitute (p[1], ',', ' ', &options->gc);
     }
   else if (streq (p[0], "tls-remote") && p[1])
     {
@@ -2227,5 +2311,6 @@ add_option (struct options *options, int i, char *p[],
       else
 	msg (M_USAGE, "Unrecognized option or missing parameter(s): --%s", p[0]);
     }
+  gc_free (&gc);
   return i;
 }

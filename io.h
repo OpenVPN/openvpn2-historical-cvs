@@ -26,8 +26,7 @@
 /*
  * I/O functionality used by both the sockets and TUN/TAP I/O layers.
  *
- * We also try to abstract away the differences between Posix and Win32
- * for the benefit of openvpn.c.
+ * We also try to abstract away the differences between Posix and Win32.
  */
 
 #ifndef OPENVPN_IO_H
@@ -125,7 +124,9 @@ overlapped_io_active (struct overlapped_io *o)
 }
 
 const char *
-overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix);
+overlapped_io_state_ascii (const struct overlapped_io *o,
+			   const char* prefix,
+			   struct gc_arena *gc);
 
 /*
  * On Win32, use WSAWaitForMultipleEvents instead of select as our main event

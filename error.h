@@ -28,6 +28,8 @@
 
 #include "basic.h"
 
+struct gc_arena;
+
 /*
  * Where should messages be printed before syslog is opened?
  * Not used if OPENVPN_DEBUG_COMMAND_LINE is defined.
@@ -57,14 +59,14 @@
 /* String and Error functions */
 
 #ifdef WIN32
-# define openvpn_errno()         GetLastError()
-# define openvpn_errno_socket()  WSAGetLastError()
-# define openvpn_strerror(e)     strerror_win32(e)
-  const char *strerror_win32 (DWORD errnum);
+# define openvpn_errno()             GetLastError()
+# define openvpn_errno_socket()      WSAGetLastError()
+# define openvpn_strerror(e, gc)     strerror_win32(e, gc)
+  const char *strerror_win32 (DWORD errnum, struct gc_arena *gc);
 #else
-# define openvpn_errno()         errno
-# define openvpn_errno_socket()  errno
-# define openvpn_strerror(x)     strerror(x)
+# define openvpn_errno()             errno
+# define openvpn_errno_socket()      errno
+# define openvpn_strerror(x, gc)     strerror(x)
 #endif
 
 /*
@@ -72,7 +74,7 @@
  * but rather through macros or inline functions defined below.
  */
 extern unsigned int x_debug_level;
-extern int msg_line_num;
+extern int x_msg_line_num;
 
 /* msg() flags */
 
@@ -186,6 +188,7 @@ struct tuntap;
 
 extern unsigned int x_cs_info_level;
 extern unsigned int x_cs_verbose_level;
+extern unsigned int x_cs_err_delay_ms;
 
 void reset_check_status (void);
 void set_check_status (unsigned int info_level, unsigned int verbose_level);
@@ -200,6 +203,12 @@ check_status (int status, const char *description, struct link_socket *sock, str
 {
   if (status < 0 || check_debug_level (x_cs_verbose_level))
     x_check_status (status, description, sock, tt);
+}
+
+static inline void
+set_check_status_error_delay (unsigned int milliseconds)
+{
+  x_cs_err_delay_ms = milliseconds;
 }
 
 #include "errlevel.h"

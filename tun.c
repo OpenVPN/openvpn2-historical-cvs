@@ -112,17 +112,20 @@ dev_component_in_dev_node (const char *dev_node)
  * before the device is actually opened.
  */
 const char *
-guess_tuntap_dev (const char *dev, const char *dev_type, const char *dev_node)
+guess_tuntap_dev (const char *dev,
+		  const char *dev_type,
+		  const char *dev_node,
+		  struct gc_arena *gc)
 {
 #ifdef WIN32
 
-  struct buffer out = alloc_buf_gc (256);
+  struct buffer out = alloc_buf_gc (256, gc);
   int op = GET_DEV_UID_NORMAL; 
 
   if (!dev_node)
     op = GET_DEV_UID_DEFAULT; 
 
-  get_device_guid (dev_node, BPTR (&out), buf_forward_capacity (&out), op);
+  get_device_guid (dev_node, BPTR (&out), buf_forward_capacity (&out), op, gc);
   return BSTR (&out);
 
 #else
@@ -166,17 +169,19 @@ ipv6_support (bool ipv6, bool ipv6_explicitly_supported, struct tuntap* tt)
 static void
 ifconfig_sanity_check (bool tun, in_addr_t addr)
 {
+  struct gc_arena gc = gc_new ();
   const bool looks_like_netmask = ((addr & 0xFF000000) == 0xFF000000);
   if (tun)
     {
       if (looks_like_netmask)
-	msg (M_WARN, "WARNING: Since you are using --dev tun, the second argument to --ifconfig must be an IP address.  You are using something (%s) that looks more like a netmask.", print_in_addr_t (addr, false));
+	msg (M_WARN, "WARNING: Since you are using --dev tun, the second argument to --ifconfig must be an IP address.  You are using something (%s) that looks more like a netmask.", print_in_addr_t (addr, false, &gc));
     }
   else /* tap */
     {
       if (!looks_like_netmask)
 	msg (M_WARN, "WARNING: Since you are using --dev tap, the second argument to --ifconfig must be a netmask, for example something like 255.255.255.0.");
     }
+  gc_free (&gc);
 }
 
 /*
@@ -200,12 +205,13 @@ check_addr_clash (const char *name,
 		  in_addr_t local,
 		  in_addr_t remote_netmask)
 {
+  struct gc_arena gc = gc_new ();
 #if 0
   msg (M_INFO, "CHECK_ADDR_CLASH type=%d public=%s local=%s, remote_netmask=%s",
        type,
-       print_in_addr_t (public, false),
-       print_in_addr_t (local, false),
-       print_in_addr_t (remote_netmask, false));
+       print_in_addr_t (public, false, &gc),
+       print_in_addr_t (local, false, &gc),
+       print_in_addr_t (remote_netmask, false, &gc));
 #endif
 
   if (public)
@@ -221,17 +227,17 @@ check_addr_clash (const char *name,
 	    msg (M_WARN,
 		 "WARNING: --%s address [%s] conflicts with --ifconfig address pair [%s, %s]",
 		 name,
-		 print_in_addr_t (public, false),
-		 print_in_addr_t (local, false),
-		 print_in_addr_t (remote_netmask, false));
+		 print_in_addr_t (public, false, &gc),
+		 print_in_addr_t (local, false, &gc),
+		 print_in_addr_t (remote_netmask, false, &gc));
 
 	  if (public_net == local_net || public_net == remote_net)
 	    msg (M_WARN,
 		 "WARNING: potential conflict between --%s address [%s] and --ifconfig address pair [%s, %s] -- this is a warning only that is triggered when local/remote addresses exist within the same /24 subnet as --ifconfig endpoints",
 		 name,
-		 print_in_addr_t (public, false),
-		 print_in_addr_t (local, false),
-		 print_in_addr_t (remote_netmask, false));
+		 print_in_addr_t (public, false, &gc),
+		 print_in_addr_t (local, false, &gc),
+		 print_in_addr_t (remote_netmask, false, &gc));
 	}
       else if (type == DEV_TYPE_TAP)
 	{
@@ -241,11 +247,12 @@ check_addr_clash (const char *name,
 	    msg (M_WARN,
 		 "WARNING: --%s address [%s] conflicts with --ifconfig subnet [%s, %s] -- local and remote addresses cannot be inside of the --ifconfig subnet",
 		 name,
-		 print_in_addr_t (public, false),
-		 print_in_addr_t (local, false),
-		 print_in_addr_t (remote_netmask, false));
+		 print_in_addr_t (public, false, &gc),
+		 print_in_addr_t (local, false, &gc),
+		 print_in_addr_t (remote_netmask, false, &gc));
 	}
     }
+  gc_free (&gc);
 }
 
 /*
@@ -263,9 +270,9 @@ no_tap_ifconfig ()
  * between peers.
  */
 const char *
-ifconfig_options_string (const struct tuntap* tt, bool remote, bool disable)
+ifconfig_options_string (const struct tuntap* tt, bool remote, bool disable, struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (256);
+  struct buffer out = alloc_buf_gc (256, gc);
   if (tt->did_ifconfig_setup && !disable)
     {
       if (tt->type == DEV_TYPE_TUN)
@@ -273,21 +280,21 @@ ifconfig_options_string (const struct tuntap* tt, bool remote, bool disable)
 	  const char *l, *r;
 	  if (remote)
 	    {
-	      r = print_in_addr_t (tt->local, false);
-	      l = print_in_addr_t (tt->remote_netmask, false);
+	      r = print_in_addr_t (tt->local, false, gc);
+	      l = print_in_addr_t (tt->remote_netmask, false, gc);
 	    }
 	  else
 	    {
-	      l = print_in_addr_t (tt->local, false);
-	      r = print_in_addr_t (tt->remote_netmask, false);
+	      l = print_in_addr_t (tt->local, false, gc);
+	      r = print_in_addr_t (tt->remote_netmask, false, gc);
 	    }
 	  buf_printf (&out, "%s %s", r, l);
 	}
       else if (tt->type == DEV_TYPE_TAP)
 	{
 	  buf_printf (&out, "%s %s",
-		      print_in_addr_t (tt->local & tt->remote_netmask, false),
-		      print_in_addr_t (tt->remote_netmask, false));
+		      print_in_addr_t (tt->local & tt->remote_netmask, false, gc),
+		      print_in_addr_t (tt->remote_netmask, false, gc));
 	}
       else
 	buf_printf (&out, "[undef]");
@@ -312,6 +319,8 @@ init_tun (struct tuntap *tt,
 	  const struct frame *frame,
 	  const struct tuntap_options *options)
 {
+  struct gc_arena gc = gc_new ();
+
 #ifdef WIN32
   overlapped_io_init (&tt->reads, frame, FALSE, true);
   overlapped_io_init (&tt->writes, frame, TRUE, true);
@@ -383,8 +392,8 @@ init_tun (struct tuntap *tt,
       /*
        * Set ifconfig parameters
        */
-      ifconfig_local = print_in_addr_t (tt->local, false);
-      ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, false);
+      ifconfig_local = print_in_addr_t (tt->local, false, &gc);
+      ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, false, &gc);
 
       /*
        * If TAP-style device, generate broadcast address.
@@ -392,7 +401,7 @@ init_tun (struct tuntap *tt,
       if (!tun)
 	{
 	  tt->broadcast = generate_ifconfig_broadcast_addr (tt->local, tt->remote_netmask);
-	  ifconfig_broadcast = print_in_addr_t (tt->broadcast, false);
+	  ifconfig_broadcast = print_in_addr_t (tt->broadcast, false, &gc);
 	}
 
       /*
@@ -411,6 +420,7 @@ init_tun (struct tuntap *tt,
 
       tt->did_ifconfig_setup = true;
     }
+  gc_free (&gc);
 }
 
 
@@ -420,6 +430,8 @@ do_ifconfig (struct tuntap *tt,
 	     const char *actual,    /* actual device name */
 	     int tun_mtu)
 {
+  struct gc_arena gc = gc_new ();
+
   if (tt->did_ifconfig_setup)
     {
       bool tun = false;
@@ -441,14 +453,14 @@ do_ifconfig (struct tuntap *tt,
       /*
        * Set ifconfig parameters
        */
-      ifconfig_local = print_in_addr_t (tt->local, false);
-      ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, false);
+      ifconfig_local = print_in_addr_t (tt->local, false, &gc);
+      ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, false, &gc);
 
       /*
        * If TAP-style device, generate broadcast address.
        */
       if (!tun)
-	ifconfig_broadcast = print_in_addr_t (tt->broadcast, false);
+	ifconfig_broadcast = print_in_addr_t (tt->broadcast, false, &gc);
 
 #if defined(TARGET_LINUX)
 #ifdef CONFIG_FEATURE_IPROUTE
@@ -649,7 +661,7 @@ do_ifconfig (struct tuntap *tt,
 	  {
 	    verify_255_255_255_252 (tt->local, tt->remote_netmask);
 	    tt->adapter_netmask = ~3;
-	    netmask = print_in_addr_t (tt->adapter_netmask, false);
+	    netmask = print_in_addr_t (tt->adapter_netmask, false, &gc);
 	  }
 	else
 	  {
@@ -686,6 +698,7 @@ do_ifconfig (struct tuntap *tt,
       msg (M_FATAL, "Sorry, but I don't know how to do 'ifconfig' commands on this operating system.  You should ifconfig your TUN/TAP device manually or use an --up script.");
 #endif
     }
+  gc_free (&gc);
 }
 
 void
@@ -720,7 +733,7 @@ tuntap_inherit_passive (struct tuntap *dest, const struct tuntap *src)
 static void
 open_null (struct tuntap *tt)
 {
-  strncpynt (tt->actual, "null", sizeof (tt->actual));
+  tt->actual_name = string_alloc ("null");
 }
 
 #ifndef WIN32
@@ -793,8 +806,8 @@ open_tun_generic (const char *dev, const char *dev_type, const char *dev_node,
       set_cloexec (tt->fd); /* don't pass fd to scripts */
       msg (M_INFO, "TUN/TAP device %s opened", tunname);
 
-      /* tt->actual is passed to up and down scripts and used as the ifconfig dev name */
-      strncpynt (tt->actual, (dynamic_opened ? dynamic_name : dev), sizeof (tt->actual));
+      /* tt->actual_name is passed to up and down scripts and used as the ifconfig dev name */
+      tt->actual_name = string_alloc (dynamic_opened ? dynamic_name : dev);
     }
 }
 
@@ -803,6 +816,8 @@ close_tun_generic (struct tuntap *tt)
 {
   if (tt->fd >= 0)
     close (tt->fd);
+  if (tt->actual_name)
+    free (tt->actual_name);
   clear_tuntap (tt);
 }
 
@@ -900,7 +915,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
       set_nonblock (tt->fd);
       set_cloexec (tt->fd);
       msg (M_INFO, "TUN/TAP device %s opened", ifr.ifr_name);
-      strncpynt (tt->actual, ifr.ifr_name, sizeof (tt->actual));
+      tt->actual_name = string_alloc (ifr.ifr_name);
     }
   return;
 
@@ -1083,11 +1098,13 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 
   close (if_fd);
 
-  openvpn_snprintf (tt->actual, sizeof (tt->actual),
-		    "%s%d", dev_tuntap_type, ppa);
+  tt->actual_name = (char *) malloc (32);
+  ASSERT (tt->actual_name);
+
+  openvpn_snprintf (tt->actual_name, 32, "%s%d", dev_tuntap_type, ppa);
 
   CLEAR (ifr);
-  strncpynt (ifr.ifr_name, tt->actual, sizeof (ifr.ifr_name));
+  strncpynt (ifr.ifr_name, tt->actual_name, sizeof (ifr.ifr_name));
   ifr.ifr_ip_muxid = muxid;
 
   if (ioctl (tt->ip_fd, SIOCSIFMUXID, &ifr) < 0)
@@ -1100,7 +1117,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   set_cloexec (tt->fd);
   set_cloexec (tt->ip_fd);
 
-  msg (M_INFO, "TUN/TAP device %s opened", tt->actual);
+  msg (M_INFO, "TUN/TAP device %s opened", tt->actual_name);
 }
 
 /*
@@ -1114,7 +1131,7 @@ close_tun (struct tuntap* tt)
       struct ifreq ifr;
 
       CLEAR (ifr);
-      strncpynt (ifr.ifr_name, tt->actual, sizeof (ifr.ifr_name));
+      strncpynt (ifr.ifr_name, tt->actual_name, sizeof (ifr.ifr_name));
 
      if (ioctl (tt->ip_fd, SIOCGIFFLAGS, &ifr) < 0)
 	msg (M_WARN | M_ERRNO, "Can't get iface flags");
@@ -1417,12 +1434,14 @@ tun_read_queue (struct tuntap *tt, int maxsize)
 	    }
 	  else /* error occurred */
 	    {
+	      struct gc_arena gc = gc_new ();
 	      ASSERT (SetEvent (tt->reads.overlapped.hEvent));
 	      tt->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      tt->reads.status = err;
 	      msg (D_WIN32_IO, "WIN32 I/O: TAP Read error [%d] : %s",
 		   (int) len,
-		   strerror_win32 (status));
+		   strerror_win32 (status, &gc));
+	      gc_free (&gc);
 	    }
 	}
     }
@@ -1478,12 +1497,14 @@ tun_write_queue (struct tuntap *tt, struct buffer *buf)
 	    }
 	  else /* error occurred */
 	    {
+	      struct gc_arena gc = gc_new ();
 	      ASSERT (SetEvent (tt->writes.overlapped.hEvent));
 	      tt->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      tt->writes.status = err;
 	      msg (D_WIN32_IO, "WIN32 I/O: TAP Write error [%d] : %s",
 		   BLEN (&tt->writes.buf),
-		   strerror_win32 (err));
+		   strerror_win32 (err, &gc));
+	      gc_free (&gc);
 	    }
 	}
     }
@@ -1696,9 +1717,10 @@ const char *
 get_device_guid (const char *name,
 		 char *actual_name,
 		 int actual_name_size,
-		 int op)
+		 int op,
+		 struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (256);
+  struct buffer out = alloc_buf_gc (256, gc);
   LONG status;
   HKEY control_net_key;
   DWORD len;
@@ -1834,6 +1856,7 @@ get_device_guid (const char *name,
 void
 verify_255_255_255_252 (in_addr_t local, in_addr_t remote)
 {
+  struct gc_arena gc = gc_new ();
   const unsigned int mask = 3;
   const char *err = NULL;
 
@@ -1856,13 +1879,15 @@ verify_255_255_255_252 (in_addr_t local, in_addr_t remote)
       goto error;
     }
 
+  gc_free (&gc);
   return;
 
  error:
   msg (M_FATAL, "There is a problem in your selection of --ifconfig endpoints [local=%s, remote=%s].  The local and remote VPN endpoints %s.  Try '" PACKAGE " --show-valid-subnets' option for more info.",
-       print_in_addr_t (local, false),
-       print_in_addr_t (remote, false),
+       print_in_addr_t (local, false, &gc),
+       print_in_addr_t (remote, false, &gc),
        err);
+  gc_free (&gc);
 }
 
 void show_valid_win32_tun_subnets (void)
@@ -1898,7 +1923,9 @@ void show_valid_win32_tun_subnets (void)
 void
 show_tap_win32_adapters (void)
 {
-  get_device_guid (NULL, NULL, 0, GET_DEV_UID_ENUMERATE);
+  struct gc_arena gc = gc_new ();
+  get_device_guid (NULL, NULL, 0, GET_DEV_UID_ENUMERATE, &gc);
+  gc_free (&gc);
 }
 
 /*
@@ -1908,6 +1935,7 @@ show_tap_win32_adapters (void)
 static PIP_ADAPTER_INFO
 get_adapt_info (DWORD index)
 {
+  struct gc_arena gc = gc_new ();
   ULONG size = 0;
   DWORD status;
 
@@ -1918,18 +1946,19 @@ get_adapt_info (DWORD index)
 	  msg (M_INFO, "GetAdaptersInfo #1 failed [%u] (status=%u) : %s",
 	       (unsigned int)index,
 	       (unsigned int)status,
-	       strerror_win32 (status));
+	       strerror_win32 (status, &gc));
 	}
       else
 	{
-	  PIP_ADAPTER_INFO pi = (PIP_ADAPTER_INFO) gc_malloc (size);
+	  PIP_ADAPTER_INFO pi = (PIP_ADAPTER_INFO) gc_malloc (size, false, &gc);
 	  ASSERT (pi);
 	  if ((status = GetAdaptersInfo (pi, &size)) != NO_ERROR)
 	    {
 	      msg (M_INFO, "GetAdaptersInfo #2 failed [%u] (status=%u) : %s",
 		   (unsigned int)index,
 		   (unsigned int)status,
-		   strerror_win32 (status));
+		   strerror_win32 (status, &gc));
+	      gc_free (&gc);
 	      return NULL;
 	    }
 
@@ -1939,11 +1968,15 @@ get_adapt_info (DWORD index)
 	    for (a = pi; a != NULL; a = a->Next)
 	      {
 		if (a->Index == index)
-		  return a;
+		  {
+		    gc_free (&gc);
+		    return a;
+		  }
 	      }
 	  }
 	}
     }
+  gc_free (&gc);
   return NULL;
 }
 
@@ -2006,6 +2039,7 @@ delete_temp_addresses (DWORD index)
 static DWORD
 get_interface_index (const char *guid)
 {
+  struct gc_arena gc = gc_new ();
   ULONG index;
   DWORD status;
   wchar_t wbuf[256];
@@ -2016,11 +2050,13 @@ get_interface_index (const char *guid)
       msg (M_INFO, "NOTE: could not get adapter index for %S, status=%u : %s",
 	   wbuf,
 	   (unsigned int)status,
-	   strerror_win32 (status));
+	   strerror_win32 (status, &gc));
+      gc_free (&gc);
       return ~0;
     }
   else
     {
+      gc_free (&gc);
       return index;
     }
 }
@@ -2093,6 +2129,7 @@ build_dhcp_options_string (struct buffer *buf, const struct tuntap_options *o)
 void
 open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
 {
+  struct gc_arena gc = gc_new ();
   char device_path[256];
   const char *device_guid = NULL;
   DWORD len;
@@ -2104,6 +2141,8 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   if (tt->type == DEV_TYPE_NULL)
     {
       open_null (tt);
+      netcmd_semaphore_release (); /* JYFIXME -- backport to 1.x */
+      gc_free (&gc);
       return;
     }
   else if (tt->type == DEV_TYPE_TAP || tt->type == DEV_TYPE_TUN)
@@ -2119,14 +2158,16 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
    * Lookup the device name in the registry, using the --dev-node high level name.
    */
   {
-    int op = GET_DEV_UID_NORMAL; 
+    char guid_buffer[256];
+    int op = GET_DEV_UID_NORMAL;
 
     if (!dev_node)
       op = GET_DEV_UID_DEFAULT; 
 
     /* translate high-level device name into a device instance
        GUID using the registry */
-    device_guid = get_device_guid (dev_node, tt->actual, sizeof (tt->actual), op);
+    device_guid = get_device_guid (dev_node, guid_buffer, sizeof (guid_buffer), op, &gc);
+    tt->actual_name = string_alloc (guid_buffer);
   }
 
   /*
@@ -2151,7 +2192,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   if (tt->hand == INVALID_HANDLE_VALUE)
     msg (M_ERR, "CreateFile failed on TAP device: %s", device_path);
 
-  msg (M_INFO, "TAP-WIN32 device [%s] opened: %s", tt->actual, device_path);
+  msg (M_INFO, "TAP-WIN32 device [%s] opened: %s", tt->actual_name, device_path);
 
   /* get driver version info */
   {
@@ -2232,7 +2273,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	    dsa = (tt->local & tt->adapter_netmask) + tt->options.dhcp_masq_offset;
 
 	  if (dsa == tt->local)
-	    msg (M_FATAL, "ERROR: There is a clash between the --ifconfig local address and the internal DHCP server address -- both are set to %s -- please use the --ip-win32 dynamic option to choose a different free address from the --ifconfig subnet for the internal DHCP server", print_in_addr_t (dsa, false));
+	    msg (M_FATAL, "ERROR: There is a clash between the --ifconfig local address and the internal DHCP server address -- both are set to %s -- please use the --ip-win32 dynamic option to choose a different free address from the --ifconfig subnet for the internal DHCP server", print_in_addr_t (dsa, false, &gc));
 
 	  if ((tt->local & tt->adapter_netmask) != (dsa & tt->adapter_netmask))
 	    msg (M_FATAL, "ERROR: --tap-win32 dynamic [offset] : offset is outside of --ifconfig subnet");
@@ -2251,10 +2292,10 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	msg (M_FATAL, "ERROR: The TAP-Win32 driver rejected a DeviceIoControl call to set TAP_IOCTL_CONFIG_DHCP_MASQ mode");
 
       msg (M_INFO, "Notified TAP-Win32 driver to set a DHCP IP/netmask of %s/%s on interface %s [DHCP-serv: %s, lease-time: %d]",
-	   print_in_addr_t (tt->local, false),
-	   print_in_addr_t (tt->adapter_netmask, false),
+	   print_in_addr_t (tt->local, false, &gc),
+	   print_in_addr_t (tt->adapter_netmask, false, &gc),
 	   device_guid,
-	   print_in_addr_t (ntohl(ep[2]), false),
+	   print_in_addr_t (ntohl(ep[2]), false, &gc),
 	   ep[3]
 	   );
 
@@ -2263,7 +2304,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	{
 	  struct buffer buf = alloc_buf (256);
 	  build_dhcp_options_string (&buf, &tt->options);
-	  msg (D_DHCP_OPT, "DHCP option string: %s", format_hex (BPTR (&buf), BLEN (&buf), 0));
+	  msg (D_DHCP_OPT, "DHCP option string: %s", format_hex (BPTR (&buf), BLEN (&buf), 0, &gc));
 	  if (!DeviceIoControl (tt->hand, TAP_IOCTL_CONFIG_DHCP_SET_OPT,
 				BPTR (&buf), BLEN (&buf),
 				BPTR (&buf), BLEN (&buf), &len, NULL))
@@ -2311,7 +2352,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	       (unsigned int)index,
 	       device_guid,
 	       (unsigned int)status,
-	       strerror_win32 (status));
+	       strerror_win32 (status, &gc));
       }
 
     /*
@@ -2354,31 +2395,32 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 				    &tt->ipapi_context,
 				    &tt->ipapi_instance)) == NO_ERROR)
 	  msg (M_INFO, "Succeeded in adding a temporary IP/netmask of %s/%s to interface %s using the Win32 IP Helper API",
-	       print_in_addr_t (tt->local, false),
-	       print_in_addr_t (tt->adapter_netmask, false),
+	       print_in_addr_t (tt->local, false, &gc),
+	       print_in_addr_t (tt->adapter_netmask, false, &gc),
 	       device_guid
 	       );
 	else
 	  msg (M_FATAL, "ERROR: AddIPAddress %s/%s failed on interface %s, index=%u, status=%u (windows error: '%s') -- %s",
-	       print_in_addr_t (tt->local, false),
-	       print_in_addr_t (tt->adapter_netmask, false),
+	       print_in_addr_t (tt->local, false, &gc),
+	       print_in_addr_t (tt->adapter_netmask, false, &gc),
 	       device_guid,
 	       (unsigned int)index,
 	       (unsigned int)status,
-	       strerror_win32 (status),
+	       strerror_win32 (status, &gc),
 	       error_suffix);
 	tt->ipapi_context_defined = true;
       }
   }
   netcmd_semaphore_release ();
+  gc_free (&gc);
 }
 
 const char *
-tap_win32_getinfo (const struct tuntap *tt)
+tap_win32_getinfo (const struct tuntap *tt, struct gc_arena *gc)
 {
   if (tt && tt->hand != NULL)
     {
-      struct buffer out = alloc_buf_gc (256);
+      struct buffer out = alloc_buf_gc (256, gc);
       DWORD len;
       if (DeviceIoControl (tt->hand, TAP_IOCTL_GET_INFO,
 			   BSTR (&out), BCAP (&out),
@@ -2416,6 +2458,7 @@ tun_show_debug (struct tuntap *tt)
 void
 close_tun (struct tuntap *tt)
 {
+  struct gc_arena gc = gc_new ();
 #if 1
   if (tt->ipapi_context_defined)
     {
@@ -2425,7 +2468,7 @@ close_tun (struct tuntap *tt)
 	  msg (M_WARN, "Warning: DeleteIPAddress[%u] failed on TAP-Win32 adapter, status=%u : %s",
 	       (unsigned int)tt->ipapi_context,
 	       (unsigned int)status,
-	       strerror_win32 (status));
+	       strerror_win32 (status, &gc));
 	}
     }
 #endif
@@ -2450,6 +2493,7 @@ close_tun (struct tuntap *tt)
 	msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on TAP-Win32 adapter");
     }
   clear_tuntap (tt);
+  gc_free (&gc);
 }
 
 /*
@@ -2490,9 +2534,9 @@ ipset2ascii (int index)
 }
 
 const char *
-ipset2ascii_all ()
+ipset2ascii_all (struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (256);
+  struct buffer out = alloc_buf_gc (256, gc);
   int i;
 
   ASSERT (IPW32_SET_N == SIZE (ipset_names));

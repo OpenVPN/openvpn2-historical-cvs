@@ -47,12 +47,14 @@
 void
 show_select_status (struct context *c)
 {
+  struct gc_arena gc = gc_new ();
   msg (D_SELECT, "SELECT %s|%s|%s|%s %d/%d",
-       TUNTAP_READ_STAT (&c->c2.event_wait, &c->c1.tuntap),
-       TUNTAP_WRITE_STAT (&c->c2.event_wait, &c->c1.tuntap),
-       SOCKET_READ_STAT (&c->c2.event_wait, &c->c2.link_socket),
-       SOCKET_WRITE_STAT (&c->c2.event_wait, &c->c2.link_socket),
+       TUNTAP_READ_STAT (&c->c2.event_wait, &c->c1.tuntap, &gc),
+       TUNTAP_WRITE_STAT (&c->c2.event_wait, &c->c1.tuntap, &gc),
+       SOCKET_READ_STAT (&c->c2.event_wait, &c->c2.link_socket, &gc),
+       SOCKET_WRITE_STAT (&c->c2.event_wait, &c->c2.link_socket, &gc),
        (int) c->c2.timeval.tv_sec, (int) c->c2.timeval.tv_usec);
+  gc_free (&gc);
 }
 
 /*
@@ -149,7 +151,7 @@ check_connection_established_dowork (struct context *c)
 	    {
 	      c->c2.did_open_tun =
 		do_open_tun (&c->options, &c->c2.frame, &c->c2.link_socket,
-			     &c->c1.tuntap, &c->c1.route_list);
+			     &c->c1.tuntap, c->c1.route_list);
 	      TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
 	      c->c2.current = time (NULL);
 	    }
@@ -191,8 +193,11 @@ check_connection_established_dowork (struct context *c)
 void
 check_add_routes_dowork (struct context *c)
 {
-  do_route (&c->options, &c->c1.route_list);
-  c->c2.current = time (NULL);
+  if (c->c1.route_list)
+    {
+      do_route (&c->options, c->c1.route_list);
+      c->c2.current = time (NULL);
+    }
   event_timeout_clear (&c->c2.route_wakeup);
 }
 
@@ -463,6 +468,7 @@ read_incoming_link (struct context *c)
 void
 process_incoming_link (struct context *c)
 {
+  struct gc_arena gc = gc_new ();
   if (c->c2.buf.len > 0)
     {
       c->c2.link_read_bytes += c->c2.buf.len;
@@ -486,8 +492,8 @@ process_incoming_link (struct context *c)
   msg (D_LINK_RW, "%s READ [%d] from %s: %s",
        proto2ascii (c->c2.link_socket.proto, true),
        BLEN (&c->c2.buf),
-       print_sockaddr (&c->c2.from),
-       PROTO_DUMP (&c->c2.buf));
+       print_sockaddr (&c->c2.from, &gc),
+       PROTO_DUMP (&c->c2.buf, &gc));
 
   /*
    * Good, non-zero length packet received.
@@ -526,7 +532,7 @@ process_incoming_link (struct context *c)
 		      c->sig->signal_received = 0;
 		      c->sig->signal_text = "error";
 		      mutex_unlock (L_TLS);
-		      return;
+		      goto done;
 		    }
 		}
 	      else
@@ -551,7 +557,7 @@ process_incoming_link (struct context *c)
 	      msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
 	      c->sig->signal_text = "decryption-error";
 	      mutex_unlock (L_TLS);
-	      return;
+	      goto done;
 	    }
 	}
 #ifdef USE_SSL
@@ -605,6 +611,8 @@ process_incoming_link (struct context *c)
     {
       c->c2.to_tun = c->c2.nullbuf;
     }
+ done:
+  gc_free (&gc);
 }
 
 void
@@ -640,6 +648,8 @@ read_incoming_tun (struct context *c)
 void
 process_incoming_tun (struct context *c)
 {
+  struct gc_arena gc = gc_new ();
+
   if (c->c2.buf.len > 0)
     c->c2.tun_read_bytes += c->c2.buf.len;
 
@@ -651,8 +661,8 @@ process_incoming_tun (struct context *c)
   /* Show packet content */
   msg (D_TUN_RW, "TUN READ [%d]: %s md5=%s",
        BLEN (&c->c2.buf),
-       format_hex (BPTR (&c->c2.buf), BLEN (&c->c2.buf), 80),
-       MD5SUM (BPTR (&c->c2.buf), BLEN (&c->c2.buf)));
+       format_hex (BPTR (&c->c2.buf), BLEN (&c->c2.buf), 80, &gc),
+       MD5SUM (BPTR (&c->c2.buf), BLEN (&c->c2.buf), &gc));
 
   if (c->c2.buf.len > 0)
     {
@@ -692,11 +702,14 @@ process_incoming_tun (struct context *c)
       c->c2.to_link = c->c2.nullbuf;
       c->c2.free_to_link = false;
     }
+  gc_free (&gc);
 }
 
 void
 process_outgoing_link (struct context *c, struct link_socket *ls)
 {
+  struct gc_arena gc = gc_new ();
+
   if (c->c2.to_link.len > 0 && c->c2.to_link.len <= EXPANDED_SIZE (&c->c2.frame))
     {
       /*
@@ -738,8 +751,8 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
 	  msg (D_LINK_RW, "%s WRITE [%d] to %s: %s",
 	       proto2ascii (ls->proto, true),
 	       BLEN (&c->c2.to_link),
-	       print_sockaddr (&c->c2.to_link_addr),
-	       PROTO_DUMP (&c->c2.to_link));
+	       print_sockaddr (&c->c2.to_link_addr, &gc),
+	       PROTO_DUMP (&c->c2.to_link, &gc));
 
 	  /* Packet send complexified by possible Socks5 usage */
 	  {
@@ -774,7 +787,7 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
 	  if (size != BLEN (&c->c2.to_link))
 	    msg (D_LINK_ERRORS,
 		 "TCP/UDP packet was truncated/expanded on write to %s (tried=%d,actual=%d)",
-		 print_sockaddr (&c->c2.to_link_addr),
+		 print_sockaddr (&c->c2.to_link_addr, &gc),
 		 BLEN (&c->c2.to_link),
 		 size);
 	}
@@ -782,7 +795,7 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
   else
     {
       msg (D_LINK_ERRORS, "TCP/UDP packet too large on write to %s (tried=%d,max=%d)",
-	   print_sockaddr (&c->c2.to_link_addr),
+	   print_sockaddr (&c->c2.to_link_addr, &gc),
 	   c->c2.to_link.len,
 	   EXPANDED_SIZE (&c->c2.frame));
     }
@@ -798,11 +811,15 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
       free_buf (&c->c2.to_link);
     }
   c->c2.to_link = c->c2.nullbuf;
+
+  gc_free (&gc);
 }
 
 void
 process_outgoing_tun (struct context *c, struct tuntap *tt)
 {
+  struct gc_arena gc = gc_new ();
+
   /*
    * Set up for write() call to TUN/TAP
    * device.
@@ -838,8 +855,8 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
 #endif
       msg (D_TUN_RW, "TUN WRITE [%d]: %s md5=%s",
 	   BLEN (&c->c2.to_tun),
-	   format_hex (BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun), 80),
-	   MD5SUM (BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun)));
+	   format_hex (BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun), 80, &gc),
+	   MD5SUM (BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun), &gc));
 
 #ifdef TUN_PASS_BUFFER
       size = write_tun_buffered (tt, &c->c2.to_tun);
@@ -858,7 +875,7 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
 	  if (size != BLEN (&c->c2.to_tun))
 	    msg (D_LINK_ERRORS,
 		 "TUN/TAP packet was fragmented on write to %s (tried=%d,actual=%d)",
-		 tt->actual,
+		 tt->actual_name,
 		 BLEN (&c->c2.to_tun),
 		 size);
 	}
@@ -883,6 +900,8 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
     event_timeout_reset (&c->c2.inactivity_interval, c->c2.current);
 
   c->c2.to_tun = c->c2.nullbuf;
+
+  gc_free (&gc);
 }
 
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)

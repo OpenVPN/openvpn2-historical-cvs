@@ -112,7 +112,7 @@ struct tuntap
 
   struct tuntap_options options; /* options set on command line */
 
-  char actual[256]; /* actual name of TUN/TAP dev, usually including unit number */
+  char *actual_name; /* actual name of TUN/TAP dev, usually including unit number */
 
   /* ifconfig parameters */
   in_addr_t local;
@@ -165,13 +165,13 @@ struct tuntap
 
 #define TUNTAP_SETMAXFD(w, tt)
 
-#define TUNTAP_READ_STAT(w, tt) \
+#define TUNTAP_READ_STAT(w, tt, gc) \
    ((tt)->hand != NULL \
-   ? overlapped_io_state_ascii (&((tt)->reads),  "tr") : "trX")
+   ? overlapped_io_state_ascii (&((tt)->reads),  "tr", (gc)) : "trX")
 
-#define TUNTAP_WRITE_STAT(w, tt) \
+#define TUNTAP_WRITE_STAT(w, tt, gc) \
    ((tt)->hand != NULL \
-   ? overlapped_io_state_ascii (&((tt)->writes), "tw") : "twX")
+   ? overlapped_io_state_ascii (&((tt)->writes), "tw", (gc)) : "twX")
 
 #else
 
@@ -179,8 +179,8 @@ struct tuntap
 #define TUNTAP_SET_WRITE(w, tt)  { if ((tt)->fd >= 0)   FD_SET   ((tt)->fd, &((w)->writes)); }
 #define TUNTAP_ISSET(w, tt, set)      ((tt)->fd >= 0 && FD_ISSET ((tt)->fd, &((w)->set)))
 #define TUNTAP_SETMAXFD(w, tt)   { if ((tt)->fd >= 0)   wait_update_maxfd ((w), (tt)->fd); }
-#define TUNTAP_READ_STAT(w, tt)  (TUNTAP_ISSET ((w), (tt), reads) ?  "TR" : "tr")
-#define TUNTAP_WRITE_STAT(w, tt) (TUNTAP_ISSET ((w), (tt), writes) ? "TW" : "tw")
+#define TUNTAP_READ_STAT(w, tt, gc)  (TUNTAP_ISSET ((w), (tt), reads) ?  "TR" : "tr")
+#define TUNTAP_WRITE_STAT(w, tt, gc) (TUNTAP_ISSET ((w), (tt), writes) ? "TW" : "tw")
 
 #endif
 
@@ -202,8 +202,10 @@ int read_tun (struct tuntap* tt, uint8_t *buf, int len);
 void tuncfg (const char *dev, const char *dev_type, const char *dev_node,
 	     bool ipv6, int persist_mode);
 
-const char *guess_tuntap_dev (const char *dev, const char *dev_type,
-			      const char *dev_node);
+const char *guess_tuntap_dev (const char *dev,
+			      const char *dev_type,
+			      const char *dev_node,
+			      struct gc_arena *gc);
 
 void init_tun (struct tuntap *tt,
 	       const char *dev,       /* --dev option */
@@ -225,9 +227,7 @@ bool is_dev_type (const char *dev, const char *dev_type, const char *match_type)
 int dev_type_enum (const char *dev, const char *dev_type);
 const char *dev_type_string (const char *dev, const char *dev_type);
 
-const char *ifconfig_options_string (const struct tuntap* tt,
-				     bool remote,
-				     bool disable);
+const char *ifconfig_options_string (const struct tuntap* tt, bool remote, bool disable, struct gc_arena *gc);
 
 void tuntap_inherit_passive (struct tuntap *dest, const struct tuntap *src);
 
@@ -286,7 +286,7 @@ ifconfig_order(void)
 
 int ascii2ipset (const char* name);
 const char *ipset2ascii (int index);
-const char *ipset2ascii_all (void);
+const char *ipset2ascii_all (struct gc_arena *gc);
 
 /* op for get_device_guid */
 
@@ -298,13 +298,14 @@ const char *ipset2ascii_all (void);
 const char *get_device_guid (const char *name,
 			     char *actual_name,
 			     int actual_name_size,
-			     int op);
+			     int op,
+			     struct gc_arena *gc);
 
 void verify_255_255_255_252 (in_addr_t local, in_addr_t remote);
 
 void show_tap_win32_adapters (void);
 void show_valid_win32_tun_subnets (void);
-const char *tap_win32_getinfo (const struct tuntap *tt);
+const char *tap_win32_getinfo (const struct tuntap *tt, struct gc_arena *gc);
 void tun_show_debug (struct tuntap *tt);
 
 int tun_read_queue (struct tuntap *tt, int maxsize);

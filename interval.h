@@ -41,7 +41,7 @@
 
 /* struct timeval functions */
 
-const char *tv_string (const struct timeval *tv);
+const char *tv_string (const struct timeval *tv, struct gc_arena *gc);
 
 static inline bool
 tv_defined (const struct timeval *tv)

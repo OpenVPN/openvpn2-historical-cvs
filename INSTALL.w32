@@ -7,15 +7,43 @@ As of 2003.07.18, OpenVPN only builds/runs on Win XP.
 Ports to other versions of windows should
 be forthcoming.
 
+Install from Binaries
+---------------------
+
+Download and Unzip the most recent OpenVPN-Win32 beta
+which can be found in:
+
+http://prdownloads.sourceforge.net/openvpn/
+
+Choose the most recent distribution with a .zip extension.
+
+The .zip version is basically identical to the .tar.gz
+version except it also contains a .\win32-binaries directory.
+
+Within win32-binaries, the bin directory has the
+OpenVPN exe and the OpenSSL DLLs.  Either copy all
+files in bin to a directory on your PATH, or add
+the location of the bin directory to your PATH.
+
 Build from source
--------------------
+-----------------
+
+You can skip this section if you installed
+from binaries as described above.
 
 You will need the following:
 
 (1) MinGW/MSYS environment
+    http://mingw.sourceforge.net/
+
 (2) OpenSSL library
+    http://www.openssl.org/
+
 (3) LZO library
+    http://www.oberhumer.com/opensource/lzo/
+
 (4) Windows DDK (available only from Microsoft)
+    http://www.microsoft.com/whdc/ddk/winddk.mspx
 
 First build the usermode component of OpenVPN
 from the top-level directory of the OpenVPN
@@ -63,22 +91,6 @@ If you build dynamically with OpenSSL, copy the OpenSSL
 DLLs to a directory in your path.
 
 See instructions below for installing the kernel driver.
-
-Install from Binaries
----------------------
-
-Download and Unzip the most recent OpenVPN-Win32 beta
-which can be found in:
-
-http://openvpn.sourceforge.net/beta/win32/
-
-This distribution is exactly like the OpenVPN source
-tarball except it has a .\win32-binaries directory.
-
-Within win32-binaries, the bin directory has the
-OpenVPN exe and the OpenSSL DLLs.  Either copy all
-files in bin to a directory on your PATH, or add
-the location of the bin directory to your PATH.
 
 Install the TAP-Win32 kernel driver
 -----------------------------------

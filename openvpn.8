@@ -1866,6 +1866,12 @@ not it should be accepted.  For a simple perl script which will test
 the common name field on the certificate, see the file
 .B verify-cn
 in the OpenVPN distribution.
+
+While OpenVPN currently doesn't support CRLs (certificate
+revocation lists), a simple
+.B --tls-verify
+script could be implemented that rejects certificates
+based on the CN (Common Name).
 .TP
 .B --disable-occ
 Disable options compatibility check between peers.  This is designed

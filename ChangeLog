@@ -1,7 +1,12 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.28 2004/05/09 04:53:10 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.29 2004/05/10 06:13:31 jimyonan Exp $
+
+2004.05.09 -- Version 2.0-beta1
+
+* Unchanged from test29 except for version number
+  upgrade.
 
 2004.05.08 -- Version 2.0-test29
 
@@ -237,6 +242,19 @@ $Id: ChangeLog,v 1.89.2.28 2004/05/09 04:53:10 jimyonan Exp $
 
 * Initial testbed for 2.0.
 
+2004.05.09 -- Version 1.6.0
+	
+* Unchanged from 1.6-rc4 except for version number
+  upgrade.
+
+2004.04.01 -- Version 1.6-rc4
+
+* Made minor customizations to devcon and
+  renamed as tapinstall.exe for Windows version.
+* Fixed "storage size of `iv' isn't known" build
+  problem on FreeBSD.
+* OpenSSL 0.9.7d bundled with Windows self-install.
+	
 2004.03.13 -- Version 1.6-rc3
 
 * Minor Windows fixes for --ip-win32 dynamic, relating to

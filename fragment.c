@@ -23,9 +23,10 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include "config.h"
+
 #ifdef FRAGMENT_ENABLE
 
-#include "config.h"
 #include "syshead.h"
 #include "misc.h"
 #include "fragment.h"

@@ -1,7 +1,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.63.2.11 2003/05/13 07:49:40 jimyonan Exp $
+$Id: ChangeLog,v 1.63.2.12 2003/05/13 09:50:38 jimyonan Exp $
 
 Upcoming Version 1.4.1
 
@@ -13,7 +13,8 @@ Upcoming Version 1.4.1
   Occurs on platorms where
   EXTENDED_SOCKET_ERROR_CAPABILITY is defined,
   such as Linux 2.4.
-
+* Added --enable-dynamic-mtu configure option.
+	
 2003.05.07 -- Version 1.4.0
 
 * Added --replay-persist feature to allow replay

@@ -47,14 +47,6 @@
 #include "memdbg.h"
 
 /*
- * When should we daemonize?
- *
- * Level 0 -- after option parsing (early)
- * Level 1 -- after all initialization (late)
- */
-#define DAEMONIZATION_LEVEL 1
-
-/*
  * Should we become a daemon?
  *  level == 0 after parameters have been parsed but before any initialization
  *  level == 1 after initialization but before any SSL/TLS negotiation or

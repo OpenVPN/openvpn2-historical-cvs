@@ -39,16 +39,14 @@
 
 #include "forward-inline.h"
 
-#define PROCESS_SIGNAL_P2P(c)                   \
-      if (IS_SIG (c))                           \
-	{                                       \
-	  const int brk = process_signal (c);   \
-	  perf_pop ();                          \
-	  if (brk)                              \
-	    break;                              \
-	  else                                  \
-	    continue;                           \
-	}
+#define P2P_CHECK_SIG() EVENT_LOOP_CHECK_SIGNAL (c, process_signal_p2p, c);
+
+static bool
+process_signal_p2p (struct context *c)
+{
+  remap_signal (c);
+  return process_signal (c);
+}
 
 static void
 tunnel_point_to_point (struct context *c)
@@ -59,7 +57,7 @@ tunnel_point_to_point (struct context *c)
   c->mode = CM_P2P;
 
   /* initialize tunnel instance */
-  init_instance (c, CC_HARD_USR1_TO_HUP);
+  init_instance (c, c->es, CC_HARD_USR1_TO_HUP);
   if (IS_SIG (c))
     return;
 
@@ -70,11 +68,11 @@ tunnel_point_to_point (struct context *c)
 
       /* process timers, TLS, etc. */
       pre_select (c);
-      PROCESS_SIGNAL_P2P (c);
+      P2P_CHECK_SIG();
 
       /* set up and do the I/O wait */
       io_wait (c, p2p_iow_flags (c));
-      PROCESS_SIGNAL_P2P (c);
+      P2P_CHECK_SIG();
 
       /* timeout? */
       if (c->c2.event_set_status == ES_TIMEOUT)
@@ -85,14 +83,13 @@ tunnel_point_to_point (struct context *c)
 
       /* process the I/O which triggered select */
       process_io (c);
-      PROCESS_SIGNAL_P2P (c);
+      P2P_CHECK_SIG();
 
       perf_pop ();
     }
 
   /* tear down tunnel instance (unless --persist-tun) */
   close_instance (c);
-  c->first_time = false;
 }
 
 #undef PROCESS_SIGNAL_P2P
@@ -163,7 +160,7 @@ main (int argc, char *argv[])
 	  if (do_test_crypto (&c.options))
 	    break;
 
-	    /* set certain options as environmental variables */
+	  /* set certain options as environmental variables */
 	  setenv_settings (c.es, &c.options);
 
 	  /* finish context init */
@@ -186,14 +183,12 @@ main (int argc, char *argv[])
 		  ASSERT (0);
 		}
 
+	      /* indicates first iteration -- has program-wide scope */
+	      c.first_time = false;
+
 	      /* any signals received? */
 	      if (IS_SIG (&c))
 		print_signal (c.sig, NULL, M_INFO);
-
-	      /* Convert SIGUSR1 -> SIGHUP if no --persist options (or other options
-		 which hold state across restarts) specified */
-	      if (!is_stateful_restart (&c.options) && c.sig->signal_received == SIGUSR1)
-		c.sig->signal_received = SIGHUP;
 	    }
 	  while (c.sig->signal_received == SIGUSR1);
 
@@ -203,10 +198,10 @@ main (int argc, char *argv[])
       while (c.sig->signal_received == SIGHUP);
     }
 
+  context_gc_free (&c);
+
   /* uninitialize program-wide statics */
   uninit_static ();
-
-  context_gc_free (&c);
 
   openvpn_exit (OPENVPN_EXIT_STATUS_GOOD);  /* exit point */
   return 0;			            /* NOTREACHED */

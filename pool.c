@@ -191,12 +191,12 @@ ifconfig_pool_acquire (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *
 }
 
 bool
-ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand)
+ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand, const bool hard)
 {
   bool ret = false;
   if (pool && hand >= 0 && hand < pool->size)
     {
-      ifconfig_pool_entry_free (&pool->list[hand], false);
+      ifconfig_pool_entry_free (&pool->list[hand], hard);
       ret = true;
     }
   return ret;

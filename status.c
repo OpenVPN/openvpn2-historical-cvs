@@ -99,7 +99,10 @@ status_open (const char *filename, const int refresh_freq, const int msglevel, c
 		so->read_buf = alloc_buf (512);
 	    }
 	  else
-	    msg (M_WARN, "Note: cannot open %s for %s", filename, print_status_mode (so->flags));
+	    {
+	      msg (M_WARN, "Note: cannot open %s for %s", filename, print_status_mode (so->flags));
+	      so->errors = true;
+	    }
 	}
       else
 	so->flags = STATUS_OUTPUT_WRITE;
@@ -168,19 +171,29 @@ status_flush (struct status_output *so)
     }
 }
 
-void
+/* return false if error occurred */
+bool
 status_close (struct status_output *so)
 {
+  bool ret = true;
   if (so)
     {
+      if (so->errors)
+	ret = false;
       if (so->fd >= 0)
-	close (so->fd);
+	{
+	  if (close (so->fd) < 0)
+	    ret = false;
+	}
       if (so->filename)
 	free (so->filename);
       if (buf_defined (&so->read_buf))
 	free_buf (&so->read_buf);
       free (so);
     }
+  else
+    ret = false;
+  return ret;
 }
 
 #define STATUS_PRINTF_MAXLEN 256
@@ -204,7 +217,10 @@ status_printf (struct status_output *so, const char *format, ...)
 	  strcat (buf, "\n");
 	  len = strlen (buf);
 	  if (len > 0)
-	    write (so->fd, buf, len);
+	    {
+	      if (write (so->fd, buf, len) < 0)
+		so->errors = true;
+	    }
 	}
 
       if (so->msglevel >= 0)

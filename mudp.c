@@ -212,7 +212,7 @@ tunnel_server_udp (struct context *top)
   context_clear_2 (top);
 
   /* initialize top-tunnel instance */
-  init_instance (top, CC_HARD_USR1_TO_HUP);
+  init_instance (top, top->es, CC_HARD_USR1_TO_HUP);
   if (IS_SIG (top))
     return;
   
@@ -223,7 +223,7 @@ tunnel_server_udp (struct context *top)
   multi_top_init (&multi, top);
 
   /* finished with initialization */
-  initialization_sequence_completed (top);
+  initialization_sequence_completed (top, false);
 
   /* per-packet event loop */
   while (true)
@@ -260,7 +260,6 @@ tunnel_server_udp (struct context *top)
   multi_top_free (&multi);
   close_instance (top);
   multi_uninit (&multi);
-  top->first_time = false;
 }
 
 #endif

@@ -51,6 +51,8 @@
 #include "fdmisc.h"
 #include "interval.h"
 #include "perf.h"
+#include "status.h"
+#include "gremlin.h"
 
 #ifdef WIN32
 #include "cryptoapi.h"
@@ -89,6 +91,8 @@ show_tls_performance_stats(void)
 
 #ifdef BIO_DEBUG
 
+#warning BIO_DEBUG defined
+
 static FILE *biofp;                            /* GLOBAL */
 static bool biofp_toggle;                      /* GLOBAL */
 static time_t biofp_last_open;                 /* GLOBAL */
@@ -124,15 +128,17 @@ open_biofp()
 }
 
 static void
-bio_debug_data (const char *mode, BIO *bio, uint8_t *buf, int len, const char *desc)
+bio_debug_data (const char *mode, BIO *bio, const uint8_t *buf, int len, const char *desc)
 {
+  struct gc_arena gc = gc_new ();
   if (len > 0)
     {
       open_biofp();
       fprintf(biofp, "BIO_%s %s time=" time_format " bio=" ptr_format " len=%d data=%s\n",
-	      mode, desc, time (NULL), bio, len, format_hex (buf, len, 0));
+	      mode, desc, time (NULL), (ptr_type)bio, len, format_hex (buf, len, 0, &gc));
       fflush (biofp);
     }
+  gc_free (&gc);
 }
 
 static void
@@ -140,7 +146,7 @@ bio_debug_oc (const char *mode, BIO *bio)
 {
   open_biofp();
   fprintf(biofp, "BIO %s time=" time_format " bio=" ptr_format "\n",
-	  mode, time (NULL), bio);
+	  mode, time (NULL), (ptr_type)bio);
   fflush (biofp);
 }
 
@@ -291,64 +297,37 @@ tmp_rsa_cb (SSL * s, int is_export, int keylength)
 }
 
 /*
- * Extract common name from an X509 subject name.
+ * Extract a field from an X509 subject name.
+ *
+ * Example:
+ *
+ * /C=US/ST=CO/L=Denver/O=ORG/CN=Test-CA/Email=jim@yonan.net
+ *
+ * The common name is 'Test-CA'
  */
-
 static void
-extract_common_name (char *out, int size, const char *subject)
+extract_x509_field (const char *x509, const char *field_name, char *out, int size)
 {
-  /*
-   * Example subject:
-   *
-   * /C=US/ST=CO/L=Denver/O=NTLP/CN=Test-CA/Email=jim@yonan.net
-   *
-   * The common name is 'Test-CA'
-   */
-
-  char c;
-  int state = 0;
+  char field_buf[256];
+  struct buffer x509_buf;
 
   ASSERT (size > 0);
-  out[--size] = '\0';
-
-  do {
-    c = *subject++;
-    if (state == 4)
-      {
-	if (c == '/')
-	  c = '\0';
-	if (size > 0)
-	  {
-	    *out++ = c;
-	    --size;
-	  }
-	else
+  *out = '\0';
+  buf_set_read (&x509_buf, (uint8_t *)x509, strlen (x509));
+  while (buf_parse (&x509_buf, '/', field_buf, sizeof (field_buf)))
+    {
+      struct buffer component_buf;
+      char field_name_buf[64];
+      char field_value_buf[256];
+      buf_set_read (&component_buf, field_buf, strlen (field_buf));
+      buf_parse (&component_buf, '=', field_name_buf, sizeof (field_name_buf));
+      buf_parse (&component_buf, '=', field_value_buf, sizeof (field_value_buf));
+      if (!strcmp (field_name_buf, field_name))
+	{
+	  strncpynt (out, field_value_buf, size);
 	  break;
-      }
-    else if (c == '/')
-      state = 1;
-    else if (state == 1)
-      {
-	if (c == 'C')
-	  state = 2;
-	else
-	  state = 0;
-      }
-    else if (state == 2)
-      {
-	if (c == 'N')
-	  state = 3;
-	else
-	  state = 0;
-      }
-    else if (state == 3)
-      {
-	if (c == '=')
-	  state = 4;
-	else
-	  state = 0;
-      }
-  } while (c != '\0');
+	}
+    }
 }
 
 static void
@@ -381,15 +360,13 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 {
   char subject[256];
   char envname[64];
+  char common_name[TLS_CN_LEN];
   SSL *ssl;
   struct tls_session *session;
   const struct tls_options *opt;
   const int max_depth = 8;
 
-  /*
-   * Retrieve the pointer to the SSL of the connection currently treated
-   * and the application specific data stored into the SSL object.
-   */
+  /* get the tls_session pointer */
   ssl = X509_STORE_CTX_get_ex_data (ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
   ASSERT (ssl);
   session = (struct tls_session *) SSL_get_ex_data (ssl, mydata_index);
@@ -397,16 +374,24 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   opt = session->opt;
   ASSERT (opt);
 
+  /* get the X509 name */
   X509_NAME_oneline (X509_get_subject_name (ctx->current_cert), subject,
 		     sizeof (subject));
   subject[sizeof (subject) - 1] = '\0';
-  string_mod (subject, CC_ALNUM|CC_LIMITED_PUNCT, 0, '.');
+
+  /* enforce character class restrictions in X509 name */
+  string_mod (subject, X509_NAME_CHAR_CLASS, 0, '_');
+
+  /* extract the common name */
+  extract_x509_field (subject, "CN", common_name, TLS_CN_LEN);
+  string_mod (common_name, COMMON_NAME_CHAR_CLASS, 0, '_');
 
 #if 0 /* print some debugging info */
   msg (D_LOW, "LOCAL OPT: %s", opt->local_options);
   msg (D_LOW, "X509: %s", subject);
 #endif
 
+  /* did peer present cert which was signed our root cert? */
   if (!preverify_ok)
     {
       /* Remote site specified a certificate, but it's not correct */
@@ -415,13 +400,24 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
       goto err;			/* Reject connection */
     }
 
+  /* warn if cert chain is too deep */
   if (ctx->error_depth >= max_depth)
     msg (M_WARN, "TLS Warning: Convoluted certificate chain detected with depth [%d] greater than %d", ctx->error_depth, max_depth);
+
+  /* save common name in session object */
+  if (ctx->error_depth == 0)
+    set_common_name (session, common_name);
 
   /* export subject name string as environmental variable */
   session->verify_maxlevel = max_int (session->verify_maxlevel, ctx->error_depth);
   openvpn_snprintf (envname, sizeof(envname), "tls_id_%d", ctx->error_depth);
   setenv_str (session->opt->es, envname, subject);
+
+#if 0
+  /* export common name string as environmental variable */
+  openvpn_snprintf (envname, sizeof(envname), "tls_common_name_%d", ctx->error_depth);
+  setenv_str (session->opt->es, envname, common_name);
+#endif
 
   /* export serial number as environmental variable */
   {
@@ -433,9 +429,11 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   /* export current untrusted IP */
   setenv_untrusted (session);
   
-  if (opt->verify_x509name && ctx->error_depth == 0)
+  /* verify X509 name or common name against --tls-remote */
+  if (opt->verify_x509name && strlen (opt->verify_x509name) > 0 && ctx->error_depth == 0)
     {
-      if (strcmp (opt->verify_x509name, subject) == 0)
+      if (strcmp (opt->verify_x509name, subject) == 0
+	  || strncmp (opt->verify_x509name, common_name, strlen (opt->verify_x509name)) == 0)
 	msg (D_HANDSHAKE, "VERIFY X509NAME OK: %s", subject);
       else
 	{
@@ -445,6 +443,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 	}
     }
 
+  /* run --tls-verify script */
   if (opt->verify_command)
     {
       char command[512];
@@ -476,6 +475,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 	}
     }
   
+  /* check peer cert against CRL */
   if (opt->crl_file)
     {
       X509_CRL *crl=NULL;
@@ -527,15 +527,6 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 
   msg (D_HANDSHAKE, "VERIFY OK: depth=%d, %s", ctx->error_depth, subject);
 
-  /* save common name in session object */
-  if (ctx->error_depth == 0)
-    {
-      char common_name[TLS_CN_LEN];
-      extract_common_name (common_name, TLS_CN_LEN, subject);
-      string_mod (common_name, COMMON_NAME_CHAR_CLASS, 0, '_');
-      set_common_name (session, common_name);
-    }
-  
   return 1;			/* Accept connection */
 
  err:
@@ -1048,12 +1039,12 @@ getbio (BIO_METHOD * type, const char *desc)
  * Write to an OpenSSL BIO in non-blocking mode.
  */
 static int
-bio_write (struct tls_multi* multi, BIO *bio, struct buffer *buf, const char *desc)
+bio_write (struct tls_multi* multi, BIO *bio, const uint8_t *data, int size, const char *desc)
 {
   int i;
   int ret = 0;
-  ASSERT (buf->len >= 0);
-  if (buf->len)
+  ASSERT (size >= 0);
+  if (size)
     {
       /*
        * Free the L_TLS lock prior to calling BIO routines
@@ -1062,10 +1053,10 @@ bio_write (struct tls_multi* multi, BIO *bio, struct buffer *buf, const char *de
        * allowing tunnel packet forwarding to continue.
        */
 #ifdef BIO_DEBUG
-      bio_debug_data ("write", bio, BPTR (buf), BLEN (buf), desc);
+      bio_debug_data ("write", bio, data, size, desc);
 #endif
       //mutex_unlock (multi->mutex);
-      i = BIO_write (bio, BPTR (buf), BLEN (buf));
+      i = BIO_write (bio, data, size);
       //mutex_lock (multi->mutex);
       if (i < 0)
 	{
@@ -1080,17 +1071,15 @@ bio_write (struct tls_multi* multi, BIO *bio, struct buffer *buf, const char *de
 	      ret = -1;
 	    }
 	}
-      else if (i != buf->len)
+      else if (i != size)
 	{
 	  msg (D_TLS_ERRORS | M_SSL,
-	       "TLS ERROR: BIO write %s incomplete %d/%d", desc, i, buf->len);
+	       "TLS ERROR: BIO write %s incomplete %d/%d", desc, i, size);
 	  ret = -1;
 	}
       else
 	{			/* successful write */
 	  msg (D_HANDSHAKE_VERBOSE, "BIO write %s %d bytes", desc, i);
-	  memset (BPTR (buf), 0, BLEN (buf)); /* erase data just written */
-	  buf->len = 0;
 	  ret = 1;
 	}
     }
@@ -1122,6 +1111,7 @@ bio_read (struct tls_multi* multi, BIO *bio, struct buffer *buf, int maxlen, con
       //mutex_unlock (multi->mutex);
       i = BIO_read (bio, BPTR (buf), len);
       //mutex_lock (multi->mutex);
+      VALGRIND_MAKE_READABLE ((void *) &i, sizeof (i));
 #ifdef BIO_DEBUG
       bio_debug_data ("read", bio, BPTR (buf), i, desc);
 #endif
@@ -1148,6 +1138,7 @@ bio_read (struct tls_multi* multi, BIO *bio, struct buffer *buf, int maxlen, con
 	  msg (D_HANDSHAKE_VERBOSE, "BIO read %s %d bytes", desc, i);
 	  buf->len = i;
 	  ret = 1;
+	  VALGRIND_MAKE_READABLE ((void *) BPTR (buf), BLEN (buf));
 	}
     }
   return ret;
@@ -1158,12 +1149,33 @@ bio_read (struct tls_multi* multi, BIO *bio, struct buffer *buf, int maxlen, con
  * to BIOs.
  */
 
+static void
+bio_write_post (const int status, struct buffer *buf)
+{
+  if (status == 1) /* success status return from bio_write? */
+    {
+      memset (BPTR (buf), 0, BLEN (buf)); /* erase data just written */
+      buf->len = 0;
+    }
+}
+
 static int
 key_state_write_plaintext (struct tls_multi *multi, struct key_state *ks, struct buffer *buf)
 {
   int ret;
   perf_push (PERF_BIO_WRITE_PLAINTEXT);
-  ret = bio_write (multi, ks->ssl_bio, buf, "tls_write_plaintext");
+  ret = bio_write (multi, ks->ssl_bio, BPTR(buf), BLEN(buf), "tls_write_plaintext");
+  bio_write_post (ret, buf);
+  perf_pop ();
+  return ret;
+}
+
+static int
+key_state_write_plaintext_const (struct tls_multi *multi, struct key_state *ks, const uint8_t *data, int len)
+{
+  int ret;
+  perf_push (PERF_BIO_WRITE_PLAINTEXT);
+  ret = bio_write (multi, ks->ssl_bio, data, len, "tls_write_plaintext_const");
   perf_pop ();
   return ret;
 }
@@ -1173,7 +1185,8 @@ key_state_write_ciphertext (struct tls_multi *multi, struct key_state *ks, struc
 {
   int ret;
   perf_push (PERF_BIO_WRITE_CIPHERTEXT);
-  ret = bio_write (multi, ks->ct_in, buf, "tls_write_ciphertext");
+  ret = bio_write (multi, ks->ct_in, BPTR(buf), BLEN(buf), "tls_write_ciphertext");
+  bio_write_post (ret, buf);
   perf_pop ();
   return ret;
 }
@@ -1915,6 +1928,8 @@ openvpn_PRF (const uint8_t *secret,
 
   buf_clear (&seed);
   free_buf (&seed);
+
+  VALGRIND_MAKE_READABLE ((void *)output, output_len);
 }
 
 /* 
@@ -2136,6 +2151,7 @@ verify_user_pass (struct tls_session *session, const struct user_pass *up)
 {
   struct gc_arena gc = gc_new ();
   struct buffer cmd = alloc_buf_gc (256, &gc);
+  const char *tmp_file = "";
   int retval;
   bool ret = false;
 
@@ -2145,8 +2161,26 @@ verify_user_pass (struct tls_session *session, const struct user_pass *up)
       /* Set environmental variables prior to calling script */
       setenv_str (session->opt->es, "script_type", "user-pass-verify");
 
-      setenv_str (session->opt->es, "username", up->username);
-      setenv_str (session->opt->es, "password", up->password);
+      if (session->opt->auth_user_pass_verify_script_via_file)
+	{
+	  struct status_output *so;
+
+	  tmp_file = create_temp_filename (session->opt->tmp_dir, &gc);
+	  so = status_open (tmp_file, 0, -1, STATUS_OUTPUT_WRITE);
+	  status_printf (so, "%s", up->username);
+	  status_printf (so, "%s", up->password);
+	  if (!status_close (so))
+	    {
+	      msg (D_TLS_ERRORS, "TLS Auth Error: could not write username/password to file: %s",
+		   tmp_file);
+	      goto done;
+	    }
+	}
+      else
+	{
+	  setenv_str (session->opt->es, "username", up->username);
+	  setenv_str (session->opt->es, "password", up->password);
+	}
 
       /* setenv incoming cert common name for script */
       setenv_str (session->opt->es, "common_name", session->common_name);
@@ -2155,7 +2189,7 @@ verify_user_pass (struct tls_session *session, const struct user_pass *up)
       setenv_untrusted (session);
 
       /* format command line */
-      buf_printf (&cmd, "%s", session->opt->auth_user_pass_verify_script);
+      buf_printf (&cmd, "%s %s", session->opt->auth_user_pass_verify_script, tmp_file);
       
       /* call command */
       retval = openvpn_system (BSTR (&cmd), session->opt->es, S_SCRIPT);
@@ -2166,12 +2200,18 @@ verify_user_pass (struct tls_session *session, const struct user_pass *up)
       else if (!system_executed (retval))
 	msg (D_TLS_ERRORS, "TLS Auth Error: user-pass-verify script failed to execute: %s", BSTR (&cmd));
 	  
-      setenv_del (session->opt->es, "password");
+      if (!session->opt->auth_user_pass_verify_script_via_file)
+	setenv_del (session->opt->es, "password");
     }
   else
     {
       msg (D_TLS_ERRORS, "TLS Auth Error: peer provided a blank username");
     }
+
+ done:
+  if (strlen (tmp_file) > 0)
+    delete_file (tmp_file);
+
   gc_free (&gc);
   return ret;
 }
@@ -2872,6 +2912,7 @@ tls_multi_process (struct tls_multi *multi,
   struct gc_arena gc = gc_new ();
   int i;
   bool active = false;
+  bool error = false;
 
   perf_push (PERF_TLS_MULTI_PROCESS);
 
@@ -2911,10 +2952,15 @@ tls_multi_process (struct tls_multi *multi,
 	   * If tls_process hits an error:
 	   * (1) If the session has an unexpired lame duck key, preserve it.
 	   * (2) Reinitialize the session.
+	   * (3) Increment soft error count
 	   */
 	  if (ks->state == S_ERROR)
 	    {
-	      ++multi->n_errors;
+	      ++multi->n_soft_errors;
+
+	      if (i == TM_ACTIVE)
+		error = true;
+
 	      if (i == TM_ACTIVE
 		  && ks_lame->state >= S_ACTIVE
 		  && !multi->opt.single_session)
@@ -2951,59 +2997,40 @@ tls_multi_process (struct tls_multi *multi,
 	 tls_authenticated (multi) ? "" : "semi-");
   }
 
+  /*
+   * A hard error means that TM_ACTIVE hit an S_ERROR state and that no
+   * other key state objects are S_ACTIVE or higher.
+   */
+  if (error)
+    {
+      for (i = 0; i < (int) SIZE (multi->key_scan); ++i)
+	{
+	  if (multi->key_scan[i]->state >= S_ACTIVE)
+	    goto nohard;
+	}
+      ++multi->n_hard_errors;
+    }
+ nohard:
+
+  /* DEBUGGING -- flood peer with repeating connection attempts */
+  {
+    const int throw_level = GREMLIN_CONNECTION_FLOOD_LEVEL (multi->opt.gremlin);
+    if (throw_level)
+      {
+	for (i = 0; i < (int) SIZE (multi->key_scan); ++i)
+	  {
+	    if (multi->key_scan[i]->state >= throw_level)
+	      {
+		++multi->n_hard_errors;
+		++multi->n_soft_errors;
+	      }
+	  }
+      }
+  }
+
   perf_pop ();
   gc_free (&gc);
   return active;
-}
-
-/*
- * Send a payload over the TLS control channel.
- * Called externally.
- */
-
-bool
-tls_send_payload (struct tls_multi *multi,
-		  const struct buffer *buf)
-{
-  struct tls_session *session;
-  struct key_state *ks;
-  bool ret = false;
-
-  ASSERT (multi);
-
-  session = &multi->session[TM_ACTIVE];
-  ks = &session->key[KS_PRIMARY];
-
-  if (ks->state >= S_ACTIVE && !BLEN (&ks->plaintext_write_buf))
-    {
-      if (buf_copy (&ks->plaintext_write_buf, buf))
-	ret = true;
-    }
-
-  return ret;
-}
-
-bool
-tls_rec_payload (struct tls_multi *multi,
-		 struct buffer *buf)
-{
-  struct tls_session *session;
-  struct key_state *ks;
-  bool ret = false;
-
-  ASSERT (multi);
-
-  session = &multi->session[TM_ACTIVE];
-  ks = &session->key[KS_PRIMARY];
-
-  if (ks->state >= S_ACTIVE && BLEN (&ks->plaintext_read_buf))
-    {
-      if (buf_copy (buf, &ks->plaintext_read_buf))
-	ret = true;
-      ks->plaintext_read_buf.len = 0;
-    }
-
-  return ret;
 }
 
 /*
@@ -3429,7 +3456,7 @@ tls_pre_decrypt (struct tls_multi *multi,
   return ret;
 
  error:
-  ++multi->n_errors;
+  ++multi->n_soft_errors;
   goto done;
 }
 
@@ -3526,7 +3553,7 @@ tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
 	 * session ID.
 	 *
 	 * On the other hand if --tls-auth is not being used, we
-	 * will fork and proceed to begin the TLS authentication
+	 * will proceed to begin the TLS authentication
 	 * handshake with only cursory integrity checks having
 	 * been performed, since we will be leaving the task
 	 * of authentication solely up to TLS.
@@ -3597,6 +3624,57 @@ tls_post_encrypt (struct tls_multi *multi, struct buffer *buf)
       ++ks->n_packets;
       ks->n_bytes += buf->len;
     }
+}
+
+/*
+ * Send a payload over the TLS control channel.
+ * Called externally.
+ */
+
+bool
+tls_send_payload (struct tls_multi *multi,
+		  const uint8_t *data,
+		  int size)
+{
+  struct tls_session *session;
+  struct key_state *ks;
+  bool ret = false;
+
+  ASSERT (multi);
+
+  session = &multi->session[TM_ACTIVE];
+  ks = &session->key[KS_PRIMARY];
+
+  if (ks->state >= S_ACTIVE)
+    {
+      if (key_state_write_plaintext_const (multi, ks, data, size) == 1)
+	ret = true;
+    }
+
+  return ret;
+}
+
+bool
+tls_rec_payload (struct tls_multi *multi,
+		 struct buffer *buf)
+{
+  struct tls_session *session;
+  struct key_state *ks;
+  bool ret = false;
+
+  ASSERT (multi);
+
+  session = &multi->session[TM_ACTIVE];
+  ks = &session->key[KS_PRIMARY];
+
+  if (ks->state >= S_ACTIVE && BLEN (&ks->plaintext_read_buf))
+    {
+      if (buf_copy (buf, &ks->plaintext_read_buf))
+	ret = true;
+      ks->plaintext_read_buf.len = 0;
+    }
+
+  return ret;
 }
 
 /*
@@ -3696,6 +3774,25 @@ print_data:
 done:
   return BSTR (&out);
 }
+
+#ifdef EXTRACT_X509_FIELD_TEST
+
+void
+extract_x509_field_test (void)
+{
+  char line[8];
+  char field[4];
+  static const char field_name[] = "CN";
+
+  while (fgets (line, sizeof (line), stdin))
+    {
+      chomp (line);
+      extract_x509_field (line, field_name, field, sizeof (field));
+      printf ("CN: '%s'\n", field);
+    }
+}
+
+#endif
 
 #else
 static void dummy(void) {}

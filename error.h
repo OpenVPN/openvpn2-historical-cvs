@@ -184,9 +184,6 @@ void close_syslog ();
 /* log file output */
 void redirect_stdout_stderr (const char *file, bool append);
 
-/* print out-of-memory error and exit */
-void out_of_memory (void);
-
 /* exit program */
 void openvpn_exit (int status);
 

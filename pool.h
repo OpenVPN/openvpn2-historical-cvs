@@ -68,7 +68,7 @@ void ifconfig_pool_free (struct ifconfig_pool *pool);
 
 ifconfig_pool_handle ifconfig_pool_acquire (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *remote, const char *common_name);
 
-bool ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand);
+bool ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand, const bool hard);
 
 struct ifconfig_pool_persist *ifconfig_pool_persist_init (const char *filename, int refresh_freq);
 void ifconfig_pool_persist_close (struct ifconfig_pool_persist *persist);

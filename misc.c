@@ -215,14 +215,10 @@ get_pid_file (const char* filename, struct pid_state *state)
   CLEAR (*state);
   if (filename)
     {
-#ifdef HAVE_GETPID
       state->fp = fopen (filename, "w");
       if (!state->fp)
 	msg (M_ERR, "Open error on pid file %s", filename);
       state->filename = filename;
-#else
-      msg (M_FATAL, "Sorry but I can't write my pid to '%s' because this operating system doesn't appear to support the getpid() system call", filename);
-#endif
     }
 }
 
@@ -230,25 +226,27 @@ get_pid_file (const char* filename, struct pid_state *state)
 void
 write_pid (const struct pid_state *state)
 {
-#ifdef HAVE_GETPID
   if (state->filename && state->fp)
     {
-      const pid_t pid = getpid (); 
-      fprintf(state->fp, "%d\n", (int)pid);
+      unsigned int pid = openvpn_getpid (); 
+      fprintf(state->fp, "%u\n", pid);
       if (fclose (state->fp))
 	msg (M_ERR, "Close error on pid file %s", state->filename);
     }
-#endif
 }
 
 /* Get current PID */
-int
-get_current_pid ()
+unsigned int
+openvpn_getpid ()
 {
+#ifdef WIN32
+  return (unsigned int) GetCurrentProcessId ();
+#else
 #ifdef HAVE_GETPID
-  return (int) getpid ();
+  return (unsigned int) getpid ();
 #else
   return 0;
+#endif
 #endif
 }
 
@@ -970,10 +968,17 @@ test_file (const char *filename)
 const char *
 create_temp_filename (const char *directory, struct gc_arena *gc)
 {
+  static unsigned int counter;
   struct buffer fname = alloc_buf_gc (256, gc);
-  buf_printf (&fname, PACKAGE "_%d_%d.tmp",
-	      (int) openvpn_thread_self (),
-	      (int) get_random ());
+
+  mutex_lock_static (L_CREATE_TEMP);
+  ++counter;
+  mutex_unlock_static (L_CREATE_TEMP);
+
+  buf_printf (&fname, PACKAGE "_%u_%u.tmp",
+	      openvpn_getpid (),
+	      counter);
+
   return gen_path (directory, BSTR (&fname), gc);
 }
 

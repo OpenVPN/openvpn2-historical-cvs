@@ -1,42 +1,58 @@
-# This makefile builds the user-mode component
-# of OpenVPN for WIN32 in the mingw environment.
+# This Makefile builds the user-mode component
+# of OpenVPN for WIN32 in the MinGW environment.
 #
 # Build Dependencies:
 #	mingw		(GNU C compiler for windows)
 #	msys		(GNU utilities and shell for windows)
 #	OpenSSL		(SSL/TLS/crypto library)
 #	LZO		(real-time compression library)
+#       Dmalloc         (debugging only)
 #
 # Targets:
 #	static -- link statically with OpenSSL
-#       dynamic -- link dynamically with OpenSSL 
+#       dynamic -- link dynamically with OpenSSL
+#       dmalloc -- enable memory debugging using the dmalloc library 
 #
 # Note that LZO is always linked statically.
-
-# Change these to point to your OpenSSL and LZO top-level
-# directories.
-
+#
 # To build openssl-0.9.7d, remember to edit ms\mw.bat
 # adding '--win32' flag to make command:
 #
 #   make --win32 -f ms/mingw32.mak
 #
-# useful gcc flags:
-#  -fno-inline : turn off inlining
+# Now cd to top level openssl directory in a Windows
+# command-prompt window, and type:
+#
+#   ms\mw
+#
+# If you are building with dmalloc debugging support
+# see windbg.h for additional dmalloc notes.
+
+#########################################################
+# Change these to point to your OpenSSL, LZO, and
+# (optionally) dmalloc top-level directories.
 
 OPENSSL = /c/src/openssl-0.9.7d
-
 LZO = /c/src/lzo-1.08
+DMALLOC = /c/src/dmalloc-5.4.2
+
+#########################################################
 
 CC = gcc -g -O2 -Wall -Wno-unused-function -Wno-unused-variable -mno-cygwin
 
-###
+CC_DMALLOC = gcc -g -O2 -Wall -Wno-unused-function -Wno-unused-variable -mno-cygwin -fno-inline -DDMALLOC
 
 INCLUDE_DIRS = -I${OPENSSL}/include -I${LZO}/include
 
+INCLUDE_DIRS_DMALLOC = ${INCLUDE_DIRS} -I${DMALLOC}
+
 LIBS = -llzo -lcrypt32 -lws2_32 -lgdi32 -liphlpapi -lwinmm
 
+LIBS_DMALLOC = ${LIBS} -ldmalloc
+
 LIB_DIRS = -L${OPENSSL}/out -L${LZO}/src/.libs
+
+LIB_DIRS_DMALLOC = ${LIB_DIRS} -L${DMALLOC}
 
 EXE = openvpn.exe
 
@@ -44,7 +60,8 @@ HEADERS = \
 	base64.h \
 	basic.h \
 	buffer.h \
-	circ_list.h common.h \
+	circ_list.h \
+	common.h \
 	tap-win32/common.h \
         config-win32.h \
 	crypto.h \
@@ -152,14 +169,23 @@ OBJS =  base64.o \
 	win32.o \
 	work.o
 
+dynamic : MY_CC = ${CC}
+dynamic : MY_INCLUDE_DIRS = ${INCLUDE_DIRS}
 dynamic : ${OBJS}
-	${CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl32 -leay32 ${LIBS}
+	${MY_CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl32 -leay32 ${LIBS}
 
+static : MY_CC = ${CC}
+static : MY_INCLUDE_DIRS = ${INCLUDE_DIRS}
 static : ${OBJS}
 	${CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl -lcrypto ${LIBS}
+
+dmalloc : MY_CC = ${CC_DMALLOC}
+dmalloc : MY_INCLUDE_DIRS = ${INCLUDE_DIRS_DMALLOC}
+dmalloc : ${OBJS}
+	${MY_CC} -o ${EXE} ${OBJS} ${LIB_DIRS_DMALLOC} -lssl32 -leay32 ${LIBS_DMALLOC}
 
 clean :
 	rm -f ${OBJS} ${EXE}
 
 %.o : %.c ${HEADERS}
-	${CC} ${INCLUDE_DIRS} -c $< -o $@
+	${MY_CC} ${MY_INCLUDE_DIRS} -c $< -o $@

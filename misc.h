@@ -92,17 +92,13 @@ void run_script (const char *command,
 
 /* workspace for get_pid_file/write_pid */
 struct pid_state {
-#ifdef HAVE_GETPID
   FILE *fp;
   const char *filename;
-#else
-  int dummy;
-#endif
 };
 
 void get_pid_file (const char* filename, struct pid_state *state);
 void write_pid (const struct pid_state *state);
-int get_current_pid ();
+unsigned int openvpn_getpid (void);
 
 void do_mlockall (bool print_msg); /* Disable paging */
 

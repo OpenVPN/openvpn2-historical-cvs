@@ -182,6 +182,8 @@ struct options
   bool up_restart;
   bool daemon;
 
+  int remap_sigusr1;
+
   /* inetd modes defined in socket.h */
   int inetd;
 
@@ -190,9 +192,10 @@ struct options
   int nice;
   int verbosity;
   int mute;
-  bool gremlin;
+  int gremlin;
 
   const char *status_file;
+  int status_file_version;
   int status_file_update_freq;
 
   /* optimize TUN/TAP/UDP writes */
@@ -282,6 +285,7 @@ struct options
   bool client_cert_not_required;
   bool username_as_common_name;
   const char *auth_user_pass_verify_script;
+  bool auth_user_pass_verify_script_via_file;
   const char *auth_user_pass_file;
 
 #endif

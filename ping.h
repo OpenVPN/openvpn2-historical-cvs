@@ -32,7 +32,7 @@
 /*
  * Initial default --ping-restart before --pull
  */
-#define PRE_PULL_INITIAL_PING_RESTART 60  /* in seconds */
+#define PRE_PULL_INITIAL_PING_RESTART 120  /* in seconds */
 
 extern const uint8_t ping_string[];
 

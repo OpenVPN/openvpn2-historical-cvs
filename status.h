@@ -45,6 +45,8 @@ struct status_output
   struct buffer read_buf;
 
   struct event_timeout et;
+
+  bool errors;
 };
 
 struct status_output *status_open (const char *filename,
@@ -56,7 +58,7 @@ bool status_trigger_tv (struct status_output *so, struct timeval *tv);
 bool status_trigger (struct status_output *so);
 void status_reset (struct status_output *so);
 void status_flush (struct status_output *so);
-void status_close (struct status_output *so);
+bool status_close (struct status_output *so);
 void status_printf (struct status_output *so, const char *format, ...)
 #ifdef __GNUC__
     __attribute__ ((format (printf, 2, 3)))

@@ -70,6 +70,9 @@ struct multi_instance {
   /* queued outgoing data in Server/TCP mode */
   unsigned int tcp_rwflags;
   struct mbuf_set *tcp_link_out_deferred;
+  bool socket_set_called;
+
+  in_addr_t reporting_addr;       /* IP address shown in status listing */
 
   bool did_open_context;
   bool did_real_hash;
@@ -98,6 +101,7 @@ struct multi_context {
   bool enable_c2c;
   int max_clients;
   int tcp_queue_limit;
+  int status_file_version;
 
   struct multi_instance *pending;
   struct multi_instance *earliest_wakeup;
@@ -168,6 +172,10 @@ void multi_add_mbuf (struct multi_context *m,
 		     struct mbuf_buffer *mb);
 
 void multi_ifconfig_pool_persist (struct multi_context *m, bool force);
+
+bool multi_process_signal (struct multi_context *m);
+
+void multi_close_instance_on_signal (struct multi_context *m, struct multi_instance *mi);
 
 /*
  * Return true if our output queue is not full
@@ -372,21 +380,7 @@ multi_process_outgoing_link_dowork (struct multi_context *m, struct multi_instan
 /*
  * Check for signals.
  */
-#define MULTI_CHECK_SIG() \
-  if (IS_SIG (&multi.top)) \
-  { \
-    if (multi.top.sig->signal_received == SIGUSR2) \
-      { \
-        struct status_output *so = status_open (NULL, 0, M_INFO, 0); \
-        multi_print_status (&multi, so); \
-        status_close (so); \
-        multi.top.sig->signal_received = 0; \
-        perf_pop (); \
-        continue; \
-      } \
-    perf_pop (); \
-    break; \
-  }
+#define MULTI_CHECK_SIG() EVENT_LOOP_CHECK_SIGNAL (&multi.top, multi_process_signal, &multi)
 
 #endif /* P2MP */
 #endif /* MULTI_H */

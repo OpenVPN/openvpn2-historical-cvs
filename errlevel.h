@@ -84,9 +84,10 @@
 #define D_RESTART            LOGLEV(3, 33, 0)        /* show certain restart messages */
 #define D_PUSH               LOGLEV(3, 34, 0)        /* show push/pull info */
 #define D_IFCONFIG_POOL      LOGLEV(3, 35, 0)        /* show ifconfig pool info */
-#define D_MULTI_LOW          LOGLEV(3, 36, 0)        /* show point-to-multipoint low-freq debug info */
-#define D_BACKTRACK          LOGLEV(3, 37, 0)        /* show replay backtracks */
-#define D_AUTH               LOGLEV(3, 38, 0)        /* show user/pass auth info */
+#define D_BACKTRACK          LOGLEV(3, 36, 0)        /* show replay backtracks */
+#define D_AUTH               LOGLEV(3, 37, 0)        /* show user/pass auth info */
+#define D_MULTI_LOW          LOGLEV(3, 38, 0)        /* show point-to-multipoint low-freq debug info */
+#define D_MULTI_DROPPED      LOGLEV(3, 39, 0)        /* show point-to-multipoint packet drops */
 
 #define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
 #define D_SHOW_OCC           LOGLEV(4, 41, 0)        /* show options compatibility string */

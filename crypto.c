@@ -1620,6 +1620,42 @@ md5sum (uint8_t *buf, int len, int n_print_chars, struct gc_arena *gc)
   return format_hex (digest, MD5_DIGEST_LENGTH, n_print_chars, gc);
 }
 
+/*
+ * OpenSSL memory debugging.  If dmalloc debugging is enabled, tell
+ * OpenSSL to use our private malloc/realloc/free functions so that
+ * we can dispatch them to dmalloc.
+ */
+
+#ifdef DMALLOC
+
+static void *
+crypto_malloc (size_t size, const char *file, int line)
+{
+  return dmalloc_malloc(file, line, size, DMALLOC_FUNC_MALLOC, 0, 0);
+}
+
+static void *
+crypto_realloc (void *ptr, size_t size, const char *file, int line)
+{
+  return dmalloc_realloc(file, line, ptr, size, DMALLOC_FUNC_REALLOC, 0);
+}
+
+static void
+crypto_free (void *ptr)
+{
+  dmalloc_free (__FILE__, __LINE__, ptr, DMALLOC_FUNC_FREE);
+}
+
+void
+openssl_dmalloc_init (void)
+{
+   CRYPTO_set_mem_ex_functions (crypto_malloc,
+				crypto_realloc,
+				crypto_free);
+}
+
+#endif /* DMALLOC */
+
 #ifndef USE_SSL
 
 void

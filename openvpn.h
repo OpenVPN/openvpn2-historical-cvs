@@ -272,6 +272,9 @@ struct context_2
   /* used to optimize calls to tls_multi_process */
   struct interval tmp_int;
 
+  /* throw this signal on TLS errors */
+  int tls_exit_signal;
+
 #endif /* USE_SSL */
 
   /* passed to encrypt or decrypt, contains all
@@ -418,6 +421,20 @@ struct context
      restarts (SIGUSR1 and SIGHUP) */
   struct context_2 c2;
 };
+
+/*
+ * Check for a signal when inside an event loop
+ */
+#define EVENT_LOOP_CHECK_SIGNAL(c, func, arg)   \
+      if (IS_SIG (c))                           \
+	{                                       \
+	  const int brk = func (arg);           \
+	  perf_pop ();                          \
+	  if (brk)                              \
+	    break;                              \
+	  else                                  \
+	    continue;                           \
+	}
 
 /*
  * Macros for referencing objects which may not

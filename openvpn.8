@@ -138,7 +138,6 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-float\fR\ ]
 [\ \fB\-\-fragment\fR\ \fImax\fR\ ]
 [\ \fB\-\-genkey\fR\ ]
-[\ \fB\-\-gremlin\fR\ ]
 [\ \fB\-\-group\fR\ \fIgroup\fR\ ]
 [\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
 [\ \fB\-\-hash\-size\fR\ \fIr\ v\fR\ ]
@@ -199,6 +198,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-push\fR\ \fI"option"\fR\ ]
 [\ \fB\-\-rcvbuf\fR\ \fIsize\fR\ ]
 [\ \fB\-\-redirect\-gateway\fR\ \fI["local"]\ ["def1"]\fR\ ]
+[\ \fB\-\-remap\-usr1\fR\ \fIsignal\fR\ ]
 [\ \fB\-\-remote\-random\fR\ ]
 [\ \fB\-\-remote\fR\ \fIhost\ [port]\fR\ ]
 [\ \fB\-\-reneg\-bytes\fR\ \fIn\fR\ ]
@@ -235,6 +235,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-socks\-proxy\-retry\fR\ ]
 [\ \fB\-\-socks\-proxy\fR\ \fIserver\ [port]\fR\ ]
 [\ \fB\-\-status\fR\ \fIfile\ [n]\fR\ ]
+[\ \fB\-\-status\-version\fR\ \fIn\fR\ ]
 [\ \fB\-\-tap\-sleep\fR\ \fIn\fR\ ]
 [\ \fB\-\-tcp\-queue\-limit\fR\ \fIn\fR\ ]
 [\ \fB\-\-test\-crypto\fR\ ]
@@ -1548,6 +1549,14 @@ UID change and/or
 variables as the
 .B --up
 option above.
+
+Note that if you reduce privileges by using
+.B --user
+and/or
+.B --group,
+your
+.B --down
+script will also run at reduced privilege.
 .\"*********************************************************
 .TP
 .B --down-pre
@@ -1844,6 +1853,17 @@ is specified, and when
 is NOT specified.
 .\"*********************************************************
 .TP
+.B --remap-usr1 signal
+Control whether internally or externally
+generated SIGUSR1 signals are remapped to
+SIGHUP (restart without persisting state) or
+SIGTERM (exit).
+
+.B signal
+can be set to "SIGHUP" or "SIGTERM".  By default, no remapping
+occurs.
+.\"*********************************************************
+.TP
 .B --verb n
 Set output verbosity to
 .B n
@@ -1854,19 +1874,8 @@ of what's happening without being swamped by output.
 .B 0 --
 No output except fatal errors.
 .br
-.B 1 --
-Show startup information + connection initiated messages + non-fatal encryption & net errors.
-.br
-.B 2 --
-Show SSL/TLS negotiations.
-.br
-.B 3 --
-Show extra SSL/TLS info +
-.B --gremlin
-net outages + adaptive compression state changes (on or off).
-.br
-.B 4 --
-Show all parameter settings.
+.B 1 to 4 --
+Normal usage range.
 .br
 .B 5 --
 Output
@@ -1877,7 +1886,7 @@ characters to the console for each packet read and write, uppercase is
 used for TCP/UDP packets and lowercase is used for TUN/TAP packets.
 .br
 .B 6 to 11 --
-Show debug info of increasing verbosity (see errlevel.h for additional
+Debug info range (see errlevel.h for additional
 information on debug levels).
 .\"*********************************************************
 .TP
@@ -1893,36 +1902,17 @@ Status can also be written to the syslog by sending a
 signal.
 .\"*********************************************************
 .TP
+.B --status-version [n]
+Choose the status file format version number.  Currently
+.B n
+can be 1 or 2 and defaults to 1.
+.\"*********************************************************
+.TP
 .B --mute n
 Log at most
 .B n
 consecutive messages in the same category.  This is useful to
 limit repetitive logging of similar message types.
-.\"*********************************************************
-.TP
-.B --gremlin
-Simulate dropped & corrupted packets + network outages
-(for debugging and testing only).  This is a
-powerful tool for verifying the robustness of the OpenVPN protocol,
-especially in TLS mode.  When used with TLS parameters that force
-frequent key renegotiations such as
-.B --reneg-sec 10,
-this option will stress-test the ability of OpenVPN peers to recover
-from errors and remain in sync.
-Current parameter settings will cause
-.B --gremlin
-to drop 2% of packets and corrupt another 2%.  A packet corruption will
-alter a random byte in the packet to a random value.  It might
-also increase or decrease the size of the packet by one byte.
-.B --gremlin
-will also simulate network outages by going "down"
-for a period of 10 to 60 seconds.
-Between simulated outages, OpenVPN will
-remain up for periods of 10 to 300 seconds.  To see gremlin
-messages, set
-.B --verb
-to 3 or higher.  To change gremlin constants, consult the
-file gremlin.c included in the OpenVPN source distribution.
 .\"*********************************************************
 .TP
 .B --comp-lzo
@@ -2143,6 +2133,13 @@ If
 you would like to treat
 .B file
 as a configuration file.
+
+Note that the entries in this file are treated by OpenVPN as
+suggestions only, based on past associations between
+a common name and IP address.  They do not guarantee that the given common
+name will always receive the given IP address.  If you want guaranteed
+assignment, use
+.B --ifconfig-push
 .\"*********************************************************
 .TP
 .B --ifconfig-pool-linear
@@ -2434,22 +2431,42 @@ policies with regard to the client's high-level common name,
 rather than the low level client virtual addresses.
 .\"*********************************************************
 .TP
-.B --auth-user-pass-verify script
+.B --auth-user-pass-verify script method
 Require the client to provide a username/password (possibly
 in addition to a client certificate) for authentication.
 
 OpenVPN will execute
 .B script
-as a shell command with the environmental variables
+as a shell command to validate the username/password
+provided by the client.
+
+If
+.B method
+is set to "via-env", OpenVPN will call
+.B script
+with the environmental variables
 .B username
 and
 .B password
 set to the username/password strings provided by the client.
+Be aware that this method is insecure on some platforms which
+make the environment of a process publicly visible to other
+unprivileged processes.
 
-The script should examine
-.B username
-and
-.B password,
+If
+.B method
+is set to "via-file", OpenVPN will write the username and
+password to the first two lines of a temporary file.  The filename
+will be passed as an argument to
+.B script,
+and the file will be automatically deleted by OpenVPN after
+the script returns.  The location of the temporary file is
+controlled by the
+.B --tmp-dir
+option, and will default to the current directory if unspecified.
+
+The script should examine the username
+and password,
 returning a success exit code (0) if the
 client's authentication request is to be accepted, or a failure
 code (1) to reject the client.
@@ -3368,13 +3385,25 @@ the common name field on the certificate, see the file
 in the OpenVPN distribution.
 .\"*********************************************************
 .TP
-.B --tls-remote x509name
+.B --tls-remote name
 Accept connections only from a host with X509 name
-.B x509name.
+or common name equal to
+.B name.
 The remote host must also pass all other tests
 of verification.
 
-This is an useful replacement for the
+Name can also be a common name prefix, for example if you
+want a client to only accept connections to "Server-1",
+"Server-2", etc., you can simply use
+.B --tls-remote Server
+
+Using a common name prefix is a useful alternative to managing
+a CRL (Certificate Revocation List) on the client, since it allows the client
+to refuse all certificates except for those associated
+with designated servers.
+
+.B --tls-remote
+is a useful replacement for the
 .B --tls-verify
 option to verify the remote host, because
 .B --tls-remote

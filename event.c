@@ -508,7 +508,8 @@ ep_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
   struct ep_set *eps = (struct ep_set *) es;
   struct epoll_event ev;
 
-  ev.events = 0;
+  CLEAR (ev);
+
   ev.data.ptr = arg;
   if (rwflags & EVENT_READ)
     ev.events |= EPOLLIN;

@@ -76,7 +76,7 @@ check_send_occ_msg (struct context *c)
       if (!TO_LINK_DEF(c))
 	check_send_occ_msg_dowork (c);
       else
-	tv_clear (&c->c2.timeval);
+	tv_clear (&c->c2.timeval);  /* ZERO-TIMEOUT */
     }
 }
 

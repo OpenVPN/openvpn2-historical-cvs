@@ -356,6 +356,9 @@ void key2_print (const struct key2* k,
 		 const char* prefix0,
 		 const char* prefix1);
 
+/* memory debugging */
+void openssl_dmalloc_init (void);
+
 #ifdef USE_SSL
 
 void get_tls_handshake_key (const struct key_type *key_type,

@@ -51,7 +51,7 @@ receive_auth_failed (struct context *c, const struct buffer *buffer)
   msg (M_VERB0, "AUTH: Received AUTH_FAILED control message");
   if (c->options.pull)
     {
-      c->sig->signal_received = SIGTERM; /* SOFT-SIGUSR1 -- Auth failure error */
+      c->sig->signal_received = SIGTERM; /* SOFT-SIGTERM -- Auth failure error */
       c->sig->signal_text = "auth-failure";
     }
 }

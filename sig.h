@@ -53,6 +53,8 @@ const char *signal_description (int signum, const char *sigtext);
 void print_signal (const struct signal_info *si, const char *title, int msglevel);
 void print_status (const struct context *c, struct status_output *so);
 
+void remap_signal (struct context *c);
+
 bool process_signal (struct context *c);
 
 void process_explicit_exit_notification_timer_wakeup (struct context *c);

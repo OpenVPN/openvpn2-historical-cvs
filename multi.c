@@ -37,6 +37,7 @@
 #include "push.h"
 #include "misc.h"
 #include "otime.h"
+#include "gremlin.h"
 
 #include "memdbg.h"
 
@@ -245,6 +246,11 @@ multi_init (struct multi_context *m, struct context *t, bool tcp_mode)
   m->mbuf = mbuf_init (t->options.n_bcast_buf);
 
   /*
+   * Different status file format options are available
+   */
+  m->status_file_version = t->options.status_file_version;
+
+  /*
    * Possibly allocate an ifconfig pool, do it
    * differently based on whether a tun or tap style
    * tunnel.
@@ -371,7 +377,7 @@ multi_close_instance (struct multi_context *m,
   ASSERT (!mi->halt);
   mi->halt = true;
 
-  msg (D_MULTI_LOW, "MULTI: multi_close_instance called");
+  msg (D_MULTI_DEBUG, "MULTI: multi_close_instance called");
 
   /* prevent dangling pointers */
   if (m->pending == mi)
@@ -392,7 +398,7 @@ multi_close_instance (struct multi_context *m,
 
       schedule_remove_entry (m->schedule, (struct schedule_entry *) mi);
 
-      ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle);
+      ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle, false);
 
       multi_del_iroutes (m, mi);
 
@@ -577,61 +583,133 @@ multi_print_status (struct multi_context *m, struct status_output *so)
 
       status_reset (so);
 
-      status_printf (so, PACKAGE_NAME " CLIENT LIST");
-      status_printf (so, "Updated,%s", time_string (0, 0, false, &gc_top));
-      status_printf (so, "Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since");
-      hash_iterator_init (m->hash, &hi, true);
-      while ((he = hash_iterator_next (&hi)))
+      if (m->status_file_version == 1)
 	{
-	  struct gc_arena gc = gc_new ();
-	  const struct multi_instance *mi = (struct multi_instance *) he->value;
-
-	  if (!mi->halt)
+	  /*
+	   * Status file version 1
+	   */
+	  status_printf (so, PACKAGE_NAME " CLIENT LIST");
+	  status_printf (so, "Updated,%s", time_string (0, 0, false, &gc_top));
+	  status_printf (so, "Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since");
+	  hash_iterator_init (m->hash, &hi, true);
+	  while ((he = hash_iterator_next (&hi)))
 	    {
-	      status_printf (so, "%s,%s," counter_format "," counter_format ",%s",
-			     tls_common_name (mi->context.c2.tls_multi, false),
-			     mroute_addr_print (&mi->real, &gc),
-			     mi->context.c2.link_read_bytes,
-			     mi->context.c2.link_write_bytes,
-			     time_string (mi->created, 0, false, &gc));
-	    }
-	  gc_free (&gc);
-	}
-      hash_iterator_free (&hi);
+	      struct gc_arena gc = gc_new ();
+	      const struct multi_instance *mi = (struct multi_instance *) he->value;
 
-      status_printf (so, "ROUTING TABLE");
-      status_printf (so, "Virtual Address,Common Name,Real Address,Last Ref");
-      hash_iterator_init (m->vhash, &hi, true);
-      while ((he = hash_iterator_next (&hi)))
+	      if (!mi->halt)
+		{
+		  status_printf (so, "%s,%s," counter_format "," counter_format ",%s",
+				 tls_common_name (mi->context.c2.tls_multi, false),
+				 mroute_addr_print (&mi->real, &gc),
+				 mi->context.c2.link_read_bytes,
+				 mi->context.c2.link_write_bytes,
+				 time_string (mi->created, 0, false, &gc));
+		}
+	      gc_free (&gc);
+	    }
+	  hash_iterator_free (&hi);
+
+	  status_printf (so, "ROUTING TABLE");
+	  status_printf (so, "Virtual Address,Common Name,Real Address,Last Ref");
+	  hash_iterator_init (m->vhash, &hi, true);
+	  while ((he = hash_iterator_next (&hi)))
+	    {
+	      struct gc_arena gc = gc_new ();
+	      const struct multi_route *route = (struct multi_route *) he->value;
+
+	      if (multi_route_defined (m, route))
+		{
+		  const struct multi_instance *mi = route->instance;
+		  const struct mroute_addr *ma = &route->addr;
+		  char flags[2] = {0, 0};
+
+		  if (route->flags & MULTI_ROUTE_CACHE)
+		    flags[0] = 'C';
+		  status_printf (so, "%s%s,%s,%s,%s",
+				 mroute_addr_print (ma, &gc),
+				 flags,
+				 tls_common_name (mi->context.c2.tls_multi, false),
+				 mroute_addr_print (&mi->real, &gc),
+				 time_string (route->last_reference, 0, false, &gc));
+		}
+	      gc_free (&gc);
+	    }
+	  hash_iterator_free (&hi);
+
+	  status_printf (so, "GLOBAL STATS");
+	  if (m->mbuf)
+	    status_printf (so, "Max bcast/mcast queue length,%d",
+			   mbuf_maximum_queued (m->mbuf));
+
+	  status_printf (so, "END");
+	}
+      else if (m->status_file_version == 2)
 	{
-	  struct gc_arena gc = gc_new ();
-	  const struct multi_route *route = (struct multi_route *) he->value;
-
-	  if (multi_route_defined (m, route))
+	  /*
+	   * Status file version 2
+	   */
+	  status_printf (so, "TITLE,%s", title_string);
+	  status_printf (so, "TIME,%s,%u", time_string (now, 0, false, &gc_top), (unsigned int)now);
+	  status_printf (so, "HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Bytes Received,Bytes Sent,Connected Since,Connected Since (time_t)");
+	  hash_iterator_init (m->hash, &hi, true);
+	  while ((he = hash_iterator_next (&hi)))
 	    {
-	      const struct multi_instance *mi = route->instance;
-	      const struct mroute_addr *ma = &route->addr;
-	      char flags[2] = {0, 0};
+	      struct gc_arena gc = gc_new ();
+	      const struct multi_instance *mi = (struct multi_instance *) he->value;
 
-	      if (route->flags & MULTI_ROUTE_CACHE)
-		flags[0] = 'C';
-	      status_printf (so, "%s%s,%s,%s,%s",
-			     mroute_addr_print (ma, &gc),
-			     flags,
-			     tls_common_name (mi->context.c2.tls_multi, false),
-			     mroute_addr_print (&mi->real, &gc),
-			     time_string (route->last_reference, 0, false, &gc));
+	      if (!mi->halt)
+		{
+		  status_printf (so, "CLIENT_LIST,%s,%s,%s," counter_format "," counter_format ",%s,%u",
+				 tls_common_name (mi->context.c2.tls_multi, false),
+				 mroute_addr_print (&mi->real, &gc),
+				 print_in_addr_t (mi->reporting_addr, IA_EMPTY_IF_UNDEF, &gc),
+				 mi->context.c2.link_read_bytes,
+				 mi->context.c2.link_write_bytes,
+				 time_string (mi->created, 0, false, &gc),
+				 (unsigned int)mi->created);
+		}
+	      gc_free (&gc);
 	    }
-	  gc_free (&gc);
+	  hash_iterator_free (&hi);
+
+	  status_printf (so, "HEADER,ROUTING_TABLE,Virtual Address,Common Name,Real Address,Last Ref,Last Ref (time_t)");
+	  hash_iterator_init (m->vhash, &hi, true);
+	  while ((he = hash_iterator_next (&hi)))
+	    {
+	      struct gc_arena gc = gc_new ();
+	      const struct multi_route *route = (struct multi_route *) he->value;
+
+	      if (multi_route_defined (m, route))
+		{
+		  const struct multi_instance *mi = route->instance;
+		  const struct mroute_addr *ma = &route->addr;
+		  char flags[2] = {0, 0};
+
+		  if (route->flags & MULTI_ROUTE_CACHE)
+		    flags[0] = 'C';
+		  status_printf (so, "ROUTING_TABLE,%s%s,%s,%s,%s,%u",
+				 mroute_addr_print (ma, &gc),
+				 flags,
+				 tls_common_name (mi->context.c2.tls_multi, false),
+				 mroute_addr_print (&mi->real, &gc),
+				 time_string (route->last_reference, 0, false, &gc),
+				 (unsigned int)route->last_reference);
+		}
+	      gc_free (&gc);
+	    }
+	  hash_iterator_free (&hi);
+
+	  if (m->mbuf)
+	    status_printf (so, "GLOBAL_STATS,Max bcast/mcast queue length,%d",
+			   mbuf_maximum_queued (m->mbuf));
+
+	  status_printf (so, "END");
 	}
-      hash_iterator_free (&hi);
-
-      status_printf (so, "GLOBAL STATS");
-      if (m->mbuf)
-	status_printf (so, "Max bcast/mcast queue length,%d",
-		       mbuf_maximum_queued (m->mbuf));
-
-      status_printf (so, "END");
+      else
+	{
+	  ASSERT (0);
+	}
       status_flush (so);
       gc_free (&gc_top);
     }
@@ -1015,7 +1093,7 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
 	{
 	  /* ifconfig addresses were set statically,
 	     release dynamic allocation */
-	  ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle);
+	  ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle, true);
 	  mi->vaddr_handle = -1;
 
 	  mi->context.c2.push_ifconfig_defined = true;
@@ -1090,6 +1168,9 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
 	       multi_instance_string (mi, false, &gc));
 	}
 
+      /* set our client's VPN endpoint for status reporting purposes */
+      mi->reporting_addr = mi->context.c2.push_ifconfig_local;
+
       /* set flag so we don't get called again */
       mi->connection_established_flag = true;
 
@@ -1120,7 +1201,7 @@ multi_add_mbuf (struct multi_context *m,
     }
   else
     {
-      msg (D_ROUTE, "MULTI: packet dropped due to output saturation (multi_add_mbuf)");
+      msg (D_MULTI_DROPPED, "MULTI: packet dropped due to output saturation (multi_add_mbuf)");
     }
 }
 
@@ -1248,8 +1329,7 @@ multi_process_post (struct multi_context *m, struct multi_instance *mi, const un
     {
       if (flags & MPP_CLOSE_ON_SIGNAL)
 	{
-	  print_signal (mi->context.sig, NULL, D_MULTI_LOW);
-	  multi_close_instance (m, mi, false);
+	  multi_close_instance_on_signal (m, mi);
 	  ret = false;
 	}
     }
@@ -1339,7 +1419,7 @@ multi_process_incoming_link (struct multi_context *m, struct multi_instance *ins
 	      /* make sure that source address is associated with this client */
 	      else if (multi_get_instance_by_virtual_addr (m, &src, true) != m->pending)
 		{
-		  msg (D_MULTI_DEBUG, "MULTI: bad source address from client [%s], packet dropped",
+		  msg (D_MULTI_DROPPED, "MULTI: bad source address from client [%s], packet dropped",
 		       mroute_addr_print (&src, &gc));
 		  c->c2.to_tun.len = 0;
 		}
@@ -1478,7 +1558,7 @@ multi_process_incoming_tun (struct multi_context *m, const unsigned int mpp_flag
 		  else
 		    {
 		      /* drop packet */
-		      msg (D_ROUTE, "MULTI: packet dropped due to output saturation (multi_process_incoming_tun)");
+		      msg (D_MULTI_DROPPED, "MULTI: packet dropped due to output saturation (multi_process_incoming_tun)");
 		      buf_clear (&c->c2.buf);
 		    }
 	      
@@ -1555,6 +1635,37 @@ multi_process_timeout (struct multi_context *m, const unsigned int mpp_flags)
 }
 
 /*
+ * Flood clients with random packets
+ */
+static void
+gremlin_flood_clients (struct multi_context *m)
+{
+  const int level = GREMLIN_PACKET_FLOOD_LEVEL (m->top.options.gremlin);
+  if (level)
+    {
+      struct gc_arena gc = gc_new ();
+      struct buffer buf = alloc_buf_gc (BUF_SIZE (&m->top.c2.frame), &gc);
+      struct packet_flood_parms parm = get_packet_flood_parms (level);
+      int i;
+
+      ASSERT (buf_init (&buf, FRAME_HEADROOM (&m->top.c2.frame)));
+      parm.packet_size = min_int (parm.packet_size, MAX_RW_SIZE_TUN (&m->top.c2.frame));
+
+      msg (D_GREMLIN, "GREMLIN_FLOOD_CLIENTS: flooding clients with %d packets of size %d",
+	   parm.n_packets,
+	   parm.packet_size);
+
+      for (i = 0; i < parm.packet_size; ++i)
+	ASSERT (buf_write_u8 (&buf, get_random () & 0xFF));
+
+      for (i = 0; i < parm.n_packets; ++i)
+	multi_bcast (m, &buf, NULL);
+
+      gc_free (&gc);
+    }
+}
+
+/*
  * Process timers in the top-level context
  */
 void
@@ -1572,6 +1683,8 @@ multi_process_per_second_timers_dowork (struct multi_context *m)
 
   /* possibly flush ifconfig-pool file */
   multi_ifconfig_pool_persist (m, false);
+
+  gremlin_flood_clients (m);
 }
 
 void
@@ -1586,6 +1699,38 @@ multi_top_free (struct multi_context *m)
 {
   close_context (&m->top, -1, CC_GC_FREE);
   free_context_buffers (m->top.c2.buffers);
+}
+
+/*
+ * Return true if event loop should break,
+ * false if it should continue.
+ */
+bool
+multi_process_signal (struct multi_context *m)
+{
+  if (m->top.sig->signal_received == SIGUSR2)
+    {
+      struct status_output *so = status_open (NULL, 0, M_INFO, 0);
+      multi_print_status (m, so);
+      status_close (so);
+      m->top.sig->signal_received = 0;
+      return false;
+    }
+  return true;
+}
+
+/*
+ * Called when an instance should be closed due to the
+ * reception of a soft signal.
+ */
+void
+multi_close_instance_on_signal (struct multi_context *m, struct multi_instance *mi)
+{
+  remap_signal (&mi->context);
+  set_prefix (mi);
+  print_signal (mi->context.sig, "client-instance", D_MULTI_LOW);
+  clear_prefix ();
+  multi_close_instance (m, mi, false);
 }
 
 /*

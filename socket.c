@@ -35,6 +35,7 @@
 #include "fdmisc.h"
 #include "thread.h"
 #include "misc.h"
+#include "gremlin.h"
 
 #include "memdbg.h"
 
@@ -810,7 +811,8 @@ link_socket_init_phase1 (struct link_socket *sock,
 			 int connect_retry_seconds,
 			 int mtu_discover_type,
 			 int rcvbuf,
-			 int sndbuf)
+			 int sndbuf,
+			 int gremlin)
 {
   const char *remote_host;
   int remote_port;
@@ -831,6 +833,8 @@ link_socket_init_phase1 (struct link_socket *sock,
   sock->resolve_retry_seconds = resolve_retry_seconds;
   sock->connect_retry_seconds = connect_retry_seconds;
   sock->mtu_discover_type = mtu_discover_type;
+  sock->gremlin = gremlin;
+
   sock->socket_buffer_sizes.rcvbuf = rcvbuf;
   sock->socket_buffer_sizes.sndbuf = sndbuf;
 
@@ -1118,17 +1122,26 @@ link_socket_close (struct link_socket *sock)
 {
   if (sock)
     {
+      const int gremlin = GREMLIN_CONNECTION_FLOOD_LEVEL (sock->gremlin);
       if (sock->sd != -1)
 	{
 #ifdef WIN32
-	  overlapped_io_close (&sock->reads);
-	  overlapped_io_close (&sock->writes);
 	  free_tcp_connect_event (&sock->listen_handle, sock->sd);
 #endif
-	  msg (D_CLOSE, "TCP/UDP: Closing socket");
-	  if (openvpn_close_socket (sock->sd))
-	    msg (M_WARN | M_ERRNO_SOCK, "TCP/UDP: Close Socket failed");
+	  if (!gremlin)
+	    {
+	      msg (D_CLOSE, "TCP/UDP: Closing socket");
+	      if (openvpn_close_socket (sock->sd))
+		msg (M_WARN | M_ERRNO_SOCK, "TCP/UDP: Close Socket failed");
+	    }
 	  sock->sd = -1;
+#ifdef WIN32
+	  if (!gremlin)
+	    {
+	      overlapped_io_close (&sock->reads);
+	      overlapped_io_close (&sock->writes);
+	    }
+#endif
 	}
       if (sock->ctrl_sd != -1)
 	{
@@ -1138,7 +1151,8 @@ link_socket_close (struct link_socket *sock)
 	}
       stream_buf_close (&sock->stream_buf);
       free_buf (&sock->stream_buf_data);
-      free (sock);
+      if (!gremlin)
+	free (sock);
     }
 }
 

@@ -549,7 +549,6 @@ xor (uint8_t *dest, const uint8_t *src, int len)
 /* macro classes */
 #define CC_NAME               (CC_ALNUM|CC_UNDERBAR)
 #define CC_CRLF               (CC_CR|CC_NEWLINE)
-#define CC_LIMITED_PUNCT      (CC_UNDERBAR|CC_DASH|CC_DOT|CC_COLON|CC_SLASH|CC_AT|CC_EQUAL)
 
 bool char_class (const char c, const unsigned int flags);
 bool string_class (const char *str, const unsigned int inclusive, const unsigned int exclusive);
@@ -611,14 +610,9 @@ gc_reset (struct gc_arena *a)
 
 void out_of_memory (void);
 
-#define CHECK_MALLOC_RETURN(p) \
-{ \
-  if ((p) == NULL) out_of_memory (); \
-}
-
 #define ALLOC_OBJ(dptr, type) \
 { \
-  CHECK_MALLOC_RETURN ((dptr) = (type *) malloc (sizeof (type))); \
+  check_malloc_return ((dptr) = (type *) malloc (sizeof (type))); \
 }
 
 #define ALLOC_OBJ_CLEAR(dptr, type) \
@@ -629,7 +623,7 @@ void out_of_memory (void);
 
 #define ALLOC_ARRAY(dptr, type, n) \
 { \
-  CHECK_MALLOC_RETURN ((dptr) = (type *) malloc (sizeof (type) * (n))); \
+  check_malloc_return ((dptr) = (type *) malloc (sizeof (type) * (n))); \
 }
 
 #define ALLOC_ARRAY_GC(dptr, type, n, gc) \
@@ -656,6 +650,14 @@ void out_of_memory (void);
 #define ALLOC_OBJ_CLEAR_GC(dptr, type, gc) \
 { \
   (dptr) = (type *) gc_malloc (sizeof (type), true, (gc)); \
+}
+
+static inline void
+check_malloc_return (void *p)
+{
+  void out_of_memory (void);
+  if (!p)
+    out_of_memory ();
 }
 
 #endif /* BUFFER_H */

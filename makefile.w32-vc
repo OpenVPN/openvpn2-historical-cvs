@@ -107,55 +107,55 @@ HEADERS = \
 	win32.h \
 	work.h
 
-OBJS =  base64.o \
-	buffer.o \
-	crypto.o \
-	cryptoapi.o \
-	error.o \
-	event.o \
-	fdmisc.o \
-	forward.o \
-        fragment.o \
-	gremlin.o \
-	helper.o \
-	inet_aton.o \
-	init.o \
-	interval.o \
-        list.o \
-	lzo.o \
-	mbuf.o \
-	misc.o \
-	mroute.o \
-	mss.o \
-	mtcp.o \
-	mtu.o \
-	mudp.o \
-	multi.o \
-	ntlm.o \
-	occ.o \
-        openvpn.o \
-	options.o \
-	otime.o \
-	packet_id.o \
-	perf.o \
-	ping.o \
-        pool.o \
-	proxy.o \
-	push.o \
-	reliable.o \
-        route.o \
-	schedule.o \
-	session_id.o \
-	shaper.o \
-	sig.o \
-	socket.o \
-        socks.o \
-	ssl.o \
-	status.o \
-	thread.o \
-	tun.o \
-	win32.o \
-	work.o
+OBJS =  base64.obj \
+	buffer.obj \
+	crypto.obj \
+	cryptoapi.obj \
+	error.obj \
+	event.obj \
+	fdmisc.obj \
+	forward.obj \
+        fragment.obj \
+	gremlin.obj \
+	helper.obj \
+	inet_aton.obj \
+	init.obj \
+	interval.obj \
+        list.obj \
+	lzo.obj \
+	mbuf.obj \
+	misc.obj \
+	mroute.obj \
+	mss.obj \
+	mtcp.obj \
+	mtu.obj \
+	mudp.obj \
+	multi.obj \
+	ntlm.obj \
+	occ.obj \
+        openvpn.obj \
+	options.obj \
+	otime.obj \
+	packet_id.obj \
+	perf.obj \
+	ping.obj \
+        pool.obj \
+	proxy.obj \
+	push.obj \
+	reliable.obj \
+        route.obj \
+	schedule.obj \
+	session_id.obj \
+	shaper.obj \
+	sig.obj \
+	socket.obj \
+        socks.obj \
+	ssl.obj \
+	status.obj \
+	thread.obj \
+	tun.obj \
+	win32.obj \
+	work.obj
 
 dynamic : $(OBJS)
 	$(LINK32) @<<

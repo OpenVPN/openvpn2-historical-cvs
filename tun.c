@@ -1206,7 +1206,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   close (if_fd);
 
   tt->actual_name = (char *) malloc (32);
-  CHECK_MALLOC_RETURN (tt->actual_name);
+  check_malloc_return (tt->actual_name);
 
   openvpn_snprintf (tt->actual_name, 32, "%s%d", dev_tuntap_type, ppa);
 
@@ -1254,6 +1254,9 @@ close_tun (struct tuntap *tt)
     }
   if (tt)
     {
+      if (tt->actual_name)
+	free (tt->actual_name);
+      
       clear_tuntap (tt);
       free (tt);
     }
@@ -3204,6 +3207,10 @@ close_tun (struct tuntap *tt)
 	  if (!CloseHandle (tt->hand))
 	    msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on TAP-Win32 adapter");
 	}
+
+      if (tt->actual_name)
+	free (tt->actual_name);
+
       clear_tuntap (tt);
       free (tt);
     }

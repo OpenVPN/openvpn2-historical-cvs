@@ -38,6 +38,7 @@
 #include "list.h"
 #include "otime.h"
 #include "pool.h"
+#include "gremlin.h"
 
 #include "memdbg.h"
 
@@ -157,6 +158,10 @@ context_gc_free (struct context *c)
 bool
 init_static (void)
 {
+#if defined(USE_CRYPTO) && defined(DMALLOC)
+  openssl_dmalloc_init ();
+#endif
+
   init_random_seed ();		/* init random() function, only used as
 				   source for weak random numbers */
   error_reset ();		/* initialize error.c */
@@ -207,6 +212,11 @@ init_static (void)
 
 #ifdef CHARACTER_CLASS_DEBUG
   character_class_debug ();
+  return false;
+#endif
+
+#ifdef EXTRACT_X509_FIELD_TEST
+  extract_x509_field_test ();
   return false;
 #endif
 
@@ -567,12 +577,17 @@ do_init_route_list (const struct options *options,
  * Called after all initialization has been completed.
  */
 void
-initialization_sequence_completed (struct context *c)
+initialization_sequence_completed (struct context *c, const bool errors)
 {
+  static const char message[] = "Initialization Sequence Completed";
+
   /* If we delayed UID/GID downgrade or chroot, do it now */
   do_uid_gid_chroot (c, true);
 
-  msg (M_INFO, "Initialization Sequence Completed");
+  if (errors)
+    msg (M_INFO, "%s With Errors", message);
+  else
+    msg (M_INFO, "%s", message);
 }
 
 /*
@@ -618,10 +633,11 @@ save_pulled_options_string (struct context *c, const char *newstring)
 {
   if (c->c1.pulled_options_string_save)
     free (c->c1.pulled_options_string_save);
+
+  c->c1.pulled_options_string_save = NULL;
+
   if (newstring)
     c->c1.pulled_options_string_save = string_alloc (newstring, NULL);
-  else
-    c->c1.pulled_options_string_save = NULL;
 }
 #endif
 
@@ -756,7 +772,7 @@ do_close_tun_simple (struct context *c)
   c->c1.tuntap = NULL;
   c->c1.tuntap_owned = false;
 #if P2MP
-  save_pulled_options_string (c, NULL);
+  save_pulled_options_string (c, NULL); /* delete C1-saved pulled_options_string */
 #endif
 }
 
@@ -872,7 +888,7 @@ do_up (struct context *c, bool pulled_options, unsigned int option_types_found)
 	      event_timeout_init (&c->c2.route_wakeup_expire, c->options.route_delay + c->options.route_delay_window, now);
 	    }
 	  else
-	    initialization_sequence_completed (c);
+	    initialization_sequence_completed (c, false);
 	}
 
       c->c2.do_up_ran = true;
@@ -934,30 +950,31 @@ do_deferred_options (struct context *c, const unsigned int found)
 }
 
 /*
- * Depending on protocol, sleep before restart to prevent
- * TCP race.
+ * Sleep before restart.
  */
 static void
 socket_restart_pause (const struct context *c)
 {
   const bool proxy = (c->options.http_proxy_server != NULL || c->options.socks_proxy_server != NULL);
-  const int retry = c->options.connect_retry_seconds;
 
-  int sec = 1;
+  int sec = 2;
 
   switch (c->options.proto)
     {
     case PROTO_UDPv4:
       if (proxy)
-	sec = retry;
+	sec = c->options.connect_retry_seconds;
       break;
     case PROTO_TCPv4_SERVER:
       sec = 1;
       break;
     case PROTO_TCPv4_CLIENT:
-      sec = retry;
+      sec = c->options.connect_retry_seconds;
       break;
     }
+
+  if (GREMLIN_CONNECTION_FLOOD_LEVEL (c->options.gremlin))
+    sec = 0;
 
   if (sec)
     {
@@ -1190,9 +1207,12 @@ do_init_crypto_tls (struct context *c, const unsigned int flags)
   to.verify_x509name = options->tls_remote;
   to.crl_file = options->crl_file;
   to.es = c->c2.es;
+  to.gremlin = c->options.gremlin;
 
 #if P2MP
   to.auth_user_pass_verify_script = options->auth_user_pass_verify_script;
+  to.auth_user_pass_verify_script_via_file = options->auth_user_pass_verify_script_via_file;
+  to.tmp_dir = options->tmp_dir;
   to.auth_user_pass = c->c1.auth_user_pass;
   to.username_as_common_name = options->username_as_common_name;
   if (options->ccd_exclusive)
@@ -1348,6 +1368,9 @@ do_option_warnings (struct context *c)
   if (o->ping_send_timeout && !o->ping_rec_timeout)
     msg (M_WARN, "WARNING: --ping should normally be used with --ping-restart or --ping-exit");
 
+  if ((o->username || o->groupname || o->chroot_dir) && (!o->persist_tun || !o->persist_key))
+    msg (M_WARN, "WARNING: you are using user/group/chroot without persist-key/persist-tun -- this may cause restarts to fail");
+
 #if P2MP
   if (o->pull && o->ifconfig_local && c->first_time)
     msg (M_WARN, "WARNING: using --pull/--client and --ifconfig together is probably not what you want");
@@ -1496,7 +1519,8 @@ do_init_socket_1 (struct context *c, int mode)
 			   c->options.connect_retry_seconds,
 			   c->options.mtu_discover_type,
 			   c->options.rcvbuf,
-			   c->options.sndbuf);
+			   c->options.sndbuf,
+			   c->options.gremlin);
 }
 
 /*
@@ -1619,6 +1643,7 @@ do_close_free_buf (struct context *c)
     {
       free_context_buffers (c->c2.buffers);
       c->c2.buffers = NULL;
+      c->c2.buffers_owned = false;
     }
 }
 
@@ -1640,6 +1665,7 @@ do_close_tls (struct context *c)
     free (c->c2.options_string_local);
   if (c->c2.options_string_remote)
     free (c->c2.options_string_remote);
+  c->c2.options_string_local = c->c2.options_string_remote = NULL;
 #endif
 }
 
@@ -1660,8 +1686,10 @@ static void
 do_close_link_socket (struct context *c)
 {
   if (c->c2.link_socket && c->c2.link_socket_owned)
-    link_socket_close (c->c2.link_socket);
-  c->c2.link_socket = NULL;
+    {
+      link_socket_close (c->c2.link_socket);
+      c->c2.link_socket = NULL;
+    }
 
   if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_remote_ip))
     {
@@ -1694,7 +1722,10 @@ static void
 do_close_fragment (struct context *c)
 {
   if (c->c2.fragment)
-    fragment_free (c->c2.fragment);
+    {
+      fragment_free (c->c2.fragment);
+      c->c2.fragment = NULL;
+    }
 }
 
 static void
@@ -1731,6 +1762,8 @@ do_close_event_set (struct context *c)
   if (c->c2.event_set && c->c2.event_set_owned)
     {
       event_free (c->c2.event_set);
+      c->c2.event_set = NULL;
+      c->c2.event_set_owned = false;
     }
 }
 
@@ -1826,7 +1859,10 @@ do_close_pthread (struct context *c)
 {
 #ifdef USE_PTHREAD
   if (c->sig->signal_received != SIGUSR1 && c->c1.work_thread)
-    work_thread_close (c->c1.work_thread);
+    {
+      work_thread_close (c->c1.work_thread);
+      c->c1.work_thread = NULL;
+    }
 #endif
 }
 
@@ -1861,11 +1897,22 @@ do_setup_fast_io (struct context *c)
     }
 }
 
+static void
+do_signal_on_tls_errors (struct context *c)
+{
+#if defined(USE_CRYPTO) && defined(USE_SSL)
+  if (c->options.tls_exit)
+    c->c2.tls_exit_signal = SIGTERM;
+  else
+    c->c2.tls_exit_signal = SIGUSR1;    
+#endif
+}
+
 /*
  * Initialize a tunnel instance.
  */
 void
-init_instance (struct context *c, unsigned int flags)
+init_instance (struct context *c, const struct env_set *env, unsigned int flags)
 {
   const struct options *options = &c->options;
   const bool child = (c->mode == CM_CHILD_TCP || c->mode == CM_CHILD_UDP);
@@ -1913,13 +1960,16 @@ init_instance (struct context *c, unsigned int flags)
   if (c->mode == CM_P2P || c->mode == CM_TOP)
     do_option_warnings (c);
 
-  /* inherit c2's environmental variables from c1 */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
-    do_inherit_env (c, c->es);
+  /* inherit environmental variables */
+  if (env)
+    do_inherit_env (c, env);
 
   /* should we enable fast I/O? */
   if (c->mode == CM_P2P || c->mode == CM_TOP)
     do_setup_fast_io (c);
+
+  /* should we throw a signal on TLS errors? */
+  do_signal_on_tls_errors (c);
 
   /* open --status file */
   if (c->mode == CM_P2P || c->mode == CM_TOP)
@@ -2146,12 +2196,9 @@ inherit_context_child (struct context *dest,
     }
 
   /* context init */
-  init_instance (dest, CC_USR1_TO_HUP | CC_GC_FREE);
+  init_instance (dest, src->c2.es, CC_USR1_TO_HUP | CC_GC_FREE);
   if (IS_SIG (dest))
     return;
-
-  /* inherit environment */
-  do_inherit_env (dest, src->c2.es);
 
   /* inherit tun/tap interface object */
   dest->c1.tuntap = src->c1.tuntap;
@@ -2178,9 +2225,18 @@ void
 inherit_context_top (struct context *dest,
 		     const struct context *src)
 {
+  /* copy parent */
   *dest = *src;
 
-  dest->mode = CM_TOP_CLONE;
+  /*
+   * CM_TOP_CLONE will prevent close_instance from freeing or closing
+   * resources owned by the parent.
+   *
+   * Also note that CM_TOP_CLONE context objects are
+   * closed by multi_top_free in multi.c.
+   */
+  dest->mode = CM_TOP_CLONE; 
+
   dest->first_time = false;
 
   options_detach (&dest->options);

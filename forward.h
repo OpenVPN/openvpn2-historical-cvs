@@ -66,7 +66,7 @@ void process_incoming_tun (struct context *c);
 void process_outgoing_link (struct context *c);
 void process_outgoing_tun (struct context *c);
 
-bool send_control_channel_string (struct context *c, char *str, int msglevel);
+bool send_control_channel_string (struct context *c, const char *str, int msglevel);
 
 #define PIPV4_PASSTOS         (1<<0)
 #define PIPV4_MSSFIX          (1<<1)

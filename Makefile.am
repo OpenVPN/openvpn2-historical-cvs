@@ -107,13 +107,16 @@ EXTRA_DIST = \
 	config-win32.h \
 	win32.h \
 	win32.c \
+	cryptoapi.h \
+	cryptoapi.c \
 	makefile.w32 \
         makefile.w32-vc \
 	INSTALL-win32.txt \
 	tap-win32 \
 	install-win32 \
 	service-win32 \
-	contrib
+	contrib \
+	debug
 
 dist-hook:
 	cd $(distdir) && for i in $(EXTRA_DIST) ; do find $$i -name CVS -type d -prune -exec rm -r '{}' ';' ; rm -f `find $$i -type f | grep -E '(^|\/)\.?\#|\~$$'` ; done

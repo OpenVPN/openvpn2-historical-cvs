@@ -32,7 +32,7 @@
 #ifndef PERF_H
 #define PERF_H
 
-/*#define ENABLE_PERFORMANCE_METRICS*/
+/* #define ENABLE_PERFORMANCE_METRICS */
 
 /*
  * Metrics

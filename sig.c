@@ -240,6 +240,13 @@ process_explicit_exit_notification_timer_wakeup (struct context *c)
  * Process signals
  */
 
+void
+remap_signal (struct context *c)
+{
+  if (c->sig->signal_received == SIGUSR1 && c->options.remap_sigusr1)
+    c->sig->signal_received = c->options.remap_sigusr1;
+}
+
 static void
 process_sigusr2 (const struct context *c)
 {

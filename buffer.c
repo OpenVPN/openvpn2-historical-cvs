@@ -88,7 +88,7 @@ clone_buf (const struct buffer* buf)
 #else
   ret.data = (uint8_t *) malloc (buf->capacity);
 #endif
-  CHECK_MALLOC_RETURN (ret.data);
+  check_malloc_return (ret.data);
   memcpy (BPTR (&ret), BPTR (buf), BLEN (buf));
   return ret;
 }
@@ -96,7 +96,8 @@ clone_buf (const struct buffer* buf)
 void
 buf_clear (struct buffer *buf)
 {
-  memset (buf->data, 0, buf->capacity);
+  if (buf->capacity > 0)
+    memset (buf->data, 0, buf->capacity);
   buf->len = 0;
   buf->offset = 0;
 }
@@ -239,7 +240,7 @@ gc_malloc (size_t size, bool clear, struct gc_arena *a)
 #else
       e = (struct gc_entry *) malloc (size + sizeof (struct gc_entry));
 #endif
-      CHECK_MALLOC_RETURN (e);
+      check_malloc_return (e);
       ret = (char *) e + sizeof (struct gc_entry);
       mutex_lock_static (L_GC_MALLOC);
       e->next = a->list;
@@ -253,9 +254,11 @@ gc_malloc (size_t size, bool clear, struct gc_arena *a)
 #else
       ret = malloc (size);
 #endif
-      CHECK_MALLOC_RETURN (ret);
+      check_malloc_return (ret);
     }
+#ifndef ZERO_BUFFER_ON_ALLOC
   if (clear)
+#endif
     memset (ret, 0, size);
   return ret;
 }

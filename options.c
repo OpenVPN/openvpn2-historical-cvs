@@ -162,6 +162,7 @@ static const char usage_message[] =
   "--ping n        : Ping remote once every n seconds over TCP/UDP port.\n"
   "--fast-io       : (experimental) Optimize TUN/TAP/UDP writes.\n"
   "--explicit-exit-notify n : (experimental) on exit, send exit signal to remote.\n"
+  "--remap-usr1 s  : On SIGUSR1 signals, remap signal (s='SIGHUP' or 'SIGTERM').\n"
   "--persist-tun   : Keep tun/tap device open across SIGUSR1 or --ping-restart.\n"
   "--persist-remote-ip : Keep remote IP address across SIGUSR1 or --ping-restart.\n"
   "--persist-local-ip  : Keep local IP address across SIGUSR1 or --ping-restart.\n"
@@ -228,18 +229,17 @@ static const char usage_message[] =
   "                : 0 -- no output except fatal errors\n"
   "                : 1 -- startup info + connection initiated messages +\n"
   "                       non-fatal encryption & net errors\n"
-  "                : 2 -- show TLS negotiations\n"
-  "                : 3 -- show extra TLS info + --gremlin net outages +\n"
-  "                       adaptive compress info\n"
+  "                : 2,3 -- show TLS negotiations & route info\n"
   "                : 4 -- show parameters\n"
   "                : 5 -- show 'RrWw' chars on console for each packet sent\n"
   "                       and received from TCP/UDP (caps) or tun/tap (lc)\n"
   "                : 6 to 11 -- debug messages of increasing verbosity\n"
   "--mute n        : Log at most n consecutive messages in the same category.\n"
   "--status file n : Write operational status to file every n seconds.\n"
+  "--status-version [n] : Choose the status file format version number.\n"
+  "                  Currently, n can be 1 or 2 (default=1)\n."
   "--disable-occ   : Disable options consistency check between peers.\n"
-  "--gremlin       : Simulate dropped & corrupted packets + network outages\n"
-  "                  to test robustness of protocol (for debugging only).\n"
+  "--gremlin mask  : Special stress testing mode (for debugging only).\n"
 #ifdef USE_LZO
   "--comp-lzo      : Use fast LZO compression -- may add up to 1 byte per\n"
   "                  packet for uncompressible data.\n"
@@ -274,8 +274,10 @@ static const char usage_message[] =
   "--username-as-common-name  : For auth-user-pass authentication, use\n"
   "                  the authenticated username as the common name,\n"
   "                  rather than the common name from the client cert.\n"
-  "--auth-user-pass-verify cmd : Query client for username/password and run\n"
-  "                  script cmd to verify.\n"
+  "--auth-user-pass-verify cmd method: Query client for username/password and\n"
+  "                  run script cmd to verify.  If method='via-env', pass\n"
+  "                  user/pass via environment, if method='via-file', pass\n"
+  "                  user/pass via temporary file.\n"
   "--client-to-client : Internally route client-to-client traffic.\n"
   "--duplicate-cn  : Allow multiple clients with the same common name to\n"
   "                  concurrently connect.\n"
@@ -474,6 +476,7 @@ init_options (struct options *o)
   o->local_port = o->remote_port = 5000;
   o->verbosity = 1;
   o->status_file_update_freq = 60;
+  o->status_file_version = 1;
   o->bind_local = true;
   o->tun_mtu = TUN_MTU_DEFAULT;
   o->link_mtu = LINK_MTU_DEFAULT;
@@ -732,6 +735,7 @@ show_p2mp_parms (const struct options *o)
   SHOW_BOOL (client_cert_not_required);
   SHOW_BOOL (username_as_common_name)
   SHOW_STR (auth_user_pass_verify_script);
+  SHOW_BOOL (auth_user_pass_verify_script_via_file);
   SHOW_STR (auth_user_pass_file);
 
   gc_free (&gc);
@@ -873,8 +877,8 @@ show_settings (const struct options *o)
   SHOW_INT (ping_rec_timeout);
   SHOW_INT (ping_rec_timeout_action);
   SHOW_BOOL (ping_timer_remote);
+  SHOW_INT (remap_sigusr1);
   SHOW_INT (explicit_exit_notification);
-
   SHOW_BOOL (persist_tun);
   SHOW_BOOL (persist_local_ip);
   SHOW_BOOL (persist_remote_ip);
@@ -906,8 +910,9 @@ show_settings (const struct options *o)
   SHOW_INT (nice);
   SHOW_INT (verbosity);
   SHOW_INT (mute);
-  SHOW_BOOL (gremlin);
+  SHOW_INT (gremlin);
   SHOW_STR (status_file);
+  SHOW_INT (status_file_version);
   SHOW_INT (status_file_update_freq);
 
   SHOW_BOOL (occ);
@@ -2332,10 +2337,11 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->remote_float = true;
     }
-  else if (streq (p[0], "gremlin"))
+  else if (streq (p[0], "gremlin") && p[1])
     {
+      ++i;
       VERIFY_PERMISSION (OPT_P_GENERAL);
-      options->gremlin = true;
+      options->gremlin = atoi (p[1]);
     }
   else if (streq (p[0], "user") && p[1])
     {
@@ -2519,6 +2525,25 @@ add_option (struct options *options,
 	  ++i;
 	  options->status_file_update_freq = positive (atoi (p[2]));
 	}
+    }
+  else if (streq (p[0], "status-version") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->status_file_version = atoi (p[1]);
+      if (options->status_file_version < 1 || options->status_file_version > 2)
+	msg (msglevel, "Options error: --status-version must be 1 or 2");
+    }
+  else if (streq (p[0], "remap-usr1") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      if (streq (p[1], "SIGHUP"))
+	options->remap_sigusr1 = SIGHUP;
+      else if (streq (p[1], "SIGTERM"))
+	options->remap_sigusr1 = SIGTERM;
+      else
+	msg (msglevel, "Options error: --remap-usr1 parm must be 'SIGHUP' or 'SIGTERM'");
     }
   else if ((streq (p[0], "link-mtu") || streq (p[0], "udp-mtu")) && p[1])
     {
@@ -3048,6 +3073,20 @@ add_option (struct options *options,
       ++i;
       VERIFY_PERMISSION (OPT_P_SCRIPT);
       options->auth_user_pass_verify_script = p[1];
+      if (p[2])
+	{
+	  ++i;
+	  if (streq (p[2], "via-env"))
+	    options->auth_user_pass_verify_script_via_file = false;
+	  else if (streq (p[2], "via-file"))
+	    options->auth_user_pass_verify_script_via_file = true;
+	  else
+	    msg (msglevel, "Options Error: second parm to --auth-user-pass-verify must be 'via-env' or 'via-file'");
+	}
+      else
+	{
+	  msg (msglevel, "Options Error: --auth-user-pass-verify requires a second parameter ('via-env' or 'via-file')");
+	}
     }
   else if (streq (p[0], "auth-user-pass"))
     {

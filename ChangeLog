@@ -1,7 +1,60 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.42 2004/10/20 06:25:48 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.43 2004/10/28 07:58:07 jimyonan Exp $
+
+2004.10.28 -- Version 2.0-beta15
+
+* Changed environmental variable character classes
+  so that names must consist of alphanumeric or
+  underbar chars and values must consist of printable
+  characters.  Illegal chars will be deleted.
+  Versions prior to 2.0-beta12 were more restrictive
+  and would map spaces to '.'.
+* On Windows, when the TAP adapter fails to
+  initialize with the correct IP address, output
+  "Initialization Sequence Completed with Errors"
+  to the console or log file.
+* Added a warning when user/group/chroot is used
+  without persist-tun and persist-key.
+* Added cryptoapi.[ch] to tarball and source zip.
+* --tls-remote option now works with common name
+  prefixes as well as with the full X509 subject
+  string.  This is a useful alternative to using
+  a CRL on the client.
+* common names associated with a static
+  --ifconfig-push setting will no longer leave
+  any state in the --ifconfig-pool-persist file.
+* Hard TLS errors (TLS handshake failed) will now
+  trigger either a SIGUSR1 signal by default
+  or SIGTERM (if --tls-exit is specified).  In TCP
+  mode, all TLS errors are considered to be hard.
+  In server mode, the signal will be local to the
+  client instance.
+* Added method parameter to --auth-user-pass-verify
+  directive to select whether username/password
+  is passed to script via environment or a temporary
+  file.
+* Added --status-version option to control format
+  of --status file.  The --mode server
+  --status-version 2 format now includes a line
+  type token, the virtual IP address is shown
+  in the client list (even in --dev tap mode),
+  and the integer time_t value is shown anywhere
+  an ascii-formatted time/date is also shown.
+* Added --remap-usr1 directive which can be used
+  to control whether internally or externally
+  generated SIGUSR1 signals are remapped to
+  SIGHUP (restart without persisting state) or
+  SIGTERM (exit).
+* When running as a Windows service (using
+  --service option), check the exit event before
+  and after reading one line of input from
+  stdin, when reading username/password info.
+* For developers: Extended the --gremlin function
+  to better stress-test the new 2.0 features,
+  added Valgrind support on Linux and Dmalloc
+  support on Windows.
 
 2004.10.19 -- Version 2.0-beta14
 

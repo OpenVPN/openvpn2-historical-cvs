@@ -199,7 +199,7 @@ void
 multi_tcp_dereference_instance (struct multi_tcp *mtcp, struct multi_instance *mi)
 {
   struct link_socket *ls = mi->context.c2.link_socket;
-  if (ls)
+  if (ls && mi->socket_set_called)
     event_del (mtcp->es, socket_event_handle (ls));
 }
 
@@ -207,11 +207,14 @@ static inline void
 multi_tcp_set_global_rw_flags (struct multi_context *m, struct multi_instance *mi)
 {
   if (mi)
-    socket_set (mi->context.c2.link_socket,
-		m->mtcp->es,
-		mbuf_defined (mi->tcp_link_out_deferred) ? EVENT_WRITE : EVENT_READ,
-		mi,
-		&mi->tcp_rwflags);
+    {
+      mi->socket_set_called = true;
+      socket_set (mi->context.c2.link_socket,
+		  m->mtcp->es,
+		  mbuf_defined (mi->tcp_link_out_deferred) ? EVENT_WRITE : EVENT_READ,
+		  mi,
+		  &mi->tcp_rwflags);
+    }
 }
 
 static inline int
@@ -310,7 +313,7 @@ multi_tcp_wait_lite (struct multi_context *m, struct multi_instance *mi, const i
        pract(action),
        (ptr_type)mi);
 
-  tv_clear (&c->c2.timeval);
+  tv_clear (&c->c2.timeval); /* ZERO-TIMEOUT */
 
   switch (action)
     {
@@ -506,7 +509,7 @@ multi_tcp_action (struct multi_context *m, struct multi_instance *mi, int action
 	{
 	  if (mi == touched)
 	    mi = NULL;
-	  multi_close_instance (m, touched, false);
+	  multi_close_instance_on_signal (m, touched);
 	}
     }
 
@@ -552,6 +555,8 @@ multi_tcp_process_io (struct multi_context *m)
   for (i = 0; i < mtcp->n_esr; ++i)
     {
       struct event_set_return *e = &mtcp->esr[i];
+
+      /* incoming data for instance? */
       if (e->arg >= MTCP_N)
 	{
 	  struct multi_instance *mi = (struct multi_instance *) e->arg;
@@ -565,7 +570,7 @@ multi_tcp_process_io (struct multi_context *m)
 	}
       else
 	{
-	  /* incoming data on TUN */
+	  /* incoming data on TUN? */
 	  if (e->arg == MTCP_TUN)
 	    {
 	      if (e->rwflags & EVENT_WRITE)
@@ -573,17 +578,17 @@ multi_tcp_process_io (struct multi_context *m)
 	      else if (e->rwflags & EVENT_READ)
 		multi_tcp_action (m, NULL, TA_TUN_READ, false);
 	    }
-	  /* new incoming TCP client attempting to connect */
+	  /* new incoming TCP client attempting to connect? */
 	  else if (e->arg == MTCP_SOCKET)
 	    {
 	      struct multi_instance *mi;
 	      ASSERT (m->top.c2.link_socket);
-	      mi = multi_create_instance_tcp (m);
 	      socket_reset_listen_persistent (m->top.c2.link_socket);
+	      mi = multi_create_instance_tcp (m);
 	      if (mi)
 		multi_tcp_action (m, mi, TA_INITIAL, false);
 	    }
-	  /* signal received */
+	  /* signal received? */
 	  else if (e->arg == MTCP_SIG)
 	    {
 	      get_signal (&m->top.sig->signal_received);
@@ -620,7 +625,7 @@ tunnel_server_tcp (struct context *top)
   context_clear_2 (top);
 
   /* initialize top-tunnel instance */
-  init_instance (top, CC_HARD_USR1_TO_HUP);
+  init_instance (top, top->es, CC_HARD_USR1_TO_HUP);
   if (IS_SIG (top))
     return;
   
@@ -631,7 +636,7 @@ tunnel_server_tcp (struct context *top)
   multi_top_init (&multi, top);
 
   /* finished with initialization */
-  initialization_sequence_completed (top);
+  initialization_sequence_completed (top, false);
 
   /* per-packet event loop */
   while (true)
@@ -668,7 +673,6 @@ tunnel_server_tcp (struct context *top)
   multi_top_free (&multi);
   close_instance (top);
   multi_uninit (&multi);
-  top->first_time = false;
 }
 
 #endif

@@ -80,10 +80,13 @@ mbuf_alloc_buf (const struct buffer *buf)
 void
 mbuf_free_buf (struct mbuf_buffer *mb)
 {
-  if (--mb->refcount <= 0)
+  if (mb)
     {
-      free_buf (&mb->buf);
-      free (mb);
+      if (--mb->refcount <= 0)
+	{
+	  free_buf (&mb->buf);
+	  free (mb);
+	}
     }
 }
 
@@ -96,7 +99,7 @@ mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item)
       struct mbuf_item rm;
       ASSERT (mbuf_extract_item (ms, &rm));
       mbuf_free_buf (rm.buffer);
-      msg (D_MBUF, "MBUF: mbuf packet dropped");
+      msg (D_MULTI_DROPPED, "MBUF: mbuf packet dropped");
     }
 
   ASSERT (ms->len < ms->capacity);

@@ -51,14 +51,20 @@ static inline void
 check_tls_errors (struct context *c)
 {
 #if defined(USE_CRYPTO) && defined(USE_SSL)
-  void check_tls_errors_dowork (struct context *c);
-  void check_tls_exit_dowork (struct context *c);
-  if (c->c2.tls_multi && c->c2.tls_multi->n_errors) 
+  void check_tls_errors_co (struct context *c);
+  void check_tls_errors_nco (struct context *c);
+  if (c->c2.tls_multi && c->c2.tls_exit_signal)
     {
       if (link_socket_connection_oriented (c->c2.link_socket))
-	check_tls_errors_dowork (c);
-      else if (c->options.tls_exit)
-	check_tls_exit_dowork (c);
+	{
+	  if (c->c2.tls_multi->n_soft_errors)
+	    check_tls_errors_co (c);
+	}
+      else
+	{
+	  if (c->c2.tls_multi->n_hard_errors)
+	    check_tls_errors_nco (c);
+	}
     }
 #endif
 }
@@ -174,7 +180,7 @@ check_packet_id_persist_flush (struct context *c)
 static inline void
 context_immediate_reschedule (struct context *c)
 {
-  c->c2.timeval.tv_sec = 0;
+  c->c2.timeval.tv_sec = 0;    /* ZERO-TIMEOUT */
   c->c2.timeval.tv_usec = 0;
 }
 

@@ -58,7 +58,7 @@ bool do_persist_tuntap (const struct options *options);
 
 void pre_setup (const struct options *options);
 
-void init_instance (struct context *c, unsigned int flags);
+void init_instance (struct context *c, const struct env_set *env, unsigned int flags);
 
 void do_route (const struct options *options,
 	       struct route_list *route_list,
@@ -98,6 +98,6 @@ struct context_buffers *init_context_buffers (const struct frame *frame);
 
 void free_context_buffers (struct context_buffers *b);
 
-void initialization_sequence_completed (struct context *c);
+void initialization_sequence_completed (struct context *c, const bool errors);
 
 #endif

@@ -362,14 +362,28 @@ win32_signal_close (struct win32_signal *ws)
   CLEAR (*ws);
 }
 
+/*
+ * Return true if interrupt occurs in service mode.
+ */
+static bool
+win32_service_interrupt (struct win32_signal *ws)
+{
+  if (ws->mode == WSO_MODE_SERVICE)
+    {
+      if (HANDLE_DEFINED (ws->in.read)
+	  && WaitForSingleObject (ws->in.read, 0) == WAIT_OBJECT_0)
+	return true;
+    }
+  return false;
+}
+
 int
 win32_signal_get (struct win32_signal *ws)
 {
   int ret = 0;
   if (ws->mode == WSO_MODE_SERVICE)
     {
-      if (HANDLE_DEFINED (ws->in.read)
-	  && WaitForSingleObject (ws->in.read, 0) == WAIT_OBJECT_0)
+      if (win32_service_interrupt (ws))
 	ret = SIGTERM;
     }
   else if (ws->mode == WSO_MODE_CONSOLE)
@@ -569,7 +583,12 @@ netcmd_semaphore_release (void)
   semaphore_release (&netcmd_semaphore);
 }
 
-/* get input from console */
+/*
+ * Get input from console.
+ *
+ * Return false on input error, or if service
+ * exit event is signaled.
+ */
 
 bool
 get_console_input_win32 (const char *prompt, const bool echo, char *input, const int capacity)
@@ -589,6 +608,7 @@ get_console_input_win32 (const char *prompt, const bool echo, char *input, const
 
   if (in != INVALID_HANDLE_VALUE
       && err != INVALID_HANDLE_VALUE
+      && !win32_service_interrupt (&win32_signal)
       && WriteFile (err, prompt, strlen (prompt), &len, NULL))
     {
       bool is_console = (GetFileType (in) == FILE_TYPE_CHAR);
@@ -617,7 +637,7 @@ get_console_input_win32 (const char *prompt, const bool echo, char *input, const
 	WriteFile (err, "\r\n", 2, &len, NULL);
       if (is_console)
 	SetConsoleMode (in, flags_save);
-      if (status)
+      if (status && !win32_service_interrupt (&win32_signal))
 	return true;
     }
 

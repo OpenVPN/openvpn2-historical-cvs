@@ -487,10 +487,12 @@ ignore_sys_error (const int err)
   if (err == EAGAIN)
     return true;
 
+#if 0 /* if enabled, suppress ENOBUFS errors */
 #ifdef ENOBUFS
   /* No buffer space available */
   if (err == ENOBUFS)
     return true;
+#endif
 #endif
 
   return false;

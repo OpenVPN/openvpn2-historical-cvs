@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [2.0_beta14], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [2.0_beta15], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -121,9 +121,9 @@ AC_ARG_WITH(route-path,
 )
 AC_DEFINE_UNQUOTED(ROUTE_PATH, "$ROUTE", [Path to route tool])
 
-AC_ARG_WITH(leak-check,
-   [  --with-leak-check=TYPE  Build with memory leak checking, TYPE = dmalloc or ssl],
-   [LEAK="$withval"]
+AC_ARG_WITH(mem-check,
+   [  --with-mem-check=TYPE  Build with debug memory checking, TYPE = dmalloc or valgrind],
+   [MEMCHECK="$withval"]
 )
 
 AC_ARG_ENABLE(iproute2,
@@ -315,11 +315,27 @@ dnl check libraries
 dnl
 
 dnl
+dnl check for valgrind tool
+dnl
+
+if test "$MEMCHECK" = "valgrind"; then
+   AC_CHECKING([for valgrind tool and Header files])
+   AC_CHECK_HEADER(valgrind/memcheck.h, 
+        [
+	    AC_DEFINE(USE_VALGRIND, 1, [Use valgrind memory debugging library])
+	    CFLAGS="-g -fno-inline"
+	],
+        [AC_MSG_ERROR([valgrind headers not found.])]
+   )
+fi
+
+dnl
 dnl check for pthread library
 dnl
 
 if test "$PTHREAD" = "yes"; then
   AC_CHECKING([for pthread support])
+  AC_MSG_RESULT([********* WARNING: pthread support is experimental for OpenVPN 2.0])
   ACX_PTHREAD(
         [
 	    case "$target" in
@@ -343,7 +359,7 @@ dnl
 dnl check for dmalloc library
 dnl
 
-if test "$LEAK" = "dmalloc"; then
+if test "$MEMCHECK" = "dmalloc"; then
    AC_CHECKING([for dmalloc Library and Header files])
    AC_CHECK_HEADER(dmalloc.h, 
         [AC_CHECK_LIB(dmalloc, malloc,
@@ -428,7 +444,7 @@ dnl
       AC_CHECK_HEADER(openssl/ssl.h,
 	   [AC_CHECK_LIB(ssl, SSL_CTX_new,
 	       [
-                  if test "$LEAK" = "ssl"; then
+                  if test "$MEMCHECK" = "ssl"; then
                      AC_CHECKING([for Memory Debugging Capabilities in OpenSSL Library])
                      AC_CHECK_LIB(ssl, CRYPTO_mem_ctrl,
                          [

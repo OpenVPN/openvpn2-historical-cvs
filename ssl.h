@@ -181,7 +181,8 @@
 /* Maximum length of common name */
 #define TLS_CN_LEN 64
 
-/* Legal characters in a common name */
+/* Legal characters in an X509 or common name */
+#define X509_NAME_CHAR_CLASS   (CC_ALNUM|CC_UNDERBAR|CC_DASH|CC_DOT|CC_AT|CC_COLON|CC_SLASH|CC_EQUAL)
 #define COMMON_NAME_CHAR_CLASS (CC_ALNUM|CC_UNDERBAR|CC_DASH|CC_DOT|CC_AT)
 
 /* Maximum length of OCC options string passed as part of auth handshake */
@@ -326,6 +327,8 @@ struct tls_options
 
   /* used for username/password authentication */
   const char *auth_user_pass_verify_script;
+  bool auth_user_pass_verify_script_via_file;
+  const char *tmp_dir;
   const struct user_pass *auth_user_pass;
   bool username_as_common_name;
 
@@ -334,6 +337,9 @@ struct tls_options
 
   /* instance-wide environment variable set */
   struct env_set *es;
+
+  /* --gremlin bits */
+  int gremlin;
 };
 
 /* index into tls_session.key */
@@ -430,13 +436,9 @@ struct tls_multi
 
   /*
    * Number of errors.
-   *
-   * Includes:
-   *   (a) errors due to TLS negotiation failure
-   *   (b) errors due to unrecognized or failed-to-authenticate
-   *       incoming packets
    */
-  int n_errors;
+  int n_hard_errors;   /* errors due to TLS negotiation failure */
+  int n_soft_errors;   /* errors due to unrecognized or failed-to-authenticate incoming packets */
 
   /*
    * Our locked common name (cannot change during the life of this tls_multi object)
@@ -517,7 +519,8 @@ void tls_set_verify_x509name (const char *x509name);
 void tls_adjust_frame_parameters(struct frame *frame);
 
 bool tls_send_payload (struct tls_multi *multi,
-		       const struct buffer *buf);
+		       const uint8_t *data,
+		       int size);
 
 bool tls_rec_payload (struct tls_multi *multi,
 		      struct buffer *buf);
@@ -564,6 +567,9 @@ const char *protocol_dump (struct buffer *buffer,
 #ifdef MEASURE_TLS_HANDSHAKE_STATS
 void show_tls_performance_stats(void);
 #endif
+
+//#define EXTRACT_X509_FIELD_TEST
+void extract_x509_field_test (void);
 
 #endif /* USE_CRYPTO && USE_SSL */
 

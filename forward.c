@@ -104,21 +104,22 @@ check_tls_dowork (struct context *c)
 #endif
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
+
 void
-check_tls_errors_dowork (struct context *c)
+check_tls_errors_co (struct context *c)
 {
-  /* TLS errors are fatal in TCP mode */
-  c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- TLS error */
-  msg (D_STREAM_ERRORS, "Fatal decryption error (check_tls_errors_dowork), restarting");
+  msg (D_STREAM_ERRORS, "Fatal TLS error (check_tls_errors_co), restarting");
+  c->sig->signal_received = c->c2.tls_exit_signal; /* SOFT-SIGUSR1 -- TLS error */
   c->sig->signal_text = "tls-error";
 }
 
 void
-check_tls_exit_dowork (struct context *c)
+check_tls_errors_nco (struct context *c)
 {
-  c->sig->signal_received = SIGTERM;
-  c->sig->signal_text = "tls-exit";
+  c->sig->signal_received = c->c2.tls_exit_signal; /* SOFT-SIGUSR1 -- TLS error */
+  c->sig->signal_text = "tls-error";
 }
+
 #endif
 
 #if P2MP
@@ -207,20 +208,25 @@ check_connection_established_dowork (struct context *c)
  * etc.
  */
 bool
-send_control_channel_string (struct context *c, char *str, int msglevel)
+send_control_channel_string (struct context *c, const char *str, int msglevel)
 {
 #if defined(USE_CRYPTO) && defined(USE_SSL)
+
   if (c->c2.tls_multi) {
-    struct buffer buf;
     bool stat;
-    buf_set_read (&buf, str, strlen (str) + 1);
-    stat = tls_send_payload (c->c2.tls_multi, &buf);
+
+    /* buffered cleartext write onto TLS control channel */
+    stat = tls_send_payload (c->c2.tls_multi, str, strlen (str) + 1);
+
+    /* reschedule tls_multi_process */
     interval_action (&c->c2.tmp_int);
-    context_immediate_reschedule (c);
+    context_immediate_reschedule (c); /* ZERO-TIMEOUT */
+
     msg (msglevel, "SENT CONTROL [%s]: '%s' (status=%d)",
 	 tls_common_name (c->c2.tls_multi, false),
 	 str,
 	 (int) stat);
+
     return stat;
   }
 #endif
@@ -230,17 +236,27 @@ send_control_channel_string (struct context *c, char *str, int msglevel)
 /*
  * Add routes.
  */
+
+static void
+check_add_routes_action (struct context *c, const bool errors)
+{
+  do_route (&c->options, c->c1.route_list, c->c1.tuntap, c->c2.es);
+  update_time ();
+  event_timeout_clear (&c->c2.route_wakeup);
+  event_timeout_clear (&c->c2.route_wakeup_expire);
+  initialization_sequence_completed (c, errors);
+}
+
 void
 check_add_routes_dowork (struct context *c)
 {
-  if (test_routes (c->c1.route_list, c->c1.tuntap)
-      || event_timeout_trigger (&c->c2.route_wakeup_expire, &c->c2.timeval, ETT_DEFAULT))
+  if (test_routes (c->c1.route_list, c->c1.tuntap))
     {
-      do_route (&c->options, c->c1.route_list, c->c1.tuntap, c->c2.es);
-      update_time ();
-      event_timeout_clear (&c->c2.route_wakeup);
-      event_timeout_clear (&c->c2.route_wakeup_expire);
-      initialization_sequence_completed (c);
+      check_add_routes_action (c, false);
+    }
+  else if (event_timeout_trigger (&c->c2.route_wakeup_expire, &c->c2.timeval, ETT_DEFAULT))
+    {
+      check_add_routes_action (c, true);
     }
   else
     {
@@ -570,9 +586,9 @@ process_incoming_link (struct context *c)
 
   /* take action to corrupt packet if we are in gremlin test mode */
   if (c->options.gremlin) {
-    if (!ask_gremlin())
+    if (!ask_gremlin (c->options.gremlin))
       c->c2.buf.len = 0;
-    corrupt_gremlin (&c->c2.buf);
+    corrupt_gremlin (&c->c2.buf, c->options.gremlin);
   }
 
   /* log incoming packet */
@@ -844,7 +860,7 @@ process_outgoing_link (struct context *c)
       ASSERT (addr_defined (&c->c2.to_link_addr));
 
       /* In gremlin-test mode, we may choose to drop this packet */
-      if (!c->options.gremlin || ask_gremlin())
+      if (!c->options.gremlin || ask_gremlin (c->options.gremlin))
 	{
 	  /*
 	   * Let the traffic shaper know how many bytes

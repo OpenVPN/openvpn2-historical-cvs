@@ -191,6 +191,8 @@ struct link_socket
   uint8_t ptos;
   bool ptos_defined;
 #endif
+
+  int gremlin; /* --gremlin bits */
 };
 
 /*
@@ -250,7 +252,8 @@ link_socket_init_phase1 (struct link_socket *sock,
 			 int connect_retry_seconds,
 			 int mtu_discover_type,
 			 int rcvbuf,
-			 int sndbuf);
+			 int sndbuf,
+			 int gremlin);
 
 void link_socket_init_phase2 (struct link_socket *sock,
 			      const struct frame *frame,

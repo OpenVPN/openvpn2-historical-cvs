@@ -43,7 +43,8 @@
 #define L_GETTIMEOFDAY 8
 #define L_ENV_SET      9
 #define L_SYSTEM       10
-#define N_MUTEXES      11
+#define L_CREATE_TEMP  11
+#define N_MUTEXES      12
 
 #ifdef USE_PTHREAD
 

@@ -113,7 +113,7 @@ lzo_compress_init (struct lzo_compress_workspace *lzowork, bool adaptive)
   if (lzo_init () != LZO_E_OK)
     msg (M_FATAL, "Cannot initialize LZO compression library");
   lzowork->wmem = (lzo_voidp) lzo_malloc (lzowork->wmem_size);
-  CHECK_MALLOC_RETURN (lzowork->wmem);
+  check_malloc_return (lzowork->wmem);
   msg (M_INFO, "LZO compression initialized");
 }
 

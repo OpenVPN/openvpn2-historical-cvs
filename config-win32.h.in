@@ -55,7 +55,10 @@ typedef unsigned int ssize_t;
 #define TAP_WIN32_MIN_MAJOR 6
 #define TAP_WIN32_MIN_MINOR 11
 
-/* gettimeofday() is implemented in misc.c for Windows */
+/* Enable multiclient server capability */
+#define MULTICLIENT_SERVER_ENABLED 1
+
+/* gettimeofday() is implemented in otime.c for Windows */
 #define HAVE_GETTIMEOFDAY 1
 
 /* Define to 1 if you have the `chdir' function. */

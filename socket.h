@@ -34,6 +34,21 @@
 #include "proxy.h"
 #include "socks.h"
 
+#define REMOTE_LIST_SIZE 64
+
+struct remote_entry
+{
+  const char *hostname;
+  int port;
+};
+
+struct remote_list
+{
+  int len;
+  int current;
+  struct remote_entry array[REMOTE_LIST_SIZE];
+};
+
 /* 
  * packet_size_type is used communicate packet size
  * over the wire when stream oriented protocols are
@@ -56,6 +71,16 @@ struct link_socket_addr
   struct sockaddr_in actual; /* remote may change due to --float */
 };
 
+struct link_socket_info
+{
+  struct link_socket_addr *lsa;
+  bool connection_established;
+  const char *ipchange_command;
+  bool remote_float;  
+  int proto;                    /* Protocol (PROTO_x defined below) */
+  int mtu_changed;              /* Set to true when mtu value is changed */
+};
+
 /*
  * Used to extract packets encapsulated in streams into a buffer,
  * in this case IP packets embedded in a TCP stream.
@@ -76,6 +101,15 @@ struct stream_buf
 };
 
 /*
+ * Used to set socket buffer sizes
+ */
+struct socket_buffer_size
+{
+  int rcvbuf;
+  int sndbuf;
+};
+
+/*
  * This is the main socket structure used by OpenVPN.  The SOCKET_
  * defines try to abstract away our implementation differences between
  * using sockets on Posix vs. Win32.
@@ -83,60 +117,56 @@ struct stream_buf
 struct link_socket
 {
   /* if true, indicates a stream protocol returned more than one encapsulated packet */
-# define SOCKET_READ_RESIDUAL(s) ((s)->stream_buf.residual_fully_formed)
+# define SOCKET_READ_RESIDUAL(s) ((s) && (s)->stream_buf.residual_fully_formed)
 
 #ifdef WIN32
   /* these macros are called in the context of the openvpn() function */
-# define SOCKET_SET_READ(w, s) { if (stream_buf_read_setup (s)) { \
+# define SOCKET_SET_READ(w, s) { if ((s) && stream_buf_read_setup (s)) { \
                                    wait_add ((w), (s)->reads.overlapped.hEvent); \
                                    socket_recv_queue ((s), 0); }}
-# define SOCKET_SET_WRITE(w, s)  { wait_add ((w), (s)->writes.overlapped.hEvent); }
-# define SOCKET_ISSET(w, s, set) ( wait_trigger ((w), (s)->set.overlapped.hEvent))
-# define SOCKET_SETMAXFD(w, s)
-# define SOCKET_READ_STAT(w, s, gc)  (overlapped_io_state_ascii (&((s)->reads),  "sr", (gc)))
-# define SOCKET_WRITE_STAT(w, s, gc) (overlapped_io_state_ascii (&((s)->writes), "sw", (gc)))
+# define SOCKET_SET_WRITE(w, s)  { if (s)     wait_add ((w), (s)->writes.overlapped.hEvent); }
+# define SOCKET_ISSET(w, s, set) ( (s) && wait_trigger ((w), (s)->set.overlapped.hEvent))
+# define SOCKET_READ_STAT(w, s, gc)  ((s) ? overlapped_io_state_ascii (&((s)->reads),  "sr", (gc)) : "srU")
+# define SOCKET_WRITE_STAT(w, s, gc) ((s) ? overlapped_io_state_ascii (&((s)->writes), "sw", (gc)) : "swU")
   struct overlapped_io reads;
   struct overlapped_io writes;
 #else
   /* these macros are called in the context of the openvpn() function */
-# define SOCKET_SET_READ(w, s)  { if (stream_buf_read_setup (s)) wait_add_reads  ((w), (s)->sd); }
-# define SOCKET_SET_WRITE(w, s) {                                wait_add_writes ((w), (s)->sd); }
+# define SOCKET_SET_READ(w, s)  { if ((s) && stream_buf_read_setup (s)) wait_add_reads  ((w), (s)->sd); }
+# define SOCKET_SET_WRITE(w, s) { if  (s)                               wait_add_writes ((w), (s)->sd); }
 
-# define SOCKET_ISSET(w, s, set)      (wait_test_##set ((w), (s)->sd))
-# define SOCKET_READ_STAT(w, s, gc)   (   SOCKET_ISSET ((w), (s), reads)  ? "SR" : "sr")
-# define SOCKET_WRITE_STAT(w, s, gc)  (   SOCKET_ISSET ((w), (s), writes) ? "SW" : "sw")
+# define SOCKET_ISSET(w, s, set)      ((s) && wait_test_##set ((w), (s)->sd))
+# define SOCKET_READ_STAT(w, s, gc)   (          SOCKET_ISSET ((w), (s), reads)  ? "SR" : "sr")
+# define SOCKET_WRITE_STAT(w, s, gc)  (          SOCKET_ISSET ((w), (s), writes) ? "SW" : "sw")
 #endif
+
+  struct link_socket_info info;
 
   socket_descriptor_t sd;
   socket_descriptor_t ctrl_sd;  /* only used for UDP over Socks */
 
   /* set on initial call to init phase 1 */
-  const char *local_host;
+  struct remote_list *remote_list;
   const char *remote_host;
-  int local_port;
   int remote_port;
-  int proto;                    /* Protocol (PROTO_x defined below) */
+  const char *local_host;
+  int local_port;
   bool bind_local;
-  bool remote_float;
 
 # define INETD_NONE   0
 # define INETD_WAIT   1
 # define INETD_NOWAIT 2
   int inetd;
 
-  struct link_socket_addr *lsa;
-  const char *ipchange_command;
   int resolve_retry_seconds;
   int connect_retry_seconds;
   int mtu_discover_type;
 
+  struct socket_buffer_size socket_buffer_sizes;
+
   int mtu;                      /* OS discovered MTU, or 0 if unknown */
-  int mtu_changed;              /* Set to true when mtu value is changed */
 
   bool did_resolve_remote;
-
-# define CONNECTION_ESTABLISHED(ls) ((ls)->set_outgoing_initial)
-  bool set_outgoing_initial;
 
   /* for stream sockets */
   struct stream_buf stream_buf;
@@ -188,25 +218,26 @@ int socket_finalize (
 
 #endif
 
-void link_socket_reset (struct link_socket *sock);
+struct link_socket *link_socket_new (void);
 
-void link_socket_init_phase1 (struct link_socket *sock,
-			      const char *local_host,
-			      const char *remote_host,
-			      int local_port,
-			      int remote_port,
-			      int proto,
-			      struct http_proxy_info *http_proxy,
-			      struct socks_proxy_info *socks_proxy,
-			      bool bind_local,
-			      bool remote_float,
-			      int inetd,
-			      struct link_socket_addr *lsa,
-			      const char *ipchange_command,
-			      int resolve_retry_seconds,
-			      int connect_retry_seconds,
-			      int mtu_discover_type);
-
+void
+link_socket_init_phase1 (struct link_socket *sock,
+			 const char *local_host,
+			 struct remote_list *remote_list,
+			 int local_port,
+			 int proto,
+			 struct http_proxy_info *http_proxy,
+			 struct socks_proxy_info *socks_proxy,
+			 bool bind_local,
+			 bool remote_float,
+			 int inetd,
+			 struct link_socket_addr *lsa,
+			 const char *ipchange_command,
+			 int resolve_retry_seconds,
+			 int connect_retry_seconds,
+			 int mtu_discover_type,
+			 int rcvbuf,
+			 int sndbuf);
 
 void link_socket_init_phase2 (struct link_socket *sock,
 			      const struct frame *frame,
@@ -240,22 +271,22 @@ void setenv_in_addr_t (const char *name_prefix, in_addr_t addr);
 
 void bad_address_length (int actual, int expected);
 
-in_addr_t link_socket_current_remote (const struct link_socket *sock);
-
-void link_socket_inherit_passive (struct link_socket *dest, const struct link_socket *src, struct link_socket_addr *lsa);
+in_addr_t link_socket_current_remote (const struct link_socket_info *info);
 
 void link_socket_connection_initiated (const struct buffer *buf,
-				       struct link_socket *sock,
+				       struct link_socket_info *info,
 				       const struct sockaddr_in *addr,
 				       const char *common_name);
 
 void link_socket_bad_incoming_addr (struct buffer *buf,
-				    const struct link_socket *sock,
+				    const struct link_socket_info *info,
 				    const struct sockaddr_in *from_addr);
 
 void link_socket_bad_outgoing_addr (void);
 
-void setenv_trusted (struct link_socket *sock);
+void setenv_trusted (const struct link_socket_info *info);
+
+void remote_list_randomize (struct remote_list *l);
 
 /*
  * DNS resolution
@@ -327,7 +358,10 @@ link_socket_proto_connection_oriented (int proto)
 static inline bool
 link_socket_connection_oriented (const struct link_socket *sock)
 {
-  return link_socket_proto_connection_oriented (sock->proto);
+  if (sock)
+    return link_socket_proto_connection_oriented (sock->info.proto);
+  else
+    return false;
 }
 
 static inline bool
@@ -358,7 +392,7 @@ addr_port_match (const struct sockaddr_in *a1, const struct sockaddr_in *a2)
 static inline bool
 addr_match_proto (const struct sockaddr_in *a1,
 		  const struct sockaddr_in *a2,
-		  int proto)
+		  const int proto)
 {
   return link_socket_proto_connection_oriented (proto)
     ? addr_match (a1, a2)
@@ -383,7 +417,7 @@ socket_connection_reset (const struct link_socket *sock, int status)
 
 static inline bool
 link_socket_verify_incoming_addr (struct buffer *buf,
-				  const struct link_socket *sock,
+				  const struct link_socket_info *info,
 				  const struct sockaddr_in *from_addr)
 {
   if (buf->len > 0)
@@ -392,9 +426,9 @@ link_socket_verify_incoming_addr (struct buffer *buf,
 	return false;
       if (!addr_defined (from_addr))
 	return false;
-      if (sock->remote_float || !addr_defined (&sock->lsa->remote))
+      if (info->remote_float || !addr_defined (&info->lsa->remote))
 	return true;
-      if (addr_match_proto (from_addr, &sock->lsa->remote, sock->proto))
+      if (addr_match_proto (from_addr, &info->lsa->remote, info->proto))
 	return true;
     }
   else
@@ -405,12 +439,12 @@ link_socket_verify_incoming_addr (struct buffer *buf,
 
 static inline void
 link_socket_get_outgoing_addr (struct buffer *buf,
-			      const struct link_socket *sock,
+			      const struct link_socket_info *info,
 			      struct sockaddr_in *addr)
 {
   if (buf->len > 0)
     {
-      struct link_socket_addr *lsa = sock->lsa;
+      struct link_socket_addr *lsa = info->lsa;
       if (addr_defined (&lsa->actual))
 	{
 	  addr->sin_family = lsa->actual.sin_family;
@@ -427,24 +461,24 @@ link_socket_get_outgoing_addr (struct buffer *buf,
 
 static inline void
 link_socket_set_outgoing_addr (const struct buffer *buf,
-			       struct link_socket *sock,
+			       struct link_socket_info *info,
 			       const struct sockaddr_in *addr,
 			       const char *common_name)
 {
   if (!buf || buf->len > 0)
     {
-      struct link_socket_addr *lsa = sock->lsa;
+      struct link_socket_addr *lsa = info->lsa;
       if (
 	  /* new or changed address? */
-	  (!sock->set_outgoing_initial
-	   || !addr_match_proto (addr, &lsa->actual, sock->proto))
+	  (!info->connection_established
+	   || !addr_match_proto (addr, &lsa->actual, info->proto))
 	  /* address undef or address == remote or --float */
-	  && (sock->remote_float
+	  && (info->remote_float
 	      || !addr_defined (&lsa->remote)
-	      || addr_match_proto (addr, &lsa->remote, sock->proto))
+	      || addr_match_proto (addr, &lsa->remote, info->proto))
 	  )
 	{
-	  link_socket_connection_initiated (buf, sock, addr, common_name);
+	  link_socket_connection_initiated (buf, info, addr, common_name);
 	}
     }
 }
@@ -514,7 +548,7 @@ link_socket_read (struct link_socket *sock,
 		  int maxsize,
 		  struct sockaddr_in *from)
 {
-  if (sock->proto == PROTO_UDPv4)
+  if (sock->info.proto == PROTO_UDPv4)
     {
       int res;
 
@@ -525,10 +559,10 @@ link_socket_read (struct link_socket *sock,
 #endif
       return res;
     }
-  else if (sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT)
+  else if (sock->info.proto == PROTO_TCPv4_SERVER || sock->info.proto == PROTO_TCPv4_CLIENT)
     {
       /* from address was returned by accept */
-      *from = sock->lsa->actual;
+      *from = sock->info.lsa->actual;
       return link_socket_read_tcp (sock, buf);
     }
   else
@@ -627,11 +661,11 @@ link_socket_write (struct link_socket *sock,
 		   struct buffer *buf,
 		   struct sockaddr_in *to)
 {
-  if (sock->proto == PROTO_UDPv4)
+  if (sock->info.proto == PROTO_UDPv4)
     {
       return link_socket_write_udp (sock, buf, to);
     }
-  else if (sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT)
+  else if (sock->info.proto == PROTO_TCPv4_SERVER || sock->info.proto == PROTO_TCPv4_CLIENT)
     {
       return link_socket_write_tcp (sock, buf, to);
     }

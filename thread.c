@@ -133,6 +133,8 @@ openvpn_thread_init ()
   for (i = 0; i < N_MUTEXES; i++)
     ASSERT (!pthread_mutex_init (&mutex_array[i].mutex, NULL));
 
+  msg_thread_init ();
+
   pthread_initialized = true;
 }
 
@@ -143,6 +145,8 @@ openvpn_thread_cleanup ()
     {
       int i;
 
+      pthread_initialized = false;
+
       /* cleanup OpenSSL library locking */
 #if defined(USE_CRYPTO) && defined(USE_SSL)
       ssl_thread_cleanup();
@@ -152,7 +156,7 @@ openvpn_thread_cleanup ()
       for (i = 0; i < N_MUTEXES; i++)
 	ASSERT (!pthread_mutex_destroy (&mutex_array[i].mutex));
 
-      pthread_initialized = false;
+      msg_thread_uninit ();
     }
 }
 

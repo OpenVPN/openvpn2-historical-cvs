@@ -70,16 +70,17 @@
 #define D_ROUTE              LOGLEV(3, 32, 0)        /* show routes added and deleted */
 #define D_TUNTAP_INFO        LOGLEV(3, 33, 0)        /* show debugging info from TUN/TAP driver */
 #define D_RESTART            LOGLEV(3, 34, 0)        /* show certain restart messages */
+#define D_PUSH               LOGLEV(3, 35, 0)        /* show push/pull info */
+#define D_IFCONFIG_POOL      LOGLEV(3, 36, 0)        /* show ifconfig pool info */
+#define D_MULTI_LOW          LOGLEV(3, 37, 0)        /* show point-to-multipoint low-freq debug info */
+#define D_BACKTRACK          LOGLEV(3, 38, 0)        /* show replay backtracks */
 
-#define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
-#define D_SHOW_OCC           LOGLEV(4, 41, 0)        /* show options compatibility string */
-#define D_BACKTRACK          LOGLEV(4, 42, 0)        /* show replay backtracks */
+#define D_SHOW_PARMS         LOGLEV(4, 41, 0)        /* show all parameters on program initiation */
+#define D_SHOW_OCC           LOGLEV(4, 42, 0)        /* show options compatibility string */
 #define D_SEMAPHORE_LOW      LOGLEV(4, 43, 0)        /* show Win32 semaphore waits (low freq) */
 #define D_LOW                LOGLEV(4, 44, 0)        /* miscellaneous low-frequency debug info */
 #define D_DHCP_OPT           LOGLEV(4, 45, 0)        /* show DHCP options binary string */
-#define D_MULTI              LOGLEV(4, 46, 0)        /* show point-to-multipoint info */
-#define D_PUSH               LOGLEV(4, 47, 0)        /* show push/pull info */
-#define D_IFCONFIG_POOL      LOGLEV(4, 48, 0)        /* show ifconfig pool info */
+#define D_OSBUF              LOGLEV(4, 46, 0)        /* show socket/tun/tap buffer sizes */
 
 #define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 
@@ -97,6 +98,7 @@
 #define D_MULTI_DEBUG        LOGLEV(7, 70, M_DEBUG)  /* show medium-freq multi debugging info */
 #define D_MSS                LOGLEV(7, 70, M_DEBUG)  /* show MSS adjustments */
 #define D_COMP_LOW           LOGLEV(7, 70, M_DEBUG)  /* show adaptive compression state changes */
+#define D_REMOTE_LIST        LOGLEV(7, 70, M_DEBUG)  /* show --remote list */
 
 #define D_HANDSHAKE_VERBOSE  LOGLEV(8, 70, M_DEBUG)  /* show detailed description of each handshake */
 #define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* limited info from tls_session routines */

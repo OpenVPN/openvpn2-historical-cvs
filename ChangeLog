@@ -1,7 +1,35 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.24 2004/04/18 05:15:34 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.25 2004/04/29 06:19:45 jimyonan Exp $
+
+2004.04.28 -- Version 2.0-test26
+
+* Optimized broadcast path in multi-client mode.
+* Added socket buffer size options --rcvbuf & --sndbuf.
+* Configure Linux tun/tap driver to use a more sensible
+  txqueuelen default.  Also allow explicit setting
+  via --txqueuelen option (Harald Roelle).
+* The --remote option now allows the port number
+  to be specified as the second parameter.  If
+  unspecified, the port number defaults to the
+  --rport value.
+* Multiple --remote options on the client can now be
+  specified for load balancing and failover.  The
+  --remote-random flag can be used to initially randomize
+  the --remote list for basic load balancing.
+* If a remote DNS name resolves to multiple DNS addresses,
+  one will be chosen by random as a kind of basic
+  load-balancing feature if --remote-random is used.
+* Added --connect-freq option to control maximum
+  new connection frequency in multi-client mode.
+* In multi-client mode, all syslog messages associated
+  with a specific client now include a client-ID prefix.
+* For Windows, use a gettimeofday() function based
+  on QueryPerformanceCounter (Derek Burdick).
+* Fixed bug in interaction between --key-method 2
+  and DES ciphers, where dynamic keys would be generated
+  with bad parity and then be rejected.
 
 2004.04.17 -- Version 2.0-test24
 

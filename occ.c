@@ -35,6 +35,7 @@
 
 #include "memdbg.h"
 
+#include "forward-inline.h"
 #include "occ-inline.h"
 
 /*
@@ -153,7 +154,7 @@ check_send_occ_req_dowork (struct context *c)
 {
   if (++c->c2.occ_n_tries >= OCC_N_TRIES)
     {
-      if (c->options.remote)
+      if (c->options.remote_list)
 	/*
 	 * No OCC_REPLY from peer after repeated attempts.
 	 * Give up.
@@ -183,7 +184,7 @@ check_send_occ_req_dowork (struct context *c)
 void
 check_send_occ_load_test_dowork (struct context *c)
 {
-  if (CONNECTION_ESTABLISHED (&c->c2.link_socket))
+  if (CONNECTION_ESTABLISHED (c))
     {
       const struct mtu_load_test *entry;
 

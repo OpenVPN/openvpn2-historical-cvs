@@ -170,8 +170,9 @@ print_status (const struct context *c)
     lzo_print_stats (&c->c2.lzo_compwork);
 #endif
 #ifdef WIN32
-  msg (M_INFO, " TAP-WIN32 driver status: %s",
-       tap_win32_getinfo (&c->c1.tuntap, &gc));
+  if (tuntap_defined (c->c1.tuntap))
+    msg (M_INFO, " TAP-WIN32 driver status: %s",
+	 tap_win32_getinfo (c->c1.tuntap, &gc));
 #endif
   gc_free (&gc);
 }

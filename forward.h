@@ -45,8 +45,8 @@ void read_incoming_link (struct context *c);
 void process_incoming_link (struct context *c);
 void read_incoming_tun (struct context *c);
 void process_incoming_tun (struct context *c);
-void process_outgoing_link (struct context *c, struct link_socket *ls);
-void process_outgoing_tun (struct context *c, struct tuntap *tt);
+void process_outgoing_link (struct context *c);
+void process_outgoing_tun (struct context *c);
 
 bool send_control_channel_string (struct context *c, char *str);
 

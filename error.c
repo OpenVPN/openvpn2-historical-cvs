@@ -125,6 +125,7 @@ int x_msg_line_num; /* GLOBAL */
 
 void x_msg (unsigned int flags, const char *format, ...)
 {
+  struct gc_arena gc;
   va_list arglist;
 #if SYSLOG_CAPABILITY
   int level;
@@ -133,7 +134,8 @@ void x_msg (unsigned int flags, const char *format, ...)
   char *m2;
   char *tmp;
   int e;
-  struct gc_arena gc;
+  const char *prefix;
+  const char *prefix_sep;
 
   void usage_small (void);
 
@@ -226,32 +228,47 @@ void x_msg (unsigned int flags, const char *format, ...)
     level = LOG_NOTICE;
 #endif
 
+  /* set up client prefix */
+  prefix = msg_get_prefix ();
+  prefix_sep = " ";
+  if (!prefix)
+    prefix_sep = prefix = "";
+
   if (use_syslog && !std_redir)
     {
 #if SYSLOG_CAPABILITY
-      syslog (level, "%s", m1);
+      syslog (level, "%s%s%s",
+	      prefix,
+	      prefix_sep,
+	      m1);
 #endif
     }
   else
     {
       FILE *fp = msg_fp();
       const bool show_usec = check_debug_level (DEBUG_LEVEL_USEC_TIME - 1);
+
       if (flags & M_NOPREFIX)
 	{
-	  fprintf (fp, "%s\n", m1);
+	  fprintf (fp, "%s%s%s\n",
+		   prefix,
+		   prefix_sep,
+		   m1);
 	}
       else
 	{
 #ifdef USE_PTHREAD
-	  fprintf (fp, "%s %d[%d]: %s\n",
+	  fprintf (fp, "%s [%d] %s%s%s\n",
 		   time_string (0, 0, show_usec, &gc),
-		   x_msg_line_num,
 		   (int) openvpn_thread_self (),
+		   prefix,
+		   prefix_sep,
 		   m1);
 #else
-	  fprintf (fp, "%s %d: %s\n",
+	  fprintf (fp, "%s %s%s%s\n",
 		   time_string (0, 0, show_usec, &gc),
-		   x_msg_line_num,
+		   prefix,
+		   prefix_sep,
 		   m1);
 #endif
 	}
@@ -394,7 +411,7 @@ x_check_status (int status,
   const char *extended_msg = NULL;
 
   msg (x_cs_verbose_level, "%s %s returned %d",
-       sock ? proto2ascii (sock->proto, true) : "",
+       sock ? proto2ascii (sock->info.proto, true) : "",
        description,
        status);
 
@@ -410,7 +427,7 @@ x_check_status (int status,
 	  if (mtu > 0 && sock->mtu != mtu)
 	    {
 	      sock->mtu = mtu;
-	      sock->mtu_changed = true;
+	      sock->info.mtu_changed = true;
 	    }
 	}
 #elif defined(WIN32)
@@ -422,14 +439,14 @@ x_check_status (int status,
 	  if (extended_msg)
 	    msg (x_cs_info_level, "%s %s [%s]: %s (code=%d)",
 		 description,
-		 sock ? proto2ascii (sock->proto, true) : "",
+		 sock ? proto2ascii (sock->info.proto, true) : "",
 		 extended_msg,
 		 strerror_ts (my_errno, &gc),
 		 my_errno);
 	  else
 	    msg (x_cs_info_level, "%s %s: %s (code=%d)",
 		 description,
-		 sock ? proto2ascii (sock->proto, true) : "",
+		 sock ? proto2ascii (sock->info.proto, true) : "",
 		 strerror_ts (my_errno, &gc),
 		 my_errno);
 
@@ -439,6 +456,32 @@ x_check_status (int status,
 	}
       gc_free (&gc);
     }
+}
+
+/*
+ * In multiclient mode, put a client-specific prefix
+ * before each message.
+ */
+const char *x_msg_prefix; /* GLOBAL */
+
+#ifdef USE_PTHREAD
+pthread_key_t x_msg_prefix_key; /* GLOBAL */
+#endif
+
+void
+msg_thread_init (void)
+{
+#ifdef USE_PTHREAD
+  ASSERT (!pthread_key_create (&x_msg_prefix_key, NULL));
+#endif
+}
+
+void
+msg_thread_uninit (void)
+{
+#ifdef USE_PTHREAD
+  pthread_key_delete (x_msg_prefix_key);
+#endif
 }
 
 void

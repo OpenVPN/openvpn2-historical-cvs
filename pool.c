@@ -45,10 +45,11 @@ ifconfig_pool_init (int type, in_addr_t start, in_addr_t end)
 {
   struct gc_arena gc = gc_new ();
   struct ifconfig_pool *pool = NULL;
-  ASSERT (start <= end && end - start < IFCONFIG_POOL_MAX);
 
+  ASSERT (start <= end && end - start < IFCONFIG_POOL_MAX);
   ALLOC_OBJ (pool, struct ifconfig_pool);
 
+  mutex_init (&pool->mutex);
   pool->type = type;
 
   switch (type)
@@ -81,6 +82,7 @@ ifconfig_pool_free (struct ifconfig_pool *pool)
   if (pool)
     {
       free (pool->in_use);
+      mutex_destroy (&pool->mutex);
       free (pool);
     }
 }
@@ -89,6 +91,9 @@ ifconfig_pool_handle
 ifconfig_pool_acquire (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *remote)
 {
   ifconfig_pool_handle i;
+  int ret = -1;
+
+  mutex_lock (&pool->mutex);
   for (i = 0; i < pool->size; ++i)
     {
       if (!pool->in_use[i])
@@ -113,22 +118,26 @@ ifconfig_pool_acquire (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *
 	      ASSERT (0);
 	    }
 	  pool->in_use[i] = true;
-	  return i;
+	  ret = i;
+	  break;
 	}
     }
-  return -1;
+  mutex_unlock (&pool->mutex);
+  return ret;
 }
 
 bool
 ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand)
 {
+  bool ret = false;
+  mutex_lock (&pool->mutex);
   if (pool && hand >= 0 && hand < pool->size)
     {
       pool->in_use[hand] = false;
-      return true;
+      ret = true;;
     }
-  else
-    return false;
+  mutex_unlock (&pool->mutex);
+  return ret;
 }
 
 #ifdef IFCONFIG_POOL_TEST

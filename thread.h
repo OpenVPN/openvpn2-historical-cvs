@@ -106,8 +106,8 @@ mutex_unlock (pthread_mutex_t *mutex)
   if (pthread_initialized && mutex)
     {
       pthread_mutex_unlock (mutex);
-#if 1
-      sleep (0); /* if race conditions exist, make them more likely to occur */
+#if 1 /* JYFIXME: if race conditions exist, make them more likely to occur */
+      sleep (0);
 #endif
     }
 }

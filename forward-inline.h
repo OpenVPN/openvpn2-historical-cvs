@@ -51,7 +51,7 @@ check_tls_errors (struct context *c)
 {
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   void check_tls_errors_dowork (struct context *c);
-  if (c->c2.tls_multi && link_socket_connection_oriented (&c->c2.link_socket)
+  if (c->c2.tls_multi && link_socket_connection_oriented (c->c2.link_socket)
       && c->c2.tls_multi->n_errors)
     check_tls_errors_dowork (c);
 #endif
@@ -168,5 +168,23 @@ context_reschedule_sec (struct context *c, int sec)
       c->c2.timeval.tv_usec = 0;
     }
 }
+
+static inline struct link_socket_info *
+get_link_socket_info (struct context *c)
+{
+  if (c->c2.link_socket_info)
+    return c->c2.link_socket_info;
+  else
+    return &c->c2.link_socket->info;
+}
+
+static inline void
+register_activity (struct context *c)
+{
+  if (c->options.inactivity_timeout)
+    event_timeout_reset (&c->c2.inactivity_interval);
+}
+
+#define CONNECTION_ESTABLISHED(c) (get_link_socket_info(c)->connection_established)
 
 #endif /* EVENT_INLINE_H */

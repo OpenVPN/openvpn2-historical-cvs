@@ -79,7 +79,7 @@ void schedule_test (void);
 
 struct schedule_entry *schedule_find_least (struct schedule_entry *e);
 void schedule_add_modify (struct schedule *s, struct schedule_entry *e);
-
+void schedule_remove_node (struct schedule *s, struct schedule_entry *e);
 
 /* Public inline functions */
 
@@ -114,7 +114,7 @@ schedule_add_entry (struct schedule *s,
 /*
  * Return the the node with the earliest wakeup time.  If two
  * nodes have the exact same wakeup time, select based on
- * on the random priority assigned to each node (the priority
+ * the random priority assigned to each node (the priority
  * is randomized every time an entry is re-added).
  */
 static inline struct schedule_entry *

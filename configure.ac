@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [2.0_test24], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [2.0_test26], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -48,9 +48,15 @@ AC_ARG_ENABLE(ssl,
 )
 
 AC_ARG_ENABLE(pthread,
-   [  --enable-pthread        Compile pthread support for improved SSL/TLS latency],
+   [  --enable-pthread        Compile pthread support (Not implemented in 2.0)],
    [PTHREAD="$enableval"],
    [PTHREAD="no"]
+)
+
+AC_ARG_ENABLE(multi,
+   [  --disable-multi         Do not compile multi-client server support (--mode server)],
+   [MULTI="$enableval"],
+   [MULTI="yes"]
 )
 
 AC_ARG_ENABLE(strict,
@@ -432,6 +438,11 @@ dnl
       AC_DEFINE(USE_SSL, 1, [Use OpenSSL SSL library])
       OPENVPN_ADD_LIBS(-lssl)
    fi
+fi
+
+dnl enable multi-client mode
+if test "$MULTI" = "yes"; then
+   AC_DEFINE(MULTICLIENT_SERVER_ENABLED, 1, [Enable multiclient server capability])
 fi
 
 dnl enable strict compiler warnings

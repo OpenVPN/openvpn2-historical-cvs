@@ -88,6 +88,12 @@ struct tuntap_options {
   int nbdd_len;
 };
 
+#elif TARGET_LINUX
+
+struct tuntap_options {
+  int txqueuelen;
+};
+
 #else
 
 struct tuntap_options {
@@ -102,7 +108,7 @@ struct tuntap_options {
 
 struct tuntap
 {
-# define TUNNEL_TYPE(tt) ((tt)->type)
+# define TUNNEL_TYPE(tt) ((tt) ? ((tt)->type) : DEV_TYPE_UNDEF)
   int type; /* DEV_TYPE_x as defined in proto.h */
 
   bool did_ifconfig_setup;
@@ -113,6 +119,9 @@ struct tuntap
   struct tuntap_options options; /* options set on command line */
 
   char *actual_name; /* actual name of TUN/TAP dev, usually including unit number */
+
+  /* number of TX buffers */
+  int txqueuelen;
 
   /* ifconfig parameters */
   in_addr_t local;
@@ -143,6 +152,16 @@ struct tuntap
   int post_open_mtu;
 };
 
+static inline bool
+tuntap_defined (const struct tuntap *tt)
+{
+#ifdef WIN32
+  return tt && tt->hand != NULL;
+#else
+  return tt && tt->fd >= 0;
+#endif
+}
+
 /*
  * These macros are called in the context of the openvpn() function,
  * and help to abstract away the differences between Win32 and Posix.
@@ -151,31 +170,31 @@ struct tuntap
 #ifdef WIN32
 
 #define TUNTAP_SET_READ(w, tt)  \
-  { if ((tt)->hand != NULL) { \
+  { if (tuntap_defined(tt)) { \
       wait_add ((w), (tt)->reads.overlapped.hEvent); \
       tun_read_queue ((tt), 0); }}
 
 #define TUNTAP_SET_WRITE(w, tt) \
-  { if ((tt)->hand != NULL) \
+  { if (tuntap_defined(tt)) \
       wait_add ((w), (tt)->writes.overlapped.hEvent); }
 
 #define TUNTAP_ISSET(w, tt, set) \
-  ((tt)->hand != NULL \
+  (tuntap_defined(tt) \
   && wait_trigger ((w), (tt)->set.overlapped.hEvent))
 
 #define TUNTAP_READ_STAT(w, tt, gc) \
-   ((tt)->hand != NULL \
+   (tuntap_defined(tt) \
    ? overlapped_io_state_ascii (&((tt)->reads),  "tr", (gc)) : "trX")
 
 #define TUNTAP_WRITE_STAT(w, tt, gc) \
-   ((tt)->hand != NULL \
+   (tuntap_defined(tt) \
    ? overlapped_io_state_ascii (&((tt)->writes), "tw", (gc)) : "twX")
 
 #else
 
-#define TUNTAP_SET_READ(w, tt)      { wait_add_reads  ((w), (tt)->fd); }
-#define TUNTAP_SET_WRITE(w, tt)     { wait_add_writes ((w), (tt)->fd); }
-#define TUNTAP_ISSET(w, tt, set)    ( wait_test_##set ((w), (tt)->fd))
+#define TUNTAP_SET_READ(w, tt)      { if (tuntap_defined(tt)) wait_add_reads  ((w), (tt)->fd); }
+#define TUNTAP_SET_WRITE(w, tt)     { if (tuntap_defined(tt)) wait_add_writes ((w), (tt)->fd); }
+#define TUNTAP_ISSET(w, tt, set)    ( tuntap_defined(tt) &&  wait_test_##set ((w), (tt)->fd))
 #define TUNTAP_READ_STAT(w, tt, gc)     (TUNTAP_ISSET ((w), (tt), reads)  ? "TR" : "tr")
 #define TUNTAP_WRITE_STAT(w, tt, gc)    (TUNTAP_ISSET ((w), (tt), writes) ? "TW" : "tw")
 
@@ -204,15 +223,14 @@ const char *guess_tuntap_dev (const char *dev,
 			      const char *dev_node,
 			      struct gc_arena *gc);
 
-void init_tun (struct tuntap *tt,
-	       const char *dev,       /* --dev option */
-	       const char *dev_type,  /* --dev-type option */
-	       const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
-	       const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
-	       in_addr_t local_public,
-	       in_addr_t remote_public,
-	       const struct frame *frame,
-	       const struct tuntap_options *options);
+struct tuntap *init_tun (const char *dev,       /* --dev option */
+			 const char *dev_type,  /* --dev-type option */
+			 const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
+			 const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
+			 in_addr_t local_public,
+			 in_addr_t remote_public,
+			 const struct frame *frame,
+			 const struct tuntap_options *options);
 
 void do_ifconfig (struct tuntap *tt,
 		  const char *actual,    /* actual device name */
@@ -226,21 +244,9 @@ const char *dev_type_string (const char *dev, const char *dev_type);
 
 const char *ifconfig_options_string (const struct tuntap* tt, bool remote, bool disable, struct gc_arena *gc);
 
-void tuntap_inherit_passive (struct tuntap *dest, const struct tuntap *src);
-
 /*
  * Inline functions
  */
-
-static inline bool
-tuntap_defined (const struct tuntap* tt)
-{
-#ifdef WIN32
-  return tt->hand != NULL;
-#else
-  return tt->fd >= 0;
-#endif
-}
 
 static inline void
 tun_adjust_frame_parameters (struct frame* frame, int size)

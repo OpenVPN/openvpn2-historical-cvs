@@ -37,6 +37,7 @@
 #define MROUTE_EXTRACT_SUCCEEDED (1<<1)
 #define MROUTE_EXTRACT_BCAST     (1<<2)
 #define MROUTE_EXTRACT_MCAST     (1<<3)
+#define MROUTE_EXTRACT_IGMP      (1<<4)
 
 /*
  * Choose the largest address possible with

@@ -24,7 +24,7 @@ library for compression.
 %setup -q
 
 %build
-%configure --enable-pthread
+%configure
 %__make
 
 %install

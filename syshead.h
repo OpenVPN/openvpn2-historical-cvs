@@ -330,7 +330,7 @@ typedef int socket_descriptor_t;
  * Do we have point-to-multipoint capability?
  */
 
-#if defined(USE_CRYPTO) && defined(USE_SSL) && defined(HAVE_GETTIMEOFDAY)
+#if defined(MULTICLIENT_SERVER_ENABLED) && defined(USE_CRYPTO) && defined(USE_SSL) && defined(HAVE_GETTIMEOFDAY)
 #define P2MP 1
 #else
 #define P2MP 0

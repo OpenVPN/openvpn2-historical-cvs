@@ -85,21 +85,26 @@ mroute_extract_addr_from_packet (struct mroute_addr *src,
 		    }
 		  if (dest)
 		    {
+		      in_addr_t dest_addr;
 		      dest->type = MR_ADDR_IPV4;
 		      dest->len = 4;
 		      memcpy (dest->addr, &ip->daddr, 4);
+		      memcpy (&dest_addr, &ip->daddr, 4);
 
 		      /* mcast address? */
-		      if ((ntohl (ip->daddr) & IP_MCAST_SUBNET_MASK) == (unsigned long) IP_MCAST_NETWORK)
+		      if ((ntohl (dest_addr) & IP_MCAST_SUBNET_MASK) == (unsigned long) IP_MCAST_NETWORK)
 			ret |= MROUTE_EXTRACT_MCAST;
+
+		      /* IGMP message? */
+		      if (ip->protocol == OPENVPN_IPPROTO_IGMP)
+			ret |= MROUTE_EXTRACT_IGMP;
 		    }
-		  
 		  ret |= MROUTE_EXTRACT_SUCCEEDED;
 		}
 	      break;
 	    case 6:
 	      {
-		msg (M_WARN, "Need IPv6 code in mroute_extract_dest_addr_from_packet"); 
+		msg (M_WARN, "Need IPv6 code in mroute_extract_addr_from_packet"); 
 		break;
 	      }
 	    }
@@ -182,7 +187,7 @@ mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc)
   switch (maddr.type)
     {
     case MR_ADDR_ETHER:
-      buf_printf (&out, "Ether %s", format_hex_ex (ma->addr, 6, 0, 1, ":", gc)); 
+      buf_printf (&out, "%s", format_hex_ex (ma->addr, 6, 0, 1, ":", gc)); 
       break;
     case MR_ADDR_IPV4|MR_WITH_PORT:
       with_port = true;
@@ -195,7 +200,7 @@ mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc)
 	buf_set_read (&buf, maddr.addr, maddr.len);
 	addr = buf_read_u32 (&buf, &status);
 	if (status)
-	  buf_printf (&out, "IPv4 %s", print_in_addr_t (addr, true, gc));
+	  buf_printf (&out, "%s", print_in_addr_t (addr, true, gc));
 	if (with_port)
 	  {
 	    port = buf_read_u16 (&buf);

@@ -120,8 +120,10 @@ struct context_1
 {
   struct link_socket_addr link_socket_addr;
   struct key_schedule ks;
-  struct tuntap tuntap;
   struct packet_id_persist pid_persist;
+  struct remote_list *remote_list;
+  struct tuntap *tuntap;
+  bool tuntap_owned;
   struct route_list *route_list;
   struct http_proxy_info *http_proxy;
   struct socks_proxy_info *socks_proxy;
@@ -145,7 +147,10 @@ struct context_2
   bool ptos_defined;
 #endif
 
-  struct link_socket link_socket;	/* socket used for TCP/UDP connection to remote */
+  struct link_socket *link_socket;	/* socket used for TCP/UDP connection to remote */
+  bool link_socket_owned;
+  struct link_socket_info *link_socket_info;
+
   struct sockaddr_in to_link_addr;	/* IP address of remote */
   struct sockaddr_in from;              /* address of incoming datagram */
 
@@ -328,7 +333,8 @@ struct context
   /* context modes */
 # define CM_P2P     0 /* standalone point-to-point session */
 # define CM_TOP     1 /* top level of a multi-client or point-to-multipoint server */
-# define CM_CHILD   2 /* child context of a CM_TOP */
+# define CM_THREAD  2 /* clone of a CM_TOP context for one thread */
+# define CM_CHILD   3 /* child context of a CM_TOP or CM_THREAD */
   int mode;
 
   /* garbage collection for context scope

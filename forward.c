@@ -50,10 +50,10 @@ select_status_string (struct context *c, struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (64, gc);
   buf_printf (&out, "SELECT %s|%s|%s|%s %d/%d",
-	      TUNTAP_READ_STAT (&c->c2.event_wait, &c->c1.tuntap, gc),
-	      TUNTAP_WRITE_STAT (&c->c2.event_wait, &c->c1.tuntap, gc),
-	      SOCKET_READ_STAT (&c->c2.event_wait, &c->c2.link_socket, gc),
-	      SOCKET_WRITE_STAT (&c->c2.event_wait, &c->c2.link_socket, gc),
+	      TUNTAP_READ_STAT (&c->c2.event_wait, c->c1.tuntap, gc),
+	      TUNTAP_WRITE_STAT (&c->c2.event_wait, c->c1.tuntap, gc),
+	      SOCKET_READ_STAT (&c->c2.event_wait, c->c2.link_socket, gc),
+	      SOCKET_WRITE_STAT (&c->c2.event_wait, c->c2.link_socket, gc),
 	      (int) c->c2.timeval.tv_sec, (int) c->c2.timeval.tv_usec);
   return BSTR (&out);
 }
@@ -86,7 +86,7 @@ check_tls_dowork (struct context *c)
     {
       if (tls_multi_process
 	  (c->c2.tls_multi, &c->c2.to_link, &c->c2.to_link_addr,
-	   &c->c2.link_socket, &wakeup))
+	   get_link_socket_info (c), &wakeup))
 	{
 	  update_time ();
 	  interval_action (&c->c2.tmp_int);
@@ -177,7 +177,7 @@ check_connection_established_dowork (struct context *c)
 {
   if (event_timeout_trigger (&c->c2.wait_for_connect, &c->c2.timeval))
     {
-      if (CONNECTION_ESTABLISHED (&c->c2.link_socket))
+      if (CONNECTION_ESTABLISHED (c))
 	{
 #if P2MP
 	  /* if --pull was specified, send a push request to server */
@@ -212,7 +212,7 @@ send_control_channel_string (struct context *c, char *str)
     interval_action (&c->c2.tmp_int);
     context_immediate_reschedule (c);
     msg (D_PUSH, "SENT CONTROL [%s]: '%s' (status=%d)",
-	 tls_common_name (c->c2.tls_multi),
+	 tls_common_name (c->c2.tls_multi, false),
 	 str,
 	 (int) stat);
     return stat;
@@ -242,8 +242,7 @@ void
 check_inactivity_timeout_dowork (struct context *c)
 {
   struct gc_arena gc = gc_new ();
-  msg (M_INFO, "%sInactivity timeout (--inactive), exiting",
-       format_common_name (c, &gc));
+  msg (M_INFO, "Inactivity timeout (--inactive), exiting");
   c->sig->signal_received = SIGTERM;
   c->sig->signal_text = "inactive";
   gc_free (&gc);
@@ -255,12 +254,14 @@ check_inactivity_timeout_dowork (struct context *c)
 void
 check_fragment_dowork (struct context *c)
 {
+  struct link_socket_info *lsi = get_link_socket_info (c);
+
   /* OS MTU Hint? */
-  if (c->c2.link_socket.mtu_changed && c->c2.ipv4_tun)
+  if (lsi->mtu_changed && c->c2.ipv4_tun)
     {
-      frame_adjust_path_mtu (&c->c2.frame_fragment, c->c2.link_socket.mtu,
+      frame_adjust_path_mtu (&c->c2.frame_fragment, c->c2.link_socket->mtu,
 			     c->options.proto);
-      c->c2.link_socket.mtu_changed = false;
+      lsi->mtu_changed = false;
     }
 
   if (!c->c2.to_link.len
@@ -312,7 +313,7 @@ encrypt_sign (struct context *c, bool comp_frag)
   /*
    * Get the address we will be sending the packet to.
    */
-  link_socket_get_outgoing_addr (&c->c2.buf, &c->c2.link_socket,
+  link_socket_get_outgoing_addr (&c->c2.buf, get_link_socket_info (c),
 				 &c->c2.to_link_addr);
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
@@ -430,7 +431,7 @@ check_timeout_random_component (struct context *c)
 static inline void
 socks_postprocess_incoming_link (struct context *c)
 {
-  if (c->c2.link_socket.socks_proxy && c->c2.link_socket.proto == PROTO_UDPv4)
+  if (c->c2.link_socket->socks_proxy && c->c2.link_socket->info.proto == PROTO_UDPv4)
     socks_process_incoming_udp (&c->c2.buf, &c->c2.from);
 }
 
@@ -439,10 +440,10 @@ socks_preprocess_outgoing_link (struct context *c,
 				struct sockaddr_in **to_addr,
 				int *size_delta)
 {
-  if (c->c2.link_socket.socks_proxy && c->c2.link_socket.proto == PROTO_UDPv4)
+  if (c->c2.link_socket->socks_proxy && c->c2.link_socket->info.proto == PROTO_UDPv4)
     {
       *size_delta += socks_process_outgoing_udp (&c->c2.to_link, &c->c2.to_link_addr);
-      *to_addr = &c->c2.link_socket.socks_relay;
+      *to_addr = &c->c2.link_socket->socks_relay;
     }
 }
 
@@ -473,9 +474,9 @@ read_incoming_link (struct context *c)
 
   c->c2.buf = c->c2.buffers->read_link_buf;
   ASSERT (buf_init (&c->c2.buf, FRAME_HEADROOM (&c->c2.frame)));
-  status = link_socket_read (&c->c2.link_socket, &c->c2.buf, MAX_RW_SIZE_LINK (&c->c2.frame), &c->c2.from);
+  status = link_socket_read (c->c2.link_socket, &c->c2.buf, MAX_RW_SIZE_LINK (&c->c2.frame), &c->c2.from);
 
-  if (socket_connection_reset (&c->c2.link_socket, status))
+  if (socket_connection_reset (c->c2.link_socket, status))
     {
       /* received a disconnect from a connection-oriented protocol */
       if (c->options.inetd)
@@ -493,7 +494,7 @@ read_incoming_link (struct context *c)
     }
 
   /* check recvfrom status */
-  check_status (status, "read", &c->c2.link_socket, NULL);
+  check_status (status, "read", c->c2.link_socket, NULL);
 
   /* Remove socks header if applicable */
   socks_postprocess_incoming_link (c);
@@ -504,6 +505,7 @@ process_incoming_link (struct context *c)
 {
   struct gc_arena gc = gc_new ();
   bool decrypt_status;
+  struct link_socket_info *lsi = get_link_socket_info (c);
 
   if (c->c2.buf.len > 0)
     {
@@ -526,7 +528,7 @@ process_incoming_link (struct context *c)
     fprintf (stderr, "R");
 #endif
   msg (D_LINK_RW, "%s READ [%d] from %s: %s",
-       proto2ascii (c->c2.link_socket.proto, true),
+       proto2ascii (lsi->proto, true),
        BLEN (&c->c2.buf),
        print_sockaddr (&c->c2.from, &gc),
        PROTO_DUMP (&c->c2.buf, &gc));
@@ -540,8 +542,8 @@ process_incoming_link (struct context *c)
    */
   if (c->c2.buf.len > 0)
     {
-      if (!link_socket_verify_incoming_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from))
-	link_socket_bad_incoming_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from);
+      if (!link_socket_verify_incoming_addr (&c->c2.buf, lsi, &c->c2.from))
+	link_socket_bad_incoming_addr (&c->c2.buf, lsi, &c->c2.from);
 
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
@@ -579,7 +581,7 @@ process_incoming_link (struct context *c)
 	}
 #endif
       
-      if (!decrypt_status && link_socket_connection_oriented (&c->c2.link_socket))
+      if (!decrypt_status && link_socket_connection_oriented (c->c2.link_socket))
 	{
 	  /* decryption errors are fatal in TCP mode */
 	  c->sig->signal_received = SIGUSR1;
@@ -608,7 +610,7 @@ process_incoming_link (struct context *c)
        * Also, update the persisted version of our packet-id.
        */
       if (!TLS_MODE)
-	link_socket_set_outgoing_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from, NULL);
+	link_socket_set_outgoing_addr (&c->c2.buf, lsi, &c->c2.from, NULL);
 
       /* reset packet received timer */
       if (c->options.ping_rec_timeout && c->c2.buf.len > 0)
@@ -633,6 +635,10 @@ process_incoming_link (struct context *c)
 	process_received_occ_msg (c);
       
       c->c2.to_tun = c->c2.buf;
+
+      /* to_tun defined + unopened tuntap can cause deadlock */
+      if (!tuntap_defined (c->c1.tuntap))
+	c->c2.to_tun.len = 0;
     }
   else
     {
@@ -652,11 +658,11 @@ read_incoming_tun (struct context *c)
 
   c->c2.buf = c->c2.buffers->read_tun_buf;
 #ifdef TUN_PASS_BUFFER
-  read_tun_buffered (&c->c1.tuntap, &c->c2.buf, MAX_RW_SIZE_TUN (&c->c2.frame));
+  read_tun_buffered (c->c1.tuntap, &c->c2.buf, MAX_RW_SIZE_TUN (&c->c2.frame));
 #else
   ASSERT (buf_init (&c->c2.buf, FRAME_HEADROOM (&c->c2.frame)));
   ASSERT (buf_safe (&c->c2.buf, MAX_RW_SIZE_TUN (&c->c2.frame)));
-  c->c2.buf.len = read_tun (&c->c1.tuntap, BPTR (&c->c2.buf), MAX_RW_SIZE_TUN (&c->c2.frame));
+  c->c2.buf.len = read_tun (c->c1.tuntap, BPTR (&c->c2.buf), MAX_RW_SIZE_TUN (&c->c2.frame));
 #endif
 
   /* Was TUN/TAP interface stopped? */
@@ -669,7 +675,7 @@ read_incoming_tun (struct context *c)
     }
 
   /* Check the status return from read() */
-  check_status (c->c2.buf.len, "read from TUN/TAP", NULL, &c->c1.tuntap);
+  check_status (c->c2.buf.len, "read from TUN/TAP", NULL, c->c1.tuntap);
 }
 
 void
@@ -704,7 +710,7 @@ process_incoming_tun (struct context *c)
 	  )
 	{
 	  struct buffer ipbuf = c->c2.buf;
-	  if (is_ipv4 (TUNNEL_TYPE (&c->c1.tuntap), &ipbuf))
+	  if (is_ipv4 (TUNNEL_TYPE (c->c1.tuntap), &ipbuf))
 	    {
 #if PASSTOS_CAPABILITY
 	      /* extract TOS from IP header */
@@ -732,7 +738,7 @@ process_incoming_tun (struct context *c)
 }
 
 void
-process_outgoing_link (struct context *c, struct link_socket *ls)
+process_outgoing_link (struct context *c)
 {
   struct gc_arena gc = gc_new ();
 
@@ -766,7 +772,7 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
 #if PASSTOS_CAPABILITY
 	  /* Set TOS */
 	  if (c->c2.ptos_defined)
-	    setsockopt (ls->sd, IPPROTO_IP, IP_TOS, &c->c2.ptos, sizeof (c->c2.ptos));
+	    setsockopt (c->c2.link_socket->sd, IPPROTO_IP, IP_TOS, &c->c2.ptos, sizeof (c->c2.ptos));
 #endif
 
 	  /* Log packet send */
@@ -775,7 +781,7 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
 	    fprintf (stderr, "W");
 #endif
 	  msg (D_LINK_RW, "%s WRITE [%d] to %s: %s",
-	       proto2ascii (ls->proto, true),
+	       proto2ascii (c->c2.link_socket->info.proto, true),
 	       BLEN (&c->c2.to_link),
 	       print_sockaddr (&c->c2.to_link_addr, &gc),
 	       PROTO_DUMP (&c->c2.to_link, &gc));
@@ -789,7 +795,7 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
 	    socks_preprocess_outgoing_link (c, &to_addr, &size_delta);
 
 	    /* Send packet */
-	    size = link_socket_write (ls, &c->c2.to_link, to_addr);
+	    size = link_socket_write (c->c2.link_socket, &c->c2.to_link, to_addr);
 
 	    /* Undo effect of prepend */
 	    link_socket_write_post_size_adjust (&size, size_delta, &c->c2.to_link);
@@ -805,7 +811,7 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
 	size = 0;
 
       /* Check return status */
-      check_status (size, "write", ls, NULL);
+      check_status (size, "write", c->c2.link_socket, NULL);
 
       if (size > 0)
 	{
@@ -820,10 +826,11 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
     }
   else
     {
-      msg (D_LINK_ERRORS, "TCP/UDP packet too large on write to %s (tried=%d,max=%d)",
-	   print_sockaddr (&c->c2.to_link_addr, &gc),
-	   c->c2.to_link.len,
-	   EXPANDED_SIZE (&c->c2.frame));
+      if (c->c2.to_link.len > 0)
+	msg (D_LINK_ERRORS, "TCP/UDP packet too large on write to %s (tried=%d,max=%d)",
+	     print_sockaddr (&c->c2.to_link_addr, &gc),
+	     c->c2.to_link.len,
+	     EXPANDED_SIZE (&c->c2.frame));
     }
 
   buf_reset (&c->c2.to_link);
@@ -832,7 +839,7 @@ process_outgoing_link (struct context *c, struct link_socket *ls)
 }
 
 void
-process_outgoing_tun (struct context *c, struct tuntap *tt)
+process_outgoing_tun (struct context *c)
 {
   struct gc_arena gc = gc_new ();
 
@@ -850,7 +857,7 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
     {
       struct buffer ipbuf = c->c2.to_tun;
 
-      if (is_ipv4 (tt->type, &ipbuf))
+      if (is_ipv4 (c->c1.tuntap->type, &ipbuf))
 	{
 	  /* possibly alter the TCP MSS */
 	  if (c->options.mssfix)
@@ -875,14 +882,14 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
 	   MD5SUM (BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun), &gc));
 
 #ifdef TUN_PASS_BUFFER
-      size = write_tun_buffered (tt, &c->c2.to_tun);
+      size = write_tun_buffered (c->c1.tuntap, &c->c2.to_tun);
 #else
-      size = write_tun (tt, BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun));
+      size = write_tun (c->c1.tuntap, BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun));
 #endif
 
       if (size > 0)
 	c->c2.tun_write_bytes += size;
-      check_status (size, "write to TUN/TAP", NULL, tt);
+      check_status (size, "write to TUN/TAP", NULL, c->c1.tuntap);
 
       /* check written packet size */
       if (size > 0)
@@ -891,7 +898,7 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
 	  if (size != BLEN (&c->c2.to_tun))
 	    msg (D_LINK_ERRORS,
 		 "TUN/TAP packet was fragmented on write to %s (tried=%d,actual=%d)",
-		 tt->actual_name,
+		 c->c1.tuntap->actual_name,
 		 BLEN (&c->c2.to_tun),
 		 size);
 	}
@@ -912,8 +919,7 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
    * if the remote goes away, even if we are trying to send data to the
    * remote and failing.
    */
-  if (c->options.inactivity_timeout)
-    event_timeout_reset (&c->c2.inactivity_interval);
+  register_activity (c);
 
   buf_reset (&c->c2.to_tun);
 
@@ -935,8 +941,8 @@ pre_select (struct context *c)
 
 #if defined(WIN32) && defined(TAP_WIN32_DEBUG)
   c->c2.timeval.tv_sec = 1;
-  if (check_debug_level (D_TAP_WIN32_DEBUG))
-    tun_show_debug (&c->c1.tuntap);
+  if (tuntap_defined (c->c1.tuntap) && check_debug_level (D_TAP_WIN32_DEBUG))
+    tun_show_debug (c->c1.tuntap);
 #endif
 
   /* check coarse timers? */
@@ -1003,19 +1009,19 @@ single_select (struct context *c)
 
       if (delay < 1000)
 	{
-	  SOCKET_SET_WRITE (&c->c2.event_wait, &c->c2.link_socket);
+	  SOCKET_SET_WRITE (&c->c2.event_wait, c->c2.link_socket);
 	}
       else
 	{
 	  shaper_soonest_event (&c->c2.timeval, delay);
 	}
 #else /* HAVE_GETTIMEOFDAY */
-      SOCKET_SET_WRITE (&c->c2.event_wait, &c->c2.link_socket);
+      SOCKET_SET_WRITE (&c->c2.event_wait, c->c2.link_socket);
 #endif /* HAVE_GETTIMEOFDAY */
     }
   else if (!c->c2.fragment || !fragment_outgoing_defined (c->c2.fragment))
     {
-      TUNTAP_SET_READ (&c->c2.event_wait, &c->c1.tuntap);
+      TUNTAP_SET_READ (&c->c2.event_wait, c->c1.tuntap);
     }
 
   /*
@@ -1024,11 +1030,11 @@ single_select (struct context *c)
    */
   if (c->c2.to_tun.len > 0)
     {
-      TUNTAP_SET_WRITE (&c->c2.event_wait, &c->c1.tuntap);
+      TUNTAP_SET_WRITE (&c->c2.event_wait, c->c1.tuntap);
     }
   else
     {
-      SOCKET_SET_READ (&c->c2.event_wait, &c->c2.link_socket);
+      SOCKET_SET_READ (&c->c2.event_wait, c->c2.link_socket);
     }
 
   /*
@@ -1048,7 +1054,7 @@ single_select (struct context *c)
    * Wait for something to happen.
    */
   c->c2.select_status = 1;	/* this will be our return "status" if select doesn't get called */
-  if (!c->sig->signal_received && !SOCKET_READ_RESIDUAL (&c->c2.link_socket))
+  if (!c->sig->signal_received && !SOCKET_READ_RESIDUAL (c->c2.link_socket))
     {
       if (check_debug_level (D_SELECT))
 	show_select_status (c);
@@ -1070,27 +1076,24 @@ process_io (struct context *c)
   if (c->c2.select_status > 0)
     {
       /* TCP/UDP port ready to accept write */
-      if (SOCKET_ISSET (&c->c2.event_wait, &c->c2.link_socket, writes))
+      if (SOCKET_ISSET (&c->c2.event_wait, c->c2.link_socket, writes))
 	{
-	  process_outgoing_link (c, &c->c2.link_socket);
+	  process_outgoing_link (c);
 	}
       /* TUN device ready to accept write */
-      else if (TUNTAP_ISSET (&c->c2.event_wait, &c->c1.tuntap, writes))
+      else if (TUNTAP_ISSET (&c->c2.event_wait, c->c1.tuntap, writes))
 	{
-	  process_outgoing_tun (c, &c->c1.tuntap);
+	  process_outgoing_tun (c);
 	}
       /* Incoming data on TCP/UDP port */
-      else if (SOCKET_READ_RESIDUAL (&c->c2.link_socket) || SOCKET_ISSET (&c->c2.event_wait, &c->c2.link_socket, reads))
+      else if (SOCKET_READ_RESIDUAL (c->c2.link_socket) || SOCKET_ISSET (&c->c2.event_wait, c->c2.link_socket, reads))
 	{
 	  read_incoming_link (c);
 	  if (!IS_SIG (c))
 	    process_incoming_link (c);
-	  /* JYFIXME -- to_tun defined + unopened tuntap can cause deadlock, move to end of process_incoming_link */
-	  if (!tuntap_defined (&c->c1.tuntap))
-	    c->c2.to_tun.len = 0;
 	}
       /* Incoming data on TUN device */
-      else if (TUNTAP_ISSET (&c->c2.event_wait, &c->c1.tuntap, reads))
+      else if (TUNTAP_ISSET (&c->c2.event_wait, c->c1.tuntap, reads))
 	{
 	  read_incoming_tun (c);
 	  if (!IS_SIG (c))

@@ -35,6 +35,7 @@
 #include "mtu.h"
 #include "route.h"
 #include "tun.h"
+#include "socket.h"
 
 /*
  * Maximum number of parameters associated with an option,
@@ -92,10 +93,11 @@ struct options
 
   /* Networking parms */
   const char *local;
-  const char *remote;
   int local_port;
   int remote_port;
   bool remote_float;
+  struct remote_list *remote_list;
+  bool remote_random;
   const char *ipchange;
   bool bind_local;
   const char *dev;
@@ -179,6 +181,10 @@ struct options
   bool comp_lzo_adaptive;
 #endif
 
+  /* buffer sizes */
+  int rcvbuf;
+  int sndbuf;
+
   /* route management */
   const char *route_script;
   const char *route_default_gateway;
@@ -225,6 +231,8 @@ struct options
   in_addr_t push_ifconfig_local;
   in_addr_t push_ifconfig_remote_netmask;
   bool enable_c2c;
+  int cf_max;
+  int cf_per;
 #endif
 
 #ifdef USE_CRYPTO

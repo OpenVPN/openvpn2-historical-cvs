@@ -99,29 +99,105 @@ time_string (time_t t, int usec, bool show_usec, struct gc_arena *gc)
   return BSTR (&out);
 }
 
+/*
+ * Limit the frequency of an event stream.
+ *
+ * Used to control maximum rate of new
+ * incoming connections.
+ */
+
+struct frequency_limit *
+frequency_limit_init (int max, int per)
+{
+  struct frequency_limit *f;
+
+  ASSERT (max >= 0 && per >= 0);
+
+  ALLOC_OBJ (f, struct frequency_limit);
+  mutex_init (&f->mutex);
+  f->max = max;
+  f->per = per;
+  f->n = 0;
+  f->reset = 0;
+  return f;
+}
+
+void
+frequency_limit_free (struct frequency_limit *f)
+{
+  mutex_destroy (&f->mutex);
+  free (f);
+}
+
+bool
+frequency_limit_event_allowed (struct frequency_limit *f)
+{
+  if (f->per)
+    {
+      bool ret;
+      mutex_lock (&f->mutex);
+      if (now >= f->reset + f->per)
+	{
+	  f->reset = now;
+	  f->n = 0;
+	}
+      ret = (++f->n <= f->max);
+      mutex_unlock (&f->mutex);
+      return ret;
+    }
+  else
+    return true;
+}
+
 #ifdef WIN32
 
-static time_t boot_time;         /* GLOBAL */
-static DWORD prev_ms_since_boot; /* GLOBAL */
+static double counterPerMicrosecond = -1.0;            /* GLOBAL */
+static unsigned __int64 frequency = 0;                 /* GLOBAL */
+static unsigned __int64 timeSecOffset = 0;             /* GLOBAL */
+static unsigned __int64 startPerformanceCounter = 0;   /* GLOBAL */
 
+/*
+ * gettimeofday for windows
+ *
+ * CounterPerMicrosecond is the number of counts per microsecond.
+ * Double is required if we have less than 1 counter per microsecond.  This has not been tested.
+ * On a PIII 700, I get about 3.579545.  This is guaranteed not to change while the processor is running.
+ * We really don't need to check for loop detection.  On my machine it would take about 59645564 days to loop.
+ * (2^64) / frequency / 60 / 60 / 24.
+ *
+ */
 int
-gettimeofday (struct timeval *tv, void *tz)
+gettimeofday(struct timeval *tv, void *tz)
 {
-  const DWORD ms_since_boot = timeGetTime ();
+  unsigned __int64 counter;
 
-  mutex_lock_static (L_GETTIMEOFDAY);
+  QueryPerformanceCounter((LARGE_INTEGER *) &counter);
 
-  if (!boot_time || ms_since_boot < prev_ms_since_boot)
-    boot_time = time (NULL) - ms_since_boot / 1000;
+  if (counter < startPerformanceCounter || counterPerMicrosecond == -1.0)
+    {
+      time_t t;
+      mutex_lock (L_GETTIMEOFDAY);
 
-  tv->tv_sec = boot_time + ms_since_boot / 1000;
-  tv->tv_usec = (ms_since_boot % 1000) * 1000;
+      QueryPerformanceFrequency((LARGE_INTEGER *) &frequency);
 
-  prev_ms_since_boot = ms_since_boot;
+      counterPerMicrosecond = (double)frequency / 1000000.0f;
 
-  mutex_lock_static (L_GETTIMEOFDAY);
+      time(&t);
+      QueryPerformanceCounter((LARGE_INTEGER *) &counter);
+      startPerformanceCounter = counter;
+
+      counter /= frequency;
+
+      timeSecOffset = t - counter;
+
+      mutex_unlock (L_GETTIMEOFDAY);
+      QueryPerformanceCounter((LARGE_INTEGER *) &counter);
+    }
+
+  tv->tv_sec = (counter / frequency) + timeSecOffset;
+  tv->tv_usec = ((__int64)(counter / counterPerMicrosecond) % 1000000);
 
   return 0;
 }
 
-#endif
+#endif /* WIN32 */

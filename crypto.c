@@ -625,6 +625,7 @@ check_key_DES (struct key *key, const struct key_type *kt, int ndc)
   struct buffer b;
 
   buf_set_read (&b, key->cipher, kt->cipher_length);
+
   for (i = 0; i < ndc; ++i)
     {
       DES_cblock *dc = (DES_cblock*) buf_read_alloc (&b, sizeof (DES_cblock));

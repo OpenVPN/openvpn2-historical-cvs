@@ -120,8 +120,11 @@ lzo_compress_init (struct lzo_compress_workspace *lzowork, bool adaptive)
 void
 lzo_compress_uninit (struct lzo_compress_workspace *lzowork)
 {
-  lzo_free (lzowork->wmem);
-  lzowork->wmem = NULL;
+  if (lzowork)
+    {
+      lzo_free (lzowork->wmem);
+      lzowork->wmem = NULL;
+    }
 }
 
 /* Magic numbers to tell our peer if we compressed or not */

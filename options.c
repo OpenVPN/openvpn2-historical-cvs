@@ -80,7 +80,8 @@ static const char usage_message[] =
   "\n"
   "Tunnel Options:\n"
   "--local host    : Local host name or ip address.\n"
-  "--remote host   : Remote host name or ip address.\n"
+  "--remote host [port] : Remote host name or ip address.\n"
+  "--remote-random : If multiple --remote options specified, choose one randomly.\n"
   "--mode m        : Major mode, m = 'p2p' (default, point-to-point) or 'server'.\n"
   "--proto p       : Use protocol p for communicating with peer.\n"
   "                  p = udp (default), tcp-server, or tcp-client\n"
@@ -104,9 +105,9 @@ static const char usage_message[] =
   "--lport port    : TCP/UDP port # for local (default=%d).\n"
   "--rport port    : TCP/UDP port # for remote (default=%d).\n"
   "--nobind        : Do not bind to local address and port.\n"
-  "--dev tunX|tapX : TUN/TAP device (X can be omitted for dynamic device.\n"
+  "--dev tunX|tapX : tun/tap device (X can be omitted for dynamic device.\n"
   "--dev-type dt   : Which device type are we using? (dt = tun or tap) Use\n"
-  "                  this option only if the TUN/TAP device used with --dev\n"
+  "                  this option only if the tun/tap device used with --dev\n"
   "                  does not begin with \"tun\" or \"tap\".\n"
   "--dev-node node : Explicitly set the device node rather than using\n"
   "                  /dev/net/tun, /dev/tun, /dev/tap, etc.\n"
@@ -138,22 +139,22 @@ static const char usage_message[] =
   "                     redirect all outgoing IP traffic through the VPN.\n"
   "--setenv name value : Set a custom environmental variable to pass to script.\n"
   "--shaper n      : Restrict output to peer to n bytes per second.\n"
-  "--inactive n    : Exit after n seconds of inactivity on TUN/TAP device.\n"
+  "--inactive n    : Exit after n seconds of inactivity on tun/tap device.\n"
   "--ping-exit n   : Exit if n seconds pass without reception of remote ping.\n"
   "--ping-restart n: Restart if n seconds pass without reception of remote ping.\n"
   "--ping-timer-rem: Run the --ping-exit/--ping-restart timer only if we have a\n"
   "                  remote address.\n"
   "--ping n        : Ping remote once every n seconds over TCP/UDP port.\n"
-  "--persist-tun   : Keep TUN/TAP device open across SIGUSR1 or --ping-restart.\n"
+  "--persist-tun   : Keep tun/tap device open across SIGUSR1 or --ping-restart.\n"
   "--persist-remote-ip : Keep remote IP address across SIGUSR1 or --ping-restart.\n"
   "--persist-local-ip  : Keep local IP address across SIGUSR1 or --ping-restart.\n"
   "--persist-key   : Don't re-read key files across SIGUSR1 or --ping-restart.\n"
 #if PASSTOS_CAPABILITY
   "--passtos       : TOS passthrough (applies to IPv4 only).\n"
 #endif
-  "--tun-mtu n     : Take the TUN/TAP device MTU to be n and derive the\n"
+  "--tun-mtu n     : Take the tun/tap device MTU to be n and derive the\n"
   "                  TCP/UDP MTU from it (default=%d).\n"
-  "--tun-mtu-extra n : Assume that TUN/TAP device might return as many\n"
+  "--tun-mtu-extra n : Assume that tun/tap device might return as many\n"
   "                  as n bytes more than the tun-mtu size on read\n"
   "                  (default TUN=0 TAP=%d).\n"
   "--link-mtu n    : Take the TCP/UDP device MTU to be n and derive the tun MTU\n"
@@ -168,13 +169,16 @@ static const char usage_message[] =
   "                  Adds 4 bytes of overhead per datagram.\n"
   "--mssfix [n]    : Set upper bound on TCP MSS, default = tun-mtu size\n"
   "                  or --fragment max value, whichever is lower.\n"
+  "--sndbuf size   : Set the TCP/UDP send buffer size.\n"
+  "--rcvbuf size   : Set the TCP/UDP receive buffer size.\n"
+  "--txqueuelen n  : Set the tun/tap TX queue length to n (Linux only).\n"
   "--mlock         : Disable Paging -- ensures key material and tunnel\n"
   "                  data will never be written to disk.\n"
   "--up cmd        : Shell cmd to execute after successful tun device open.\n"
-  "                  Execute as: cmd TUN/TAP-dev tun-mtu link-mtu \\\n"
+  "                  Execute as: cmd tun/tap-dev tun-mtu link-mtu \\\n"
   "                              ifconfig-local-ip ifconfig-remote-ip\n"
   "                  (pre --user or --group UID/GID change)\n"
-  "--up-delay      : Delay TUN/TAP open and possible --up script execution\n"
+  "--up-delay      : Delay tun/tap open and possible --up script execution\n"
   "                  until after TCP/UDP connection establishment with peer.\n"
   "--down cmd      : Shell cmd to run after tun device close.\n"
   "                  (post --user/--group UID/GID change and/or --chroot)\n"
@@ -210,7 +214,7 @@ static const char usage_message[] =
   "                       adaptive compress info\n"
   "                : 4 -- show parameters\n"
   "                : 5 -- show 'RrWw' chars on console for each packet sent\n"
-  "                       and received from TCP/UDP (caps) or TUN/TAP (lc)\n"
+  "                       and received from TCP/UDP (caps) or tun/tap (lc)\n"
   "                : 6 to 11 -- debug messages of increasing verbosity\n"
   "--mute n        : Log at most n consecutive messages in the same category.\n"
   "--gremlin       : Simulate dropped & corrupted packets + network outages\n"
@@ -244,7 +248,8 @@ static const char usage_message[] =
   "--tmp-dir dir   : Temporary directory, used for --client-connect return file.\n"
   "--hash-size r v : Set the size of the real address hash table to r and the\n"
   "                  virtual address table to v.\n"
-  "--nbuf n :        Allocate n broadcast buffers.\n"
+  "--bcast-buffers n : Allocate n broadcast buffers.\n"
+  "--connect-freq n s : Allow a maximum of n new connections per s seconds.\n"
   "\n"
   "Client options (when connecting to a multi-client server):\n"
   "--pull          : Accept certain config file options from the peer as if they\n"
@@ -373,10 +378,10 @@ static const char usage_message[] =
 #endif				/* USE_CRYPTO */
 #ifdef TUNSETPERSIST
   "\n"
-  "TUN/TAP config mode (available with linux 2.4+):\n"
+  "Tun/tap config mode (available with linux 2.4+):\n"
   "--mktun         : Create a persistent tunnel.\n"
   "--rmtun         : Remove a persistent tunnel.\n"
-  "--dev tunX|tapX : TUN/TAP device\n"
+  "--dev tunX|tapX : tun/tap device\n"
   "--dev-type dt   : Device type.  See tunnel options above for details.\n"
 #endif
  ;
@@ -405,8 +410,13 @@ init_options (struct options *o)
   o->mtu_discover_type = -1;
   o->occ = true;
   o->mssfix = MSSFIX_DEFAULT;
+  o->rcvbuf = 65536;
+  o->sndbuf = 65536;
 #ifdef USE_LZO
   o->comp_lzo_adaptive = true;
+#endif
+#ifdef TARGET_LINUX
+  o->tuntap_options.txqueuelen = 100;
 #endif
 #ifdef WIN32
   o->tuntap_options.ip_win32_type = IPW32_SET_DHCP_MASQ;
@@ -419,7 +429,7 @@ init_options (struct options *o)
 #if P2MP
   o->real_hash_size = 256;
   o->virtual_hash_size = 256;
-  o->n_bcast_buf = 64;
+  o->n_bcast_buf = 256;
 #endif
 #ifdef USE_CRYPTO
   o->ciphername = "BF-CBC";
@@ -461,8 +471,10 @@ setenv_settings (const struct options *o)
   setenv_str ("proto", proto2ascii (o->proto, false));
   setenv_str ("local", o->local);
   setenv_int ("local_port", o->local_port);
+#if 0 // JYFIXME
   setenv_str ("remote", o->remote);
   setenv_int ("remote_port", o->remote_port);
+#endif
 }
 
 static in_addr_t
@@ -501,7 +513,8 @@ is_persist_option (const struct options *o)
   return o->persist_tun
       || o->persist_key
       || o->persist_local_ip
-      || o->persist_remote_ip;
+      || o->persist_remote_ip
+      || (o->remote_list && o->remote_list->len > 1);
 }
 
 #ifdef WIN32
@@ -584,6 +597,8 @@ show_p2mp_parms (const struct options *o)
   msg (D_SHOW_PARMS, "  push_ifconfig_local = %s", print_in_addr_t (o->push_ifconfig_local, false, &gc));
   msg (D_SHOW_PARMS, "  push_ifconfig_remote_netmask = %s", print_in_addr_t (o->push_ifconfig_remote_netmask, false, &gc));
   SHOW_BOOL (enable_c2c);
+  SHOW_INT (cf_max);
+  SHOW_INT (cf_per);
   gc_free (&gc);
 }
 
@@ -624,6 +639,24 @@ option_iroute (struct options *o,
 }
 
 #endif
+
+static void
+show_remote_list (const struct remote_list *l)
+{
+  if (l)
+    {
+      int i;
+      for (i = 0; i < l->len; ++i)
+	{
+	  msg (D_SHOW_PARMS, "  remote_list[%d] = {'%s', %d}",
+	       i, l->array[i].hostname, l->array[i].port);
+	}
+    }
+  else
+    {
+      msg (D_SHOW_PARMS, "  remote_list = NULL");
+    }
+}
 
 void
 options_detach (struct options *o)
@@ -673,7 +706,8 @@ show_settings (const struct options *o)
 
   SHOW_INT (proto);
   SHOW_STR (local);
-  SHOW_STR (remote);
+  show_remote_list (o->remote_list);
+  SHOW_BOOL (remote_random);
 
   SHOW_INT (local_port);
   SHOW_INT (remote_port);
@@ -740,6 +774,9 @@ show_settings (const struct options *o)
   SHOW_BOOL (gremlin);
 
   SHOW_BOOL (occ);
+
+  SHOW_INT (rcvbuf);
+  SHOW_INT (sndbuf);
 
   SHOW_STR (http_proxy_server);
   SHOW_INT (http_proxy_port);
@@ -832,6 +869,7 @@ options_postprocess (struct options *options, bool first_time)
   struct options defaults;
   int dev = DEV_TYPE_UNDEF;
   bool pull = false;
+  int i;
 
   init_options (&defaults);
 
@@ -849,6 +887,19 @@ options_postprocess (struct options *options, bool first_time)
    */
   dev = dev_type_enum (options->dev, options->dev_type);
 
+  /*
+   * Fill in default port number for --remote list
+   */
+  if (options->remote_list)
+    {
+      for (i = 0; i < options->remote_list->len; ++i)
+	{
+	  struct remote_entry *e = &options->remote_list->array[i];
+	  if (e->port < 0)
+	    e->port = options->remote_port;
+	}
+    }
+
   /* will we be pulling options from server? */
 #if P2MP
   pull = options->pull;
@@ -861,7 +912,7 @@ options_postprocess (struct options *options, bool first_time)
   if (options->daemon && options->inetd)
     msg (M_USAGE, "Options error: only one of --daemon or --inetd may be specified");
 
-  if (options->inetd && (options->local || options->remote))
+  if (options->inetd && (options->local || options->remote_list))
     msg (M_USAGE, "Options error: --local or --remote cannot be used with --inetd");
 
   if (options->inetd && options->proto == PROTO_TCPv4_CLIENT)
@@ -921,15 +972,30 @@ options_postprocess (struct options *options, bool first_time)
   /*
    * Sanity check on --local, --remote, and ifconfig
    */
-  if (string_defined_equal (options->local, options->remote)
-      && options->local_port == options->remote_port)
-    msg (M_USAGE, "Options error: --remote and --local addresses are the same");
+
+  if (options->remote_list)
+    {
+      int i;
+      struct remote_list *l = options->remote_list;
+
+      for (i = 0; i < l->len; ++i)
+	{
+	  const char *remote = l->array[i].hostname;
+	  const int remote_port = l->array[i].port;
+
+	  if (string_defined_equal (options->local, remote)
+	      && options->local_port == remote_port)
+	    msg (M_USAGE, "Options error: --remote and --local addresses are the same");
 	
+	  if (string_defined_equal (remote, options->ifconfig_local)
+	      || string_defined_equal (remote, options->ifconfig_remote_netmask))
+	    msg (M_USAGE, "Options error: --local and --remote addresses must be distinct from --ifconfig addresses");
+	}
+    }
+
   if (string_defined_equal (options->local, options->ifconfig_local)
-      || string_defined_equal (options->local, options->ifconfig_remote_netmask)
-      || string_defined_equal (options->remote, options->ifconfig_local)
-      || string_defined_equal (options->remote, options->ifconfig_remote_netmask))
-    msg (M_USAGE, "Options error: --local and --remote addresses must be distinct from --ifconfig addresses");
+      || string_defined_equal (options->local, options->ifconfig_remote_netmask))
+    msg (M_USAGE, "Options error: --local addresses must be distinct from --ifconfig addresses");
 
   if (string_defined_equal (options->ifconfig_local, options->ifconfig_remote_netmask))
     msg (M_USAGE, "Options error: local and remote/netmask --ifconfig addresses must be different");
@@ -967,7 +1033,7 @@ options_postprocess (struct options *options, bool first_time)
   if (options->proto != PROTO_UDPv4 && options->fragment)
     msg (M_USAGE, "Options error: --fragment can only be used with --proto udp");
 
-  if (!options->remote && options->proto == PROTO_TCPv4_CLIENT)
+  if (!options->remote_list && options->proto == PROTO_TCPv4_CLIENT)
     msg (M_USAGE, "Options error: --remote MUST be used in TCP Client mode");
 
   if (options->http_proxy_server && options->proto != PROTO_TCPv4_CLIENT)
@@ -985,6 +1051,8 @@ options_postprocess (struct options *options, bool first_time)
    */
   if (options->mode == MODE_SERVER)
     {
+      if (!(dev == DEV_TYPE_TUN || dev == DEV_TYPE_TAP))
+	msg (M_USAGE, "Options error: --mode server only works with --dev tun or --dev tap");
       if (options->pull)
 	msg (M_USAGE, "Options error: --pull cannot be used with --mode server");
       if (options->proto != PROTO_UDPv4)
@@ -992,7 +1060,15 @@ options_postprocess (struct options *options, bool first_time)
       if (!options->tls_server)
 	msg (M_USAGE, "Options error: --mode server requires --tls-server");
       if (options->tls_auth_file)
-	msg (M_USAGE, "Options error: --tls-auth can not be used with --mode server");
+	msg (M_USAGE, "Options error: --tls-auth cannot be used with --mode server");
+      if (options->remote_list)
+	msg (M_USAGE, "Options error: --remote cannot be used with --mode server");
+      if (options->http_proxy_server || options->socks_proxy_server)
+	msg (M_USAGE, "Options error: --http-proxy or --socks-proxy cannot be used with --mode server");
+      if (options->tun_ipv6)
+	msg (M_USAGE, "Options error: --tun-ipv6 cannot be used with --mode server");
+      if (options->shaper)
+	msg (M_USAGE, "Options error: --shaper cannot be used with --mode server");
 
 #ifdef WIN32
       /*
@@ -1021,6 +1097,8 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --client-config-dir requires --mode server");
       if (options->enable_c2c)
 	msg (M_USAGE, "Options error: --client-to-client requires --mode server");
+      if (options->cf_max || options->cf_per)
+	msg (M_USAGE, "Options error: --connect-freq requires --mode server");
     }
 #endif
 
@@ -1764,11 +1842,33 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->local = p[1];
     }
+  else if (streq (p[0], "remote-random"))
+    {
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->remote_random = true;
+    }
   else if (streq (p[0], "remote") && p[1])
     {
+      struct remote_list *l;
+      struct remote_entry e;
       ++i;
       VERIFY_PERMISSION (OPT_P_GENERAL);
-      options->remote = p[1];
+      if (!options->remote_list)
+	ALLOC_OBJ_CLEAR_GC (options->remote_list, struct remote_list, &options->gc);
+      l = options->remote_list;
+      if (l->len >= REMOTE_LIST_SIZE)
+	msg (msglevel, "Options Error: Maximum number of --remote options (%d) exceeded", REMOTE_LIST_SIZE);
+      e.hostname = p[1];
+      if (p[2])
+	{
+	  ++i;
+	  e.port = atoi (p[2]);
+	  if (e.port < 1 || e.port > 65535)
+	    msg (msglevel, "Options Error: port number associated with host %s is out of range", e.hostname);
+	}
+      else
+	e.port = -1;
+      l->array[l->len++] = e;
     }
   else if (streq (p[0], "resolv-retry") && p[1])
     {
@@ -2005,6 +2105,28 @@ add_option (struct options *options,
       ++i;
       VERIFY_PERMISSION (OPT_P_NICE);
       options->nice = atoi (p[1]);
+    }
+  else if (streq (p[0], "rcvbuf") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->rcvbuf = positive (atoi (p[1]));
+    }
+  else if (streq (p[0], "sndbuf") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->sndbuf = positive (atoi (p[1]));
+    }
+  else if (streq (p[0], "txqueuelen") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+#ifdef TARGET_LINUX
+      options->tuntap_options.txqueuelen = positive (atoi (p[1]));
+#else
+      msg (msglevel, "Options error: --txqueuelen not supported on this OS");
+#endif
     }
 #ifdef USE_PTHREAD
   else if (streq (p[0], "nice-work") && p[1])
@@ -2307,6 +2429,18 @@ add_option (struct options *options,
 	  goto err;
 	}
     }
+  else if (streq (p[0], "connect-freq") && p[1] && p[2])
+    {
+      i += 2;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->cf_max = atoi (p[1]);
+      options->cf_per = atoi (p[2]);
+      if (options->cf_max < 0 || options->cf_per < 0)
+	{
+	  msg (msglevel, "Options error: --connect-freq parms must be > 0");
+	  goto err;
+	}
+    }
   else if (streq (p[0], "client-connect") && p[1])
     {
       ++i;
@@ -2331,13 +2465,13 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->client_config_dir = p[1];
     }
-  else if (streq (p[0], "nbuf") && p[1])
+  else if (streq (p[0], "bcast-buffers") && p[1])
     {
       ++i;
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->n_bcast_buf = atoi (p[1]);
       if (options->n_bcast_buf < 1)
-	msg (msglevel, "Options Error: --nbuf parameter must be > 0");
+	msg (msglevel, "Options Error: --bcast-buffers parameter must be > 0");
     }
   else if (streq (p[0], "client-to-client"))
     {

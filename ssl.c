@@ -528,13 +528,15 @@ get_max_tls_verify_id (struct tls_multi* multi)
 }
 
 const char *
-tls_common_name (struct tls_multi* multi)
+tls_common_name (struct tls_multi* multi, bool null)
 {
   const char *ret = NULL;
   if (multi)
     ret = multi->session[TM_ACTIVE].common_name;
   if (ret)
     return ret;
+  else if (null)
+    return NULL;
   else
     return "UNDEF";
 }
@@ -1773,6 +1775,7 @@ generate_key_expansion (struct key_ctx_bi *key,
   /* check for weak keys */
   for (i = 0; i < 2; ++i)
     {
+      fixup_key (&key2.keys[i], key_type);
       if (!check_key (&key2.keys[i], key_type))
 	{
 	  msg (D_TLS_ERRORS, "TLS Error: Bad dynamic key generated");
@@ -1899,7 +1902,7 @@ tls_process (struct tls_multi *multi,
 	     struct tls_session *session,
 	     struct buffer *to_link,
 	     struct sockaddr_in *to_link_addr,
-	     struct link_socket *to_link_socket,
+	     struct link_socket_info *to_link_socket_info,
 	     interval_t *wakeup)
 {
   struct gc_arena gc = gc_new ();
@@ -2019,7 +2022,7 @@ tls_process (struct tls_multi *multi,
 		  INCR_SUCCESS;
 
 		  /* Set outgoing address for data channel packets */
-		  link_socket_set_outgoing_addr (NULL, to_link_socket, &ks->remote_addr, session->common_name);
+		  link_socket_set_outgoing_addr (NULL, to_link_socket_info, &ks->remote_addr, session->common_name);
 
 #ifdef MEASURE_TLS_HANDSHAKE_STATS
 		  show_tls_performance_stats();
@@ -2420,7 +2423,7 @@ bool
 tls_multi_process (struct tls_multi *multi,
 		   struct buffer *to_link,
 		   struct sockaddr_in *to_link_addr,
-		   struct link_socket *to_link_socket,
+		   struct link_socket_info *to_link_socket_info,
 		   interval_t *wakeup)
 {
   struct gc_arena gc = gc_new ();
@@ -2440,8 +2443,8 @@ tls_multi_process (struct tls_multi *multi,
 
       /* set initial remote address */
       if (i == TM_ACTIVE && ks->state == S_INITIAL &&
-	  addr_defined (&to_link_socket->lsa->actual))
-	ks->remote_addr = to_link_socket->lsa->actual;
+	  addr_defined (&to_link_socket_info->lsa->actual))
+	ks->remote_addr = to_link_socket_info->lsa->actual;
 
       msg (D_TLS_DEBUG,
 	   "TLS: tls_multi_process: i=%d state=%s, mysid=%s, stored-sid=%s, stored-ip=%s",
@@ -2456,7 +2459,7 @@ tls_multi_process (struct tls_multi *multi,
 	  update_time ();
 
 	  if (tls_process (multi, session, to_link, to_link_addr,
-			   to_link_socket, wakeup))
+			   to_link_socket_info, wakeup))
 	    active = true;
 
 	  /*

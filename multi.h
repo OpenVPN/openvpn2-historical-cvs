@@ -35,13 +35,19 @@
 #include "schedule.h"
 #include "pool.h"
 
+/*
+ * One multi_instance object per client instance.
+ */
 struct multi_instance {
   struct schedule_entry se;    /* this must be the first element of the structure */
+  MUTEX_DEFINE (mutex);
   bool defined;
+  bool halt;
   time_t created;
   struct timeval wakeup;       /* absolute time */
   struct mroute_addr real;
   ifconfig_pool_handle vaddr_handle;
+  const char *msg_prefix;
   struct gc_arena gc;
 
   bool did_open_context;
@@ -52,29 +58,60 @@ struct multi_instance {
   struct context context;
 };
 
+/*
+ * One multi_context object per server daemon.
+ */
 struct multi_context {
-  struct multi_instance *link_out;
-  struct multi_instance *link_out_bcast;
-  struct multi_instance *tun_out;
-  struct multi_instance *earliest_wakeup;
   struct hash *hash;   /* indexed by real address */
   struct hash *vhash;  /* indexed by virtual address */
   struct hash *iter;   /* like real address hash but optimized for iteration */
   struct schedule *schedule;
   struct mbuf_set *mbuf;
   struct ifconfig_pool *ifconfig_pool;
+  struct frequency_limit *new_connection_limiter;
 
   bool enable_c2c;
 };
 
-void tunnel_server (struct context *top);
+/*
+ * One multi_thread object per thread.
+ */
+struct multi_thread {
+  struct multi_context *multi; /* shared between all threads */
+  struct multi_instance *link_out;
+  struct multi_instance *link_out_bcast;
+  struct multi_instance *tun_out;
+  struct multi_instance *earliest_wakeup;  
+  struct context_buffers *context_buffers;
+  struct context top;
+};
 
-void multi_init (struct multi_context *m, struct context *t);
-void multi_select (struct multi_context *m, struct context *t);
-void multi_print_status (struct multi_context *m, struct context *t);
-void multi_process_io (struct multi_context *m, struct context *t);
-void multi_process_timeout (struct multi_context *m, struct context *t);
-void multi_uninit (struct multi_context *m);
+void tunnel_server_single_threaded (struct context *top);
+
+#ifdef USE_PTHREAD
+void tunnel_server_multi_threaded (struct context *top);
+#endif
+
+const char *multi_instance_string (struct multi_instance *mi, bool null, struct gc_arena *gc);
+
+void multi_bcast (struct multi_context *m,
+		  const struct buffer *buf,
+		  struct multi_instance *omit);
+
+/*
+ * Add a mbuf buffer to a particular
+ * instance.
+ */
+static inline void
+multi_add_mbuf (struct multi_context *m,
+		struct multi_instance *mi,
+		struct mbuf_buffer *mb)
+{
+  struct mbuf_item item;
+  item.buffer = mb;
+  item.instance = mi;
+  mbuf_add_item (m->mbuf, &item);
+}
 
 #endif /* P2MP */
 #endif /* MULTI_H */

@@ -45,6 +45,7 @@ mbuf_init (unsigned int size)
 {
   struct mbuf_set *ret;
   ALLOC_OBJ_CLEAR (ret, struct mbuf_set);
+  mutex_init (&ret->mutex);
   ret->capacity = adjust_power_of_2 (size);
   ALLOC_ARRAY (ret->array, struct mbuf_item, ret->capacity);
   return ret;
@@ -60,6 +61,7 @@ mbuf_free (struct mbuf_set *ms)
       mbuf_free_buf (item->buffer);
     }
   free (ms->array);
+  mutex_destroy (&ms->mutex);
   free (ms);
 }
 
@@ -86,10 +88,12 @@ mbuf_free_buf (struct mbuf_buffer *mb)
 void
 mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item)
 {
+  mutex_lock (&ms->mutex);
+
   if (ms->len == ms->capacity)
     {
       struct mbuf_item rm;
-      ASSERT (mbuf_extract_item (ms, &rm));
+      ASSERT (mbuf_extract_item_lock (ms, &rm, false));
       mbuf_free_buf (rm.buffer);
       msg (D_MULTI_ERRORS, "MULTI: mbuf packet dropped");
     }
@@ -97,8 +101,11 @@ mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item)
   ASSERT (ms->len < ms->capacity);
 
   ms->array[MBUF_INDEX(ms->head, ms->len, ms->capacity)] = *item;
-  ++ms->len;
+  if (++ms->len > ms->max_queued)
+    ms->max_queued = ms->len;
   ++item->buffer->refcount;
+
+  mutex_unlock (&ms->mutex);
 }
 
 #else

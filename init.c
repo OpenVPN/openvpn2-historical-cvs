@@ -35,7 +35,6 @@
 #include "init.h"
 #include "sig.h"
 #include "occ.h"
-#include "schedule.h"
 #include "list.h"
 #include "otime.h"
 
@@ -69,16 +68,39 @@ context_clear_all_except_first_time (struct context *c)
   c->first_time = first_time_save;
 }
 
+/*
+ * Initialize and possibly randomize remote list.
+ */
+static void
+init_remote_list (struct context *c)
+{
+  c->c1.remote_list = NULL;
+
+  if (c->options.remote_list)
+    {
+      struct remote_list *l;
+      ALLOC_OBJ_GC (c->c1.remote_list, struct remote_list, &c->gc);
+      l = c->c1.remote_list;
+      *l = *c->options.remote_list;
+      l->current = -1;
+      if (c->options.remote_random)
+	remote_list_randomize (l);
+    }
+}
+
 void
 context_init_1 (struct context *c)
 {
   CLEAR (c->c1.link_socket_addr);
-  clear_tuntap (&c->c1.tuntap);
   CLEAR (c->c1.ks);
   packet_id_persist_init (&c->c1.pid_persist);
+  c->c1.tuntap = NULL;
+  c->c1.tuntap_owned = false;
   c->c1.route_list = NULL;
   c->c1.http_proxy = NULL;
   c->c1.socks_proxy = NULL;
+
+  init_remote_list (c);
 
   if (c->options.http_proxy_server)
     {
@@ -173,12 +195,19 @@ uninit_static (void)
 }
 
 void
-init_verb_mute (const struct options *options)
+init_verb_mute (struct context *c, unsigned int flags)
 {
-  /* set verbosity and mute levels */
-  set_check_status (D_LINK_ERRORS, D_READ_WRITE);
-  set_debug_level (options->verbosity);
-  set_mute_cutoff (options->mute);
+  if (flags & IVM_LEVEL_1)
+    {
+      /* set verbosity and mute levels */
+      set_check_status (D_LINK_ERRORS, D_READ_WRITE);
+      set_debug_level (c->options.verbosity);
+      set_mute_cutoff (c->options.mute);
+    }
+
+  /* special D_LOG_RW mode */
+  if (flags & IVM_LEVEL_2)
+    c->c2.log_rw = (check_debug_level (D_LOG_RW) && !check_debug_level (D_LOG_RW + 1));
 }
 
 /*
@@ -252,14 +281,14 @@ do_genkey (const struct options * options)
  * Persistent TUN/TAP device management mode?
  */
 bool
-do_persist_tuntap (const struct options * options)
+do_persist_tuntap (const struct options *options)
 {
 #ifdef TUNSETPERSIST
   if (options->persist_config)
     {
       /* sanity check on options for --mktun or --rmtun */
       notnull (options->dev, "TUN/TAP device (--dev)");
-      if (options->remote || options->ifconfig_local
+      if (options->remote_list || options->ifconfig_local
 	  || options->ifconfig_remote_netmask
 #ifdef USE_CRYPTO
 	  || options->shared_secret_file
@@ -307,7 +336,7 @@ format_common_name (struct context *c, struct gc_arena *gc)
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   if (c->c2.tls_multi)
     {
-      buf_printf (&out, "[%s] ", tls_common_name (c->c2.tls_multi));
+      buf_printf (&out, "[%s] ", tls_common_name (c->c2.tls_multi, false));
     }
 #endif
   return BSTR (&out);
@@ -422,7 +451,8 @@ do_alloc_route_list (struct context *c)
 static void
 do_init_route_list (const struct options *options,
 		    struct route_list *route_list,
-		    struct link_socket *link_socket, bool fatal)
+		    const struct link_socket_info *link_socket_info,
+		    bool fatal)
 {
   const char *gw = NULL;
   int dev = dev_type_enum (options->dev, options->dev_type);
@@ -434,7 +464,7 @@ do_init_route_list (const struct options *options,
 
   if (!init_route_list (route_list,
 			options->routes,
-			gw, link_socket_current_remote (link_socket)))
+			gw, link_socket_current_remote (link_socket_info)))
     {
       if (fatal)
 	openvpn_exit (OPENVPN_EXIT_STATUS_ERROR);	/* exit point */
@@ -468,15 +498,15 @@ do_route (const struct options *options, struct route_list *route_list)
 static void
 do_init_tun (struct context *c)
 {
-  init_tun (&c->c1.tuntap,
-	    c->options.dev,
-	    c->options.dev_type,
-	    c->options.ifconfig_local,
-	    c->options.ifconfig_remote_netmask,
-	    addr_host (&c->c2.link_socket.lsa->local),
-	    addr_host (&c->c2.link_socket.lsa->remote),
-	    &c->c2.frame,
-	    &c->options.tuntap_options);
+  c->c1.tuntap = init_tun (c->options.dev,
+			   c->options.dev_type,
+			   c->options.ifconfig_local,
+			   c->options.ifconfig_remote_netmask,
+			   addr_host (&c->c1.link_socket_addr.local),
+			   addr_host (&c->c1.link_socket_addr.remote),
+			   &c->c2.frame,
+			   &c->options.tuntap_options);
+  c->c1.tuntap_owned = true;
 }
 
 /*
@@ -492,7 +522,7 @@ do_open_tun (struct context *c)
   c->c2.ipv4_tun = (!c->options.tun_ipv6
 		    && is_dev_type (c->options.dev, c->options.dev_type, "tun"));
 
-  if (!tuntap_defined (&c->c1.tuntap))
+  if (!c->c1.tuntap)
     {
       /* initialize (but do not open) tun/tap object */
       do_init_tun (c);
@@ -501,8 +531,8 @@ do_open_tun (struct context *c)
       do_alloc_route_list (c);
 
       /* parse and resolve the route option list */
-      if (c->c1.route_list)
-	do_init_route_list (&c->options, c->c1.route_list, &c->c2.link_socket, true);
+      if (c->c1.route_list && c->c2.link_socket)
+	do_init_route_list (&c->options, c->c1.route_list, &c->c2.link_socket->info, true);
 
       /* do ifconfig */
       if (!c->options.ifconfig_noexec
@@ -514,27 +544,27 @@ do_open_tun (struct context *c)
 						c->options.dev_type,
 						c->options.dev_node,
 						&gc);
-	  do_ifconfig (&c->c1.tuntap, guess, TUN_MTU_SIZE (&c->c2.frame));
+	  do_ifconfig (c->c1.tuntap, guess, TUN_MTU_SIZE (&c->c2.frame));
 	}
 
       /* open the tun device */
       open_tun (c->options.dev, c->options.dev_type, c->options.dev_node,
-		c->options.tun_ipv6, &c->c1.tuntap);
+		c->options.tun_ipv6, c->c1.tuntap);
 
       /* do ifconfig */
       if (!c->options.ifconfig_noexec
 	  && ifconfig_order () == IFCONFIG_AFTER_TUN_OPEN)
 	{
-	  do_ifconfig (&c->c1.tuntap, c->c1.tuntap.actual_name, TUN_MTU_SIZE (&c->c2.frame));
+	  do_ifconfig (c->c1.tuntap, c->c1.tuntap->actual_name, TUN_MTU_SIZE (&c->c2.frame));
 	}
 
       /* run the up script */
       run_script (c->options.up_script,
-		  c->c1.tuntap.actual_name,
+		  c->c1.tuntap->actual_name,
 		  TUN_MTU_SIZE (&c->c2.frame),
 		  EXPANDED_SIZE (&c->c2.frame),
-		  print_in_addr_t (c->c1.tuntap.local, true, &gc),
-		  print_in_addr_t (c->c1.tuntap.remote_netmask, true, &gc),
+		  print_in_addr_t (c->c1.tuntap->local, true, &gc),
+		  print_in_addr_t (c->c1.tuntap->remote_netmask, true, &gc),
 		  "init", NULL, "up");
 
       /* possibly add routes */
@@ -544,9 +574,9 @@ do_open_tun (struct context *c)
       /*
        * Did tun/tap driver give us an MTU?
        */
-      if (c->c1.tuntap.post_open_mtu)
+      if (c->c1.tuntap->post_open_mtu)
 	frame_set_mtu_dynamic (&c->c2.frame,
-			       c->c1.tuntap.post_open_mtu,
+			       c->c1.tuntap->post_open_mtu,
 			       SET_MTU_TUN | SET_MTU_UPPER_BOUND);
 
       ret = true;
@@ -554,16 +584,16 @@ do_open_tun (struct context *c)
   else
     {
       msg (M_INFO, "Preserving previous TUN/TAP instance: %s",
-	   c->c1.tuntap.actual_name);
+	   c->c1.tuntap->actual_name);
 
       /* run the up script if user specified --up-restart */
       if (c->options.up_restart)
 	run_script (c->options.up_script,
-		    c->c1.tuntap.actual_name,
+		    c->c1.tuntap->actual_name,
 		    TUN_MTU_SIZE (&c->c2.frame),
 		    EXPANDED_SIZE (&c->c2.frame),
-		    print_in_addr_t (c->c1.tuntap.local, true, &gc),
-		    print_in_addr_t (c->c1.tuntap.remote_netmask, true, &gc),
+		    print_in_addr_t (c->c1.tuntap->local, true, &gc),
+		    print_in_addr_t (c->c1.tuntap->remote_netmask, true, &gc),
 		    "restart", NULL, "up");
     }
   gc_free (&gc);
@@ -592,7 +622,7 @@ do_deferred_options (struct context *c, const unsigned int found)
 {
   if (found & OPT_P_MESSAGES)
     {
-      init_verb_mute (&c->options);
+      init_verb_mute (c, IVM_LEVEL_1|IVM_LEVEL_2);
       msg (D_PUSH, "OPTIONS IMPORT: --verb and/or --mute level changed");
     }
   if (found & OPT_P_TIMER)
@@ -1028,7 +1058,7 @@ do_init_frame_tls (struct context *c)
 }
 
 struct context_buffers *
-init_context_buffers (struct frame *frame)
+init_context_buffers (const struct frame *frame)
 {
   struct context_buffers *b;
 
@@ -1114,16 +1144,26 @@ do_init_dynamic_mtu (struct context *c)
 }
 
 /*
+ * Allocate our socket object.
+ */
+static void
+do_link_socket_new (struct context *c)
+{
+  ASSERT (!c->c2.link_socket);
+  c->c2.link_socket = link_socket_new ();
+  c->c2.link_socket_owned = true;
+}
+
+/*
  * bind the TCP/UDP socket
  */
 static void
 do_init_socket_1 (struct context *c)
 {
-  link_socket_init_phase1 (&c->c2.link_socket,
+  link_socket_init_phase1 (c->c2.link_socket,
 			   c->options.local,
-			   c->options.remote,
+			   c->c1.remote_list,
 			   c->options.local_port,
-			   c->options.remote_port,
 			   c->options.proto,
 			   c->c1.http_proxy,
 			   c->c1.socks_proxy,
@@ -1134,7 +1174,9 @@ do_init_socket_1 (struct context *c)
 			   c->options.ipchange,
 			   c->options.resolve_retry_seconds,
 			   c->options.connect_retry_seconds,
-			   c->options.mtu_discover_type);
+			   c->options.mtu_discover_type,
+			   c->options.rcvbuf,
+			   c->options.sndbuf);
 }
 
 /*
@@ -1143,7 +1185,7 @@ do_init_socket_1 (struct context *c)
 static void
 do_init_socket_2 (struct context *c)
 {
-  link_socket_init_phase2 (&c->c2.link_socket, &c->c2.frame,
+  link_socket_init_phase2 (c->c2.link_socket, &c->c2.frame,
 			   &c->sig->signal_received);
 }
 
@@ -1168,9 +1210,9 @@ do_compute_occ_strings (struct context *c)
   struct gc_arena gc = gc_new ();
 
   c->c2.options_string_local =
-    options_string (&c->options, &c->c2.frame, &c->c1.tuntap, false, &gc);
+    options_string (&c->options, &c->c2.frame, c->c1.tuntap, false, &gc);
   c->c2.options_string_remote =
-    options_string (&c->options, &c->c2.frame, &c->c1.tuntap, true, &gc);
+    options_string (&c->options, &c->c2.frame, c->c1.tuntap, true, &gc);
 
   msg (D_SHOW_OCC, "Local Options String: '%s'", c->c2.options_string_local);
   msg (D_SHOW_OCC, "Expected Remote Options String: '%s'",
@@ -1311,12 +1353,16 @@ do_close_free_key_schedule (struct context *c, bool free_ssl_ctx)
 static void
 do_close_link_socket (struct context *c)
 {
-  link_socket_close (&c->c2.link_socket);
+  if (c->c2.link_socket && c->c2.link_socket_owned)
+    link_socket_close (c->c2.link_socket);
+  c->c2.link_socket = NULL;
+
   if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_remote_ip))
     {
       CLEAR (c->c1.link_socket_addr.remote);
       CLEAR (c->c1.link_socket_addr.actual);
     }
+
   if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_local_ip))
     CLEAR (c->c1.link_socket_addr.local);
 }
@@ -1328,18 +1374,21 @@ static void
 do_close_tuntap (struct context *c)
 {
   struct gc_arena gc = gc_new ();
-  if (tuntap_defined (&c->c1.tuntap))
+  if (c->c1.tuntap && c->c1.tuntap_owned)
     {
+      const char *tuntap_actual = string_alloc (c->c1.tuntap->actual_name, &gc);
+      const in_addr_t local = c->c1.tuntap->local;
+      const in_addr_t remote_netmask = c->c1.tuntap->remote_netmask;
+
       if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_tun))
 	{
-	  char *tuntap_actual = string_alloc (c->c1.tuntap.actual_name, NULL);
-
 	  /* delete any routes we added */
 	  if (c->c1.route_list)
 	    delete_routes (c->c1.route_list);
 
 	  msg (D_CLOSE, "Closing TUN/TAP interface");
-	  close_tun (&c->c1.tuntap);
+	  close_tun (c->c1.tuntap);
+	  c->c1.tuntap = NULL;
 
 	  /* Run the down script -- note that it will run at reduced
 	     privilege if, for example, "--user nobody" was used. */
@@ -1347,24 +1396,23 @@ do_close_tuntap (struct context *c)
 		      tuntap_actual,
 		      TUN_MTU_SIZE (&c->c2.frame),
 		      EXPANDED_SIZE (&c->c2.frame),
-		      print_in_addr_t (c->c1.tuntap.local, true, &gc),
-		      print_in_addr_t (c->c1.tuntap.remote_netmask, true, &gc),
+		      print_in_addr_t (local, true, &gc),
+		      print_in_addr_t (remote_netmask, true, &gc),
 		      "init",
 		      signal_description (c->sig->signal_received,
 					  c->sig->signal_text),
 		      "down");
-	  free (tuntap_actual);
 	}
       else
 	{
 	  /* run the down script on this restart if --up-restart was specified */
 	  if (c->options.up_restart)
 	    run_script (c->options.down_script,
-			c->c1.tuntap.actual_name,
+			tuntap_actual,
 			TUN_MTU_SIZE (&c->c2.frame),
 			EXPANDED_SIZE (&c->c2.frame),
-			print_in_addr_t (c->c1.tuntap.local, true, &gc),
-			print_in_addr_t (c->c1.tuntap.remote_netmask, true, &gc),
+			print_in_addr_t (local, true, &gc),
+			print_in_addr_t (remote_netmask, true, &gc),
 			"restart",
 			signal_description (c->sig->signal_received,
 					    c->sig->signal_text),
@@ -1413,9 +1461,6 @@ do_close_fragment (struct context *c)
     fragment_free (c->c2.fragment);
 }
 
-/*
- * Close syslog
- */
 static void
 do_close_syslog (struct context *c)
 {
@@ -1433,7 +1478,7 @@ do_close_event_wait (struct context *c)
  * Initialize a tunnel instance.
  */
 void
-init_instance (struct context *c, bool init_buffers)
+init_instance (struct context *c)
 {
   const struct options *options = &c->options;
 
@@ -1449,14 +1494,13 @@ init_instance (struct context *c, bool init_buffers)
   if (c->first_time)
     pre_init_signal_catch ();
 
+  /* initialize context level 2 --verb/--mute parms */
+  init_verb_mute (c, IVM_LEVEL_2);
+
   /* should we disable paging? */
   if (c->first_time && options->mlock)
     do_mlockall (true);
 
-  /* init flags */
-  c->c2.log_rw = (check_debug_level (D_LOG_RW)
-		  && !check_debug_level (D_LOG_RW + 1));
-  
   /* possible sleep if restart */
   if ((c->mode == CM_P2P || c->mode == CM_TOP) && !c->first_time)
     socket_restart_pause (options->proto, options->http_proxy_server != NULL,
@@ -1470,15 +1514,16 @@ init_instance (struct context *c, bool init_buffers)
   if (c->mode == CM_P2P || c->mode == CM_TOP)
     wait_init (&c->c2.event_wait, WAIT_READ|WAIT_WRITE);
 
-  /* reset our transport layer socket object */
-  link_socket_reset (&c->c2.link_socket);
+  /* allocate our socket object */
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_link_socket_new (c);
 
   /* initialize internal fragmentation object */
   if (options->fragment && (c->mode == CM_P2P || c->mode == CM_CHILD))
     c->c2.fragment = fragment_init (&c->c2.frame);
 
   /* init crypto layer */
-    do_init_crypto (c, c->mode == CM_TOP);
+  do_init_crypto (c, c->mode == CM_TOP);
 
 #ifdef USE_LZO
   /* initialize LZO compression library. */
@@ -1494,7 +1539,7 @@ init_instance (struct context *c, bool init_buffers)
     do_init_frame_tls (c);
 
   /* init workspace buffers whose size is derived from frame size */
-  if (init_buffers)
+  if (c->mode == CM_P2P)
     do_init_buffers (c);
 
   /* initialize internal fragmentation capability with known frame size */
@@ -1528,7 +1573,8 @@ init_instance (struct context *c, bool init_buffers)
   do_init_first_time_1 (c);
 
   /* catch signals */
-  post_init_signal_catch ();
+  if (c->first_time)
+    post_init_signal_catch ();
 
   /*
    * Do first-time initialization AFTER possible daemonization,
@@ -1543,6 +1589,7 @@ init_instance (struct context *c, bool init_buffers)
       if (IS_SIG (c))
 	{
 	  c->sig->signal_text = "socket";
+	  close_instance (c);
 	  return;
 	}
     }
@@ -1558,48 +1605,127 @@ init_instance (struct context *c, bool init_buffers)
 void
 close_instance (struct context *c)
 {
-  /* if xinetd/inetd mode, don't allow restart */
-  do_close_check_if_restart_permitted (c);
-
-#ifdef USE_LZO
-  if (c->options.comp_lzo)
-    lzo_compress_uninit (&c->c2.lzo_compwork);
-#endif
-
   /* close event objects used for select() */
   do_close_event_wait (c);
 
-  /* free buffers */
-  do_close_free_buf (c);
+    if (c->mode == CM_P2P || c->mode == CM_CHILD || c->mode == CM_TOP)
+      {
+	/* if xinetd/inetd mode, don't allow restart */
+	do_close_check_if_restart_permitted (c);
 
-  /* close TLS */
-  do_close_tls (c);
+#ifdef USE_LZO
+	if (c->options.comp_lzo)
+	  lzo_compress_uninit (&c->c2.lzo_compwork);
+#endif
 
-  /* free key schedules */
-  do_close_free_key_schedule (c, (c->mode == CM_P2P || c->mode == CM_TOP));
+	/* free buffers */
+	do_close_free_buf (c);
 
-  /* close TCP/UDP connection */
-  do_close_link_socket (c);
+	/* close TLS */
+	do_close_tls (c);
 
-  /* close TUN/TAP device */
-  do_close_tuntap (c);
+	/* free key schedules */
+	do_close_free_key_schedule (c, (c->mode == CM_P2P || c->mode == CM_TOP));
 
-  /* remove non-parameter environmental vars except for signal */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
-    do_close_remove_env (c);
+	/* close TCP/UDP connection */
+	do_close_link_socket (c);
 
-  /* close packet-id persistance file */
-  do_close_packet_id (c);
+	/* close TUN/TAP device */
+	do_close_tuntap (c);
 
-  /* close fragmentation handler */
-  do_close_fragment (c);
+	/* remove non-parameter environmental vars except for signal */
+	if (c->mode == CM_P2P || c->mode == CM_TOP)
+	  do_close_remove_env (c);
 
-  /* close syslog */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
-    do_close_syslog (c);
+	/* close packet-id persistance file */
+	do_close_packet_id (c);
 
-  /* garbage collect */
-  gc_free (&c->c2.gc);
+	/* close fragmentation handler */
+	do_close_fragment (c);
+
+	/* close syslog */
+	if (c->mode == CM_P2P || c->mode == CM_TOP)
+	  do_close_syslog (c);
+
+	/* garbage collect */
+	gc_free (&c->c2.gc);
+      }
+}
+
+void
+inherit_context_child (struct context *dest,
+		       const struct context *src)
+{
+  CLEAR (*dest);
+
+  dest->mode = CM_CHILD;
+  dest->first_time = false;
+
+  dest->gc = gc_new ();
+
+  ALLOC_OBJ_CLEAR_GC (dest->sig, struct signal_info, &dest->gc);
+
+  /* c1 init */
+  packet_id_persist_init (&dest->c1.pid_persist);
+
+#ifdef USE_CRYPTO
+  dest->c1.ks.key_type = src->c1.ks.key_type;
+#ifdef USE_SSL
+  /* inherit SSL context */
+  dest->c1.ks.ssl_ctx = src->c1.ks.ssl_ctx;
+#endif
+#endif
+
+  /* options */
+  dest->options = src->options;
+  options_detach (&dest->options);
+
+  /* context init */
+  init_instance (dest);
+  if (IS_SIG (dest))
+    return;
+
+  /* inherit buffers */
+  dest->c2.buffers = src->c2.buffers;
+
+  /* inherit parent link_socket and tuntap */
+  dest->c2.link_socket = src->c2.link_socket;
+  dest->c1.tuntap = src->c1.tuntap;
+
+  ALLOC_OBJ_GC (dest->c2.link_socket_info, struct link_socket_info, &dest->gc);
+  *dest->c2.link_socket_info = src->c2.link_socket->info;
+
+  /* locally override some link_socket_info fields */
+  dest->c2.link_socket_info->lsa = &dest->c1.link_socket_addr;
+  dest->c2.link_socket_info->connection_established = false;
+}
+
+void
+inherit_context_thread (struct context *dest,
+			const struct context *src)
+{
+  *dest = *src;
+
+  dest->mode = CM_THREAD;
+  dest->first_time = false;
+
+  options_detach (&dest->options);
+  gc_detach (&dest->gc);
+  gc_detach (&dest->c2.gc);
+
+  dest->c1.tuntap_owned = false;
+  dest->c2.link_socket_owned = false;
+  dest->c2.buffers_owned = false;
+
+  wait_init (&dest->c2.event_wait, WAIT_READ|WAIT_WRITE);
+}
+
+void
+close_context (struct context *c, int sig)
+{
+  c->sig->signal_received = sig;
+  close_instance (c);
+  context_gc_free (c);
 }
 
 #ifdef USE_CRYPTO

@@ -308,9 +308,8 @@ ifconfig_options_string (const struct tuntap* tt, bool remote, bool disable, str
  * Set up tuntap structure for ifconfig,
  * but don't execute yet.
  */
-void
-init_tun (struct tuntap *tt,
-	  const char *dev,       /* --dev option */
+struct tuntap *
+init_tun (const char *dev,       /* --dev option */
 	  const char *dev_type,  /* --dev-type option */
 	  const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
 	  const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
@@ -320,6 +319,10 @@ init_tun (struct tuntap *tt,
 	  const struct tuntap_options *options)
 {
   struct gc_arena gc = gc_new ();
+  struct tuntap *tt;
+
+  ALLOC_OBJ (tt, struct tuntap);
+  clear_tuntap (tt);
 
 #ifdef WIN32
   overlapped_io_init (&tt->reads, frame, FALSE, true);
@@ -421,6 +424,7 @@ init_tun (struct tuntap *tt,
       tt->did_ifconfig_setup = true;
     }
   gc_free (&gc);
+  return tt;
 }
 
 
@@ -523,6 +527,7 @@ do_ifconfig (struct tuntap *tt,
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "Linux ifconfig failed", true);
       tt->did_ifconfig = true;
+
 #endif /*CONFIG_FEATURE_IPROUTE*/
 #elif defined(TARGET_SOLARIS)
 
@@ -716,22 +721,6 @@ clear_tuntap (struct tuntap *tuntap)
   tuntap->ipv6 = false;
 }
 
-/*
- * Initialize a struct tuntap to be a passive child
- * for a CM_CHILD context instance.  A passive child does
- * not have a real tun/tap interface -- it slaves off of the
- * parent interface.
- *
- * Assume that clear_tuntap was called first.
- */
-void
-tuntap_inherit_passive (struct tuntap *dest, const struct tuntap *src)
-{
-  dest->type = src->type;
-  dest->local = src->local;
-  dest->remote_netmask = src->remote_netmask;
-}
-
 static void
 open_null (struct tuntap *tt)
 {
@@ -868,6 +857,10 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
       const char *node = dev_node;
       if (!node)
 	node = "/dev/net/tun";
+
+      /*
+       * Open the interface
+       */
       if ((tt->fd = open (node, O_RDWR)) < 0)
 	{
 	  msg (M_WARN | M_ERRNO, "Note: Cannot open TUN/TAP dev %s", node);
@@ -880,6 +873,10 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
       CLEAR (ifr);
       if (!tt->ipv6)
 	ifr.ifr_flags = IFF_NO_PI;
+
+#if defined(IFF_ONE_QUEUE) && defined(SIOCSIFTXQLEN)
+      ifr.ifr_flags |= IFF_ONE_QUEUE;
+#endif
 
       /*
        * Figure out if tun or tap device
@@ -914,9 +911,36 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	  goto linux_2_2_fallback;
 	}
 
+      msg (M_INFO, "TUN/TAP device %s opened", ifr.ifr_name);
+
+      /*
+       * Try making the TX send queue bigger
+       */
+#if defined(IFF_ONE_QUEUE) && defined(SIOCSIFTXQLEN)
+      {
+	struct ifreq netifr;
+	int ctl_fd;
+
+	if ((ctl_fd = socket (AF_INET, SOCK_DGRAM, 0)) >= 0)
+	  {
+	    CLEAR (netifr);
+	    strncpynt (netifr.ifr_name, ifr.ifr_name, IFNAMSIZ);
+	    netifr.ifr_qlen = tt->options.txqueuelen;
+	    if (ioctl (ctl_fd, SIOCSIFTXQLEN, (void *) &netifr) >= 0)
+	      msg (D_OSBUF, "TUN/TAP TX queue length set to %d", tt->options.txqueuelen);
+	    else
+	      msg (M_WARN | M_ERRNO, "Note: Cannot set tx queue length on %s", ifr.ifr_name);
+	    close (ctl_fd);
+	  }
+	else
+	  {
+	    msg (M_WARN | M_ERRNO, "Note: Cannot open control socket on %s", ifr.ifr_name);
+	  }
+      }
+#endif
+
       set_nonblock (tt->fd);
       set_cloexec (tt->fd);
-      msg (M_INFO, "TUN/TAP device %s opened", ifr.ifr_name);
       tt->actual_name = string_alloc (ifr.ifr_name, NULL);
     }
   return;
@@ -942,14 +966,15 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 void
 tuncfg (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, int persist_mode)
 {
-  struct tuntap tt;
+  struct tuntap *tt;
 
-  clear_tuntap (&tt);
-  tt.type = dev_type_enum (dev, dev_type);
-  open_tun (dev, dev_type, dev_node, ipv6, &tt);
-  if (ioctl (tt.fd, TUNSETPERSIST, persist_mode) < 0)
+  ALLOC_OBJ (tt, struct tuntap);
+  clear_tuntap (tt);
+  tt->type = dev_type_enum (dev, dev_type);
+  open_tun (dev, dev_type, dev_node, ipv6, tt);
+  if (ioctl (tt->fd, TUNSETPERSIST, persist_mode) < 0)
     msg (M_ERR, "Cannot ioctl TUNSETPERSIST(%d) %s", persist_mode, dev);
-  close_tun (&tt);
+  close_tun (tt);
   msg (M_INFO, "Persist state set to: %s", (persist_mode ? "ON" : "OFF"));
 }
 
@@ -958,7 +983,11 @@ tuncfg (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, 
 void
 close_tun (struct tuntap *tt)
 {
-  close_tun_generic (tt);
+  if (tt)
+    {
+      close_tun_generic (tt);
+      free (tt);
+    }
 }
 
 int
@@ -1126,9 +1155,9 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
  * Close TUN device. 
  */
 void
-close_tun (struct tuntap* tt)
+close_tun (struct tuntap *tt)
 {
-  if (tt->fd >= 0)
+  if (tt && tt->fd >= 0)
     {
       struct ifreq ifr;
 
@@ -1147,7 +1176,11 @@ close_tun (struct tuntap* tt)
       close (tt->ip_fd);
       close (tt->fd);
     }
-  clear_tuntap (tt);
+  if (tt)
+    {
+      clear_tuntap (tt);
+      free (tt);
+    }
 }
 
 int
@@ -1202,7 +1235,11 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 void
 close_tun (struct tuntap* tt)
 {
-  close_tun_generic (tt);
+  if (tt)
+    {
+      close_tun_generic (tt);
+      free (tt);
+    }
 }
 
 static inline int
@@ -1288,9 +1325,13 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 }
 
 void
-close_tun (struct tuntap* tt)
+close_tun (struct tuntap *tt)
 {
-  close_tun_generic (tt);
+  if (tt)
+    {
+      close_tun_generic (tt);
+      free (tt);
+    }
 }
 
 int
@@ -1333,9 +1374,13 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 }
 
 void
-close_tun (struct tuntap* tt)
+close_tun (struct tuntap *tt)
 {
-  close_tun_generic (tt);
+  if (tt)
+    {
+      close_tun_generic (tt);
+      free (tt);
+    }
 }
 
 int
@@ -2459,40 +2504,45 @@ void
 close_tun (struct tuntap *tt)
 {
   struct gc_arena gc = gc_new ();
-#if 1
-  if (tt->ipapi_context_defined)
+
+  if (tt)
     {
-      DWORD status;
-      if ((status = DeleteIPAddress (tt->ipapi_context)) != NO_ERROR)
+#if 1
+      if (tt->ipapi_context_defined)
 	{
-	  msg (M_WARN, "Warning: DeleteIPAddress[%u] failed on TAP-Win32 adapter, status=%u : %s",
-	       (unsigned int)tt->ipapi_context,
-	       (unsigned int)status,
-	       strerror_win32 (status, &gc));
+	  DWORD status;
+	  if ((status = DeleteIPAddress (tt->ipapi_context)) != NO_ERROR)
+	    {
+	      msg (M_WARN, "Warning: DeleteIPAddress[%u] failed on TAP-Win32 adapter, status=%u : %s",
+		   (unsigned int)tt->ipapi_context,
+		   (unsigned int)status,
+		   strerror_win32 (status, &gc));
+	    }
 	}
-    }
 #endif
 
-  if (tt->hand != NULL)
-    {
-      msg (D_WIN32_IO_LOW, "Attempting CancelIO on TAP-Win32 adapter");
-      if (!CancelIo (tt->hand))
-	msg (M_WARN | M_ERRNO, "Warning: CancelIO failed on TAP-Win32 adapter");
+      if (tt->hand != NULL)
+	{
+	  msg (D_WIN32_IO_LOW, "Attempting CancelIO on TAP-Win32 adapter");
+	  if (!CancelIo (tt->hand))
+	    msg (M_WARN | M_ERRNO, "Warning: CancelIO failed on TAP-Win32 adapter");
+	}
+
+      msg (D_WIN32_IO_LOW, "Attempting close of overlapped read event on TAP-Win32 adapter");
+      overlapped_io_close (&tt->reads);
+
+      msg (D_WIN32_IO_LOW, "Attempting close of overlapped write event on TAP-Win32 adapter");
+      overlapped_io_close (&tt->writes);
+
+      if (tt->hand != NULL)
+	{
+	  msg (D_WIN32_IO_LOW, "Attempting CloseHandle on TAP-Win32 adapter");
+	  if (!CloseHandle (tt->hand))
+	    msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on TAP-Win32 adapter");
+	}
+      clear_tuntap (tt);
+      free (tt);
     }
-
-  msg (D_WIN32_IO_LOW, "Attempting close of overlapped read event on TAP-Win32 adapter");
-  overlapped_io_close (&tt->reads);
-
-  msg (D_WIN32_IO_LOW, "Attempting close of overlapped write event on TAP-Win32 adapter");
-  overlapped_io_close (&tt->writes);
-
-  if (tt->hand != NULL)
-    {
-      msg (D_WIN32_IO_LOW, "Attempting CloseHandle on TAP-Win32 adapter");
-      if (!CloseHandle (tt->hand))
-	msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on TAP-Win32 adapter");
-    }
-  clear_tuntap (tt);
   gc_free (&gc);
 }
 
@@ -2560,7 +2610,11 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 void
 close_tun (struct tuntap* tt)
 {
-  close_tun_generic (tt);
+  if (tt)
+    {
+      close_tun_generic (tt);
+      free (tt);
+    }
 }
 
 int

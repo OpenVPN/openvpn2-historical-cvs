@@ -69,8 +69,9 @@ struct openvpn_iphdr {
 
   uint8_t    ttl;
 
+# define OPENVPN_IPPROTO_IGMP 2 /* IGMP protocol */
+# define OPENVPN_IPPROTO_TCP  6 /* TCP protocol */
 # define OPENVPN_IPPROTO_UDP 17 /* UDP protocol */
-# define OPENVPN_IPPROTO_TCP 6  /* TCP protocol */
   uint8_t    protocol;
 
   uint16_t   check;
@@ -136,7 +137,26 @@ static inline void
 htons_as (uint16_t *dest, const uint16_t src)
 {
   ((uint8_t*)dest)[0] = (uint8_t) (src >> 8);
-  ((uint8_t*)dest)[1] = (uint8_t) (src & 0xFF);
+  ((uint8_t*)dest)[1] = (uint8_t) src;
+}
+
+static inline uint32_t
+ntohl_as (const uint32_t *src)
+{
+  return (uint32_t)
+      (((uint8_t*)src)[3] << 24)
+    | (((uint8_t*)src)[2] << 16)
+    | (((uint8_t*)src)[1] << 8)
+    | (((uint8_t*)src)[0]);
+}
+
+static inline void
+htonl_as (uint32_t *dest, const uint32_t src)
+{
+  ((uint8_t*)dest)[0] = (uint8_t) (src >> 24);
+  ((uint8_t*)dest)[1] = (uint8_t) (src >> 16);
+  ((uint8_t*)dest)[2] = (uint8_t) (src >> 8);
+  ((uint8_t*)dest)[3] = (uint8_t) src;
 }
 
 static inline uint16_t

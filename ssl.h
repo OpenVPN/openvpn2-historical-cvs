@@ -436,7 +436,7 @@ void tls_multi_init_set_options(struct tls_multi* multi,
 bool tls_multi_process (struct tls_multi *multi,
 			struct buffer *to_link,
 			struct sockaddr_in *to_link_addr,
-			struct link_socket *to_link_socket,
+			struct link_socket_info *to_link_socket_info,
 			interval_t *wakeup);
 
 void tls_multi_free (struct tls_multi *multi, bool clear);
@@ -464,7 +464,7 @@ void tls_set_verify_command (const char *cmd);
 void tls_set_crl_verify (const char *crl);
 void tls_set_verify_x509name (const char *x509name);
 int get_max_tls_verify_id (struct tls_multi* multi);
-const char *tls_common_name (struct tls_multi* multi);
+const char *tls_common_name (struct tls_multi* multi, bool null);
 
 void tls_adjust_frame_parameters(struct frame *frame);
 

@@ -40,11 +40,13 @@
 static void
 tunnel_point_to_point (struct context *c)
 {
-  c->mode = CM_P2P;
   context_clear_2 (c);
 
+  /* set point-to-point mode */
+  c->mode = CM_P2P;
+
   /* initialize tunnel instance */
-  init_instance (c, true);
+  init_instance (c);
   if (IS_SIG (c))
     return;
 
@@ -122,7 +124,7 @@ main (int argc, char *argv[])
 	  parse_argv (&c.options, argc, argv, M_USAGE, OPT_P_DEFAULT, NULL);
 
 	  /* init verbosity and mute levels */
-	  init_verb_mute (&c.options);
+	  init_verb_mute (&c, IVM_LEVEL_1);
 
 	  /* set dev options */
 	  init_options_dev (&c.options);
@@ -162,7 +164,12 @@ main (int argc, char *argv[])
 		  break;
 #if P2MP
 		case MODE_SERVER:
-		  tunnel_server (&c);
+#ifdef USE_PTHREAD
+		  if (c.options.n_threads >= 2)
+		    tunnel_server_multi_threaded (&c);
+		  else
+#endif
+		    tunnel_server_single_threaded (&c);
 		  break;
 #endif
 		default:

@@ -95,7 +95,7 @@ openvpn \- secure IP tunnel daemon.
 .B openvpn
 [\ \fB\-\-askpass\fR\ ]
 [\ \fB\-\-auth\fR\ \fIalg\fR\ ]
-[\ \fB\-\-bcast\-delay\fR\ \fIn\fR\ ]
+[\ \fB\-\-bcast\-buffers\fR\ \fIn\fR\ ]
 [\ \fB\-\-ca\fR\ \fIfile\fR\ ]
 [\ \fB\-\-cd\fR\ \fIdir\fR\ ]
 [\ \fB\-\-cert\fR\ \fIfile\fR\ ]
@@ -171,8 +171,10 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-pull\fR\ ]
 [\ \fB\-\-push\-reset\fR\ ]
 [\ \fB\-\-push\fR\ \fI"option"\fR\ ]
+[\ \fB\-\-rcvbuf\fR\ \fIsize\fR\ ]
 [\ \fB\-\-redirect\-gateway\fR\ ]
 [\ \fB\-\-remote\fR\ \fIhost\fR\ ]
+[\ \fB\-\-remote\-random\fR\ ]
 [\ \fB\-\-reneg\-bytes\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-pkts\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-sec\fR\ \fIn\fR\ ]
@@ -191,6 +193,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-show\-adapters\fR\ ]
 [\ \fB\-\-show\-valid\-subnets\fR\ ]
 [\ \fB\-\-single\-session\fR\ ]
+[\ \fB\-\-sndbuf\fR\ \fIsize\fR\ ]
 [\ \fB\-\-socks\-proxy\-retry\fR\ ]
 [\ \fB\-\-socks\-proxy\fR\ \fIserver\ [port]\fR\ ]
 [\ \fB\-\-tap\-sleep\fR\ \fIn\fR\ ]
@@ -313,8 +316,25 @@ Local host name or IP address.
 If specified, OpenVPN will bind to this address only.
 If unspecified, OpenVPN will bind to all interfaces.
 .TP
-.B --remote host
-Remote host name or IP address.  If unspecified, OpenVPN will listen
+.B --remote host [port]
+Remote host name or IP address.  Multiple
+.B --remote
+options may be specified for a client which
+is connecting to a multi-client UDP server.
+OpenVPN will try each
+.B host:port
+in the order specified,
+moving on to the next host in the event of connection failure.
+Note that since UDP is connectionless, connection failure
+is defined by the
+.B --ping
+and
+.B --ping-restart
+options.
+
+If
+.B --remote
+is unspecified, OpenVPN will listen
 for packets from any IP address, but will not act on those packets unless
 they pass all authentication tests.  This requirement for authentication
 is binding on all potential peers, even those from known and supposedly
@@ -326,6 +346,18 @@ When used in TCP mode,
 will act as a filter, rejecting connections from any host which does
 not match
 .B host.
+
+If
+.B host
+resolves to multiple IP addresses, one will be randomly
+chosen, providing a sort of basic load-balancing and
+failover capability.
+.TP
+.B --remote-random
+When multiple
+.B --remote
+address/ports are specified, initially randomize the order of the list
+as a kind of basic load-balancing measure.
 .TP
 .B --proto p
 Use protocol
@@ -358,15 +390,16 @@ will wait indefinitely for an incoming connection.  A peer
 started with
 .B tcp-client
 will attempt to connect, and if that fails, will sleep for 5
-seconds and try again.  Both TCP client and server will simulate
+seconds (adjustable via the
+.B --connect-retry
+option) and try again.  Both TCP client and server will simulate
 a SIGUSR1 restart signal if either side resets the connection.
 
 OpenVPN is designed to operate optimally over UDP, but TCP capability is provided
 for situations where UDP cannot be used.
 In comparison with UDP, TCP will usually be
 somewhat less efficient and less robust when used over unreliable or congested
-networks.  TCP support is also a newer addition to OpenVPN, added in version
-1.5, and should still be considered experimental until 1.6 or 1.7.
+networks.
 
 This article outlines some of problems with tunneling IP over TCP:
 
@@ -990,6 +1023,18 @@ to 1300 (a good first try for solving MTU-related
 connection problems) with the following options:
 
 .B --tun-mtu 1500 --fragment 1300 --mssfix
+.TP
+.B --sndbuf size
+Set the TCP/UDP socket send buffer size.
+Currently defaults to 65536 bytes.
+.TP
+.B --rcvbuf size
+Set the TCP/UDP socket receive buffer size.
+Currently defaults to 65536 bytes.
+.TP
+.B --txqueuelen n
+(Linux only) Set the TX queue length on the tun/tap interface.
+Currently defaults to 100.
 .TP
 .B --shaper n
 Limit bandwidth of outgoing tunnel data to
@@ -1760,11 +1805,10 @@ and IP address of the just-authenticated client
 as environmental variables.  The script is also passed
 a single argument which is the filename of a temporary file.
 If the script wants to generate client-instance-specific
-options, it can write them to this file.  The following
-options are legal in a client-instance context:
-.B --push, --push-reset, --iroute, --ifconfig-push,
-and
-.B --config.
+options, it can write them to this file.  See the
+.B --client-config-dir
+option below for options which
+can be legally used in a client-specific context.
 .TP
 .B --client-disconnect
 Like
@@ -1785,9 +1829,15 @@ One of the useful properties of this option is that it
 allows client configuration files to be conveniently
 created, edited, or removed while the server is live,
 without needing to restart the server.
+
+The following
+options are legal in a client-specific context:
+.B --push, --push-reset, --iroute, --ifconfig-push,
+and
+.B --config.
 .TP
 .B --tmp-dir dir
-Specific a directory
+Specify a directory
 .B dir
 for temporary files.  This directory will be used by
 .B --client-connect
@@ -1801,10 +1851,22 @@ and the virtual address table to
 .B v.
 By default, both tables are sized at 256 buckets.
 .TP
-.B --bcast-delay n
-Delay for
+.B --bcast-buffers n
+Allocate
 .B n
-microseconds between broadcast or multicast packet sends.
+buffers for broadcast datagrams (default=256).
+.TP
+.B --connect-freq n sec
+Allow a maximum of
+.B n
+new connections per
+.B sec 
+seconds from clients.  This is designed to contain DoS attacks which flood
+the server with connection requests using certificates which
+will ultimately fail to authenticate.
+
+This is an imperfect solution however, because in a real
+DoS scenario, legitimate connections might also be refused.
 .SS Data Channel Encryption Options:
 These options are meaningful for both Static & TLS-negotiated key modes
 (must be compatible between peers).

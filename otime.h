@@ -35,6 +35,20 @@
 #include "common.h"
 #include "integer.h"
 #include "buffer.h"
+#include "thread.h"
+
+struct frequency_limit
+{
+  MUTEX_DEFINE (mutex);
+  int max;
+  int per;
+  int n;
+  time_t reset;
+};
+
+struct frequency_limit *frequency_limit_init (int max, int per);
+void frequency_limit_free (struct frequency_limit *f);
+bool frequency_limit_event_allowed (struct frequency_limit *f);
 
 #ifdef WIN32
 int gettimeofday(struct timeval *tv, void *tz);

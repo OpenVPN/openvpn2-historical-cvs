@@ -31,6 +31,7 @@
 /*#define IFCONFIG_POOL_TEST*/
 
 #include "basic.h"
+#include "thread.h"
 
 #define IFCONFIG_POOL_MAX 65536
 
@@ -39,6 +40,7 @@
 
 struct ifconfig_pool
 {
+  MUTEX_DEFINE (mutex);
   in_addr_t base;
   int size;
   int type;

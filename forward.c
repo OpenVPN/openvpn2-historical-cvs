@@ -33,6 +33,7 @@
 
 #include "forward.h"
 #include "init.h"
+#include "push.h"
 #include "gremlin.h"
 #include "mss.h"
 
@@ -90,10 +91,7 @@ check_tls_dowork (struct context *c)
   interval_schedule_wakeup (&c->c2.tmp_int, c->c2.current, &wakeup);
 
   if (wakeup)
-    {
-      c->c2.timeval.tv_sec = wakeup;
-      c->c2.timeval.tv_usec = 0;
-    }
+    context_reschedule_sec (c, wakeup);
 }
 #endif
 
@@ -111,26 +109,34 @@ check_tls_errors_dowork (struct context *c)
 /*
  * Handle incoming configuration
  * messages on the control channel.
- *
- * JYFIXME -- actually do something with incoming config message
  */
-#if defined(USE_CRYPTO) && defined(USE_SSL)
+#if P2MP
 void
 check_incoming_control_channel_dowork (struct context *c)
 {
   const int len = tls_test_payload_len (c->c2.tls_multi);
   if (len)
     {
-      struct buffer buf = alloc_buf (len);
+      struct gc_arena gc = gc_new ();
+      struct buffer buf = alloc_buf_gc (len, &gc);
       if (tls_rec_payload (c->c2.tls_multi, &buf))
 	{
-	  msg (D_LOW, "RECEIVE PAYLOAD: %s", BSTR (&buf));
+	  msg (D_LOW, "NOTE: Received control message: '%s'", BSTR (&buf));
+	  if (buf_string_match_head_str (&buf, "PUSH_"))
+	    {
+	      if (!process_incoming_push_msg (c, &buf))
+		msg (D_LOW, "NOTE: Failed to reply to push/pull message");
+	    }
+	  else
+	    {
+	      msg (D_LOW, "NOTE: Received unknown control message");
+	    }
 	}
       else
 	{
-	  msg (D_LOW, "RECEIVE PAYLOAD FAILED");
+	  msg (D_LOW, "NOTE: Receive control message failed");
 	}
-      free_buf (&buf);
+      gc_free (&gc);
     }
 }
 #endif
@@ -164,27 +170,36 @@ check_connection_established_dowork (struct context *c)
 				    c->options.route_delay);
 	    }
 
-#if 1 // JYFIXME -- send a test control channel config message
-#if defined(USE_CRYPTO) && defined(USE_SSL)
-	  if (c->c2.tls_multi) {
-	    char bigstring[] = "This is a test";
-	    struct buffer buf;
-	    bool stat;
-	    buf_set_read (&buf, bigstring, strlen (bigstring) + 1);
-	    stat = tls_send_payload (c->c2.tls_multi, &buf);
-	    interval_action (&c->c2.tmp_int, c->c2.current);
-	    c->c2.timeval.tv_sec = 0;
-	    c->c2.timeval.tv_usec = 0;
-	    msg (D_LOW, "WROTE PAYLOAD stat=%d", (int) stat);
-
-	    msg (D_LOW, "COMMON NAME: %s", tls_common_name (c->c2.tls_multi));
-	  }
-#endif
+#if P2MP
+	  /* if --pull was specified, send a pull request to server */
+	  if (c->c2.tls_multi && c->options.pull)
+	    send_push_request (c);
 #endif
 
 	  event_timeout_clear (&c->c2.wait_for_connect);
 	}
     }
+}
+
+bool
+send_control_channel_string (struct context *c, char *str)
+{
+#if defined(USE_CRYPTO) && defined(USE_SSL)
+  if (c->c2.tls_multi) {
+    struct buffer buf;
+    bool stat;
+    buf_set_read (&buf, str, strlen (str) + 1);
+    stat = tls_send_payload (c->c2.tls_multi, &buf);
+    interval_action (&c->c2.tmp_int, c->c2.current);
+    context_immediate_reschedule (c);
+    msg (D_PUSH, "SENT CONTROL [%s]: '%s' (status=%d)",
+	 tls_common_name (c->c2.tls_multi),
+	 str,
+	 (int) stat);
+    return stat;
+  }
+#endif
+  return true;
 }
 
 /*
@@ -345,7 +360,7 @@ check_coarse_timers_dowork (struct context *c)
 
   msg (D_INTERVAL, "TIMER: coarse timer wakeup %d seconds", (int) c->c2.timeval.tv_sec);
 
-  /* Is the course timeout NOT the earliest one? */
+  /* Is the coarse timeout NOT the earliest one? */
   if (c->c2.timeval.tv_sec > save.tv_sec)
     c->c2.timeval = save;
 }
@@ -354,18 +369,9 @@ static inline void
 check_coarse_timers (struct context *c)
 {
   if (c->c2.current >= c->c2.coarse_timer_wakeup)
-    {
-      check_coarse_timers_dowork (c);
-    }
+    check_coarse_timers_dowork (c);
   else
-    {
-      const int need_wakeup = c->c2.coarse_timer_wakeup - c->c2.current;
-      if (need_wakeup < c->c2.timeval.tv_sec)
-	{
-	  c->c2.timeval.tv_sec = need_wakeup;
-	  c->c2.timeval.tv_usec = 0;
-	}
-    }
+    context_reschedule_sec (c, c->c2.coarse_timer_wakeup - c->c2.current);
 }
 
 static void
@@ -980,8 +986,6 @@ pre_select (struct context *c)
 
   /* Update random component of timeout */
   check_timeout_random_component (c);
-
-  /* JYFIXME: caller should do garbage collect after this function returns */
 }
 
 void

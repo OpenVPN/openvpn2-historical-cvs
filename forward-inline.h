@@ -68,7 +68,7 @@ check_tls_errors (struct context *c)
 static inline void
 check_incoming_control_channel (struct context *c)
 {
-#if defined(USE_CRYPTO) && defined(USE_SSL)
+#if P2MP
   void check_incoming_control_channel_dowork (struct context *c);
   if (tls_test_payload_len (c->c2.tls_multi) > 0)
     check_incoming_control_channel_dowork (c);
@@ -133,6 +133,29 @@ check_packet_id_persist_flush (struct context *c)
       && event_timeout_trigger (&c->c2.packet_id_persist_interval, c->c2.current,
 				&c->c2.timeval))
     packet_id_persist_save (&c->c1.pid_persist);
+}
+
+/*
+ * Set our wakeup to 0 seconds, so we will be rescheduled
+ * immediately.
+ */
+static inline void
+context_immediate_reschedule (struct context *c)
+{
+  c->c2.timeval.tv_sec = 0;
+  c->c2.timeval.tv_usec = 0;
+}
+
+static inline void
+context_reschedule_sec (struct context *c, int sec)
+{
+  if (sec < 0)
+    sec = 0;
+  if (sec < c->c2.timeval.tv_sec)
+    {
+      c->c2.timeval.tv_sec = sec;
+      c->c2.timeval.tv_usec = 0;
+    }
 }
 
 #endif /* EVENT_INLINE_H */

@@ -23,30 +23,18 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef FORWARD_H
-#define FORWARD_H
+#ifdef WIN32
+#include "config-win32.h"
+#else
+#include "config.h"
+#endif
 
-#include "openvpn.h"
-#include "occ.h"
-#include "ping.h"
+#include "syshead.h"
 
-void pre_select (struct context *c);
+#include "pool.h"
 
-void single_select (struct context *c);
+#include "memdbg.h"
 
-void process_io (struct context *c);
+#if P2MP
 
-void encrypt_sign (struct context *c, bool comp_frag);
-
-void show_select_status (struct context *c);
-
-void read_incoming_link (struct context *c);
-void process_incoming_link (struct context *c);
-void read_incoming_tun (struct context *c);
-void process_incoming_tun (struct context *c);
-void process_outgoing_link (struct context *c, struct link_socket *ls);
-void process_outgoing_tun (struct context *c, struct tuntap *tt);
-
-bool send_control_channel_string (struct context *c, char *str);
-
-#endif /* FORWARD_H */
+#endif

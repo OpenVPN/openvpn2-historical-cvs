@@ -23,6 +23,9 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#ifndef OPENVPN_SSL_H
+#define OPENVPN_SSL_H
+
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 
 #include <openssl/ssl.h>
@@ -561,3 +564,5 @@ void show_tls_performance_stats(void);
 #endif
 
 #endif /* USE_CRYPTO && USE_SSL */
+
+#endif

@@ -36,6 +36,7 @@
 #include "multi.h"
 #include "init.h"
 #include "forward.h"
+#include "push.h"
 
 #include "memdbg.h"
 
@@ -218,6 +219,7 @@ multi_close_context (struct context *c)
 {
   c->sig->signal_received = SIGTERM;
   close_instance (c);
+  context_gc_free (c);
   free (c->sig);
 }
 

@@ -320,3 +320,58 @@ alloc_struct_out_of_mem (void)
 {
   ASSERT (0);
 }
+
+/*
+ * String comparison
+ */
+
+bool
+buf_string_match_head_str (const struct buffer *src, const char *match)
+{
+  const int size = strlen (match);
+  if (size < 0 || size > src->len)
+    return false;
+  return memcmp (BPTR (src), match, size) == 0;
+}
+
+bool
+buf_string_compare_advance (struct buffer *src, const char *match)
+{
+  if (buf_string_match_head_str (src, match))
+    {
+      buf_advance (src, strlen (match));
+      return true;
+    }
+  else
+    return false;
+}
+
+/*
+ * String parsing
+ */
+
+bool
+buf_parse (struct buffer *buf, const int delim, char *line, const int size)
+{
+  bool eol = false;
+  int n = 0;
+  int c;
+
+  ASSERT (size > 0);
+
+  do
+    {
+      c = buf_read_u8 (buf);
+      if (c < 0)
+	eol = true;
+      if (c <= 0 || c == delim)
+	c = 0;
+      if (n >= size)
+	break;
+      line[n++] = c;
+    }
+  while (c);
+
+  line[size-1] = '\0';
+  return !(eol && !strlen (line));
+}

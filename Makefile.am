@@ -60,8 +60,10 @@ openvpn_SOURCES = \
 	options.c options.h \
 	packet_id.c packet_id.h \
 	ping.c ping.h ping-inline.h \
+	pool.c pool.h \
 	proto.h \
 	proxy.c proxy.h \
+	push.c push.h \
 	reliable.c reliable.h \
 	route.c route.h \
 	session_id.c session_id.h \

@@ -174,6 +174,10 @@ void buf_catrunc (struct buffer *buf, const char *str);
  */
 void convert_to_one_line (struct buffer *buf);
 
+/*
+ * Parse a string based on a given delimiter char
+ */
+bool buf_parse (struct buffer *buf, const int delim, char *line, const int size);
 
 /*
  * Hex dump -- Output a binary buffer to a hex string and return it.
@@ -447,6 +451,9 @@ buf_string_match_head (const struct buffer *src, const void *match, int size)
     return false;
   return memcmp (BPTR (src), match, size) == 0;
 }
+
+bool buf_string_match_head_str (const struct buffer *src, const char *match);
+bool buf_string_compare_advance (struct buffer *src, const char *match);
 
 /*
  * Bitwise operations

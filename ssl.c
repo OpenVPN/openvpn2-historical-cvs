@@ -510,10 +510,13 @@ get_max_tls_verify_id (struct tls_multi* multi)
 const char *
 tls_common_name (struct tls_multi* multi)
 {
+  const char *ret = NULL;
   if (multi)
-    return multi->session[TM_ACTIVE].common_name;
+    ret = multi->session[TM_ACTIVE].common_name;
+  if (ret)
+    return ret;
   else
-    return NULL;
+    return "CN-UNDEF";
 }
 
 /*
@@ -2409,9 +2412,7 @@ tls_multi_process (struct tls_multi *multi,
   int i;
   bool active = false;
 
-  msg (D_TLS_DEBUG, "TLSMP: pre lock");
   mutex_lock (L_TLS);
-  msg (D_TLS_DEBUG, "TLSMP: post lock");
 
   /*
    * Process each session object having state of S_INITIAL or greater,

@@ -297,6 +297,10 @@ struct context_2
 
   /* return from main event loop select (or windows equivalent) */
   int select_status;
+
+  /* --ifconfig endpoints to be pushed to client */
+  in_addr_t push_ifconfig_local;
+  in_addr_t push_ifconfig_remote;
 };
 
 /*

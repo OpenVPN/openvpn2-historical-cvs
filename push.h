@@ -23,30 +23,19 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef FORWARD_H
-#define FORWARD_H
+#ifndef PUSH_H
+#define PUSH_H
 
-#include "openvpn.h"
-#include "occ.h"
-#include "ping.h"
+#if P2MP
 
-void pre_select (struct context *c);
+#include "forward.h"
 
-void single_select (struct context *c);
+void push_option (struct options *o, const char *opt);
 
-void process_io (struct context *c);
+bool send_push_request (struct context *c);
+bool send_push_reply (struct context *c);
 
-void encrypt_sign (struct context *c, bool comp_frag);
+bool process_incoming_push_msg (struct context *c, struct buffer *buf);
 
-void show_select_status (struct context *c);
-
-void read_incoming_link (struct context *c);
-void process_incoming_link (struct context *c);
-void read_incoming_tun (struct context *c);
-void process_incoming_tun (struct context *c);
-void process_outgoing_link (struct context *c, struct link_socket *ls);
-void process_outgoing_tun (struct context *c, struct tuntap *tt);
-
-bool send_control_channel_string (struct context *c, char *str);
-
-#endif /* FORWARD_H */
+#endif
+#endif

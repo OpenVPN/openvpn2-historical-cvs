@@ -47,6 +47,7 @@
 #include "socket.h"
 #include "packet_id.h"
 #include "win32.h"
+#include "push.h"
 
 #include "memdbg.h"
 
@@ -520,7 +521,7 @@ show_p2mp_parms (const struct options *o)
   if (o->push_list)
     {
       const struct push_list *l = o->push_list;
-      const char *printable_push_list = string_substitute (l->options, '\n', '|', &gc);
+      const char *printable_push_list = l->options;
       msg (D_SHOW_PARMS, "  push_list = '%s'", printable_push_list);
     }
   SHOW_BOOL (pull);
@@ -528,19 +529,6 @@ show_p2mp_parms (const struct options *o)
   msg (D_SHOW_PARMS, "  ifconfig_pool_start = %s", print_in_addr_t (o->ifconfig_pool_start, false, &gc));
   msg (D_SHOW_PARMS, "  ifconfig_pool_end = %s", print_in_addr_t (o->ifconfig_pool_end, false, &gc));
   gc_free (&gc);
-}
-
-static void
-push_option (struct options *o, const char *opt)
-{
-  int len;
-  if (!o->push_list)
-    o->push_list = (struct push_list *) gc_malloc (sizeof (struct push_list), true, &o->gc);
-  len = strlen (o->push_list->options);
-  if (len + strlen (opt) + 1 >= MAX_PUSH_LIST_LEN)
-    msg (M_USAGE, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
-  strcat (o->push_list->options, opt);
-  strcat (o->push_list->options, "\n");
 }
 
 #endif
@@ -1431,6 +1419,26 @@ parse_argv (struct options* options, int argc, char *argv[])
 	}
       i = add_option (options, i, p, NULL, 0, 0);
     }
+}
+
+bool
+apply_push_options (struct options *options, struct buffer *buf)
+{
+  char line[256];
+  int line_num = 0;
+  const char *file = "[PUSH-OPTIONS]";
+
+  while (buf_parse (buf, ',', line, sizeof (line)))
+    {
+      char *p[MAX_PARMS];
+      CLEAR (p);
+      ++line_num;
+      if (parse_line (line, p, SIZE (p), file, line_num, &options->gc))
+	{
+	  add_option (options, 0, p, file, line_num, 0);
+	}
+    }
+  return true;
 }
 
 static int

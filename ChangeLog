@@ -1,7 +1,11 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.13 2004/03/20 09:19:43 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.14 2004/03/20 16:08:32 jimyonan Exp $
+
+2004.03.20 -- Version 2.0-test14
+
+* Implemented --push and --pull.
 
 2004.03.20 -- Version 2.0-test13
 

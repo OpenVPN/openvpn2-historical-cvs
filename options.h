@@ -46,7 +46,9 @@ extern const char title_string[];
 
 #if P2MP
 /* parameters to be pushed to peer */
-#define MAX_PUSH_LIST_LEN 1024
+
+#define MAX_PUSH_LIST_LEN 1024 /* This parm is related to PLAINTEXT_BUFFER_SIZE in ssl.h */
+
 struct push_list {
   /* newline delimited options, like config file */
   char options[MAX_PUSH_LIST_LEN];
@@ -294,5 +296,7 @@ int options_cmp_equal (char *actual, const char *expected, size_t actual_n);
 void options_warning (char *actual, const char *expected, size_t actual_n);
 
 void options_postprocess (struct options *options, bool first_time);
+
+bool apply_push_options (struct options *o, struct buffer *buf);
 
 #endif

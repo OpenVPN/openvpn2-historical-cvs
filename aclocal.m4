@@ -96,7 +96,7 @@ dnl (with help from M. Frigo), as well as ac_pthread and hb_pthread
 dnl macros posted by AFC to the autoconf macro repository.  We are also
 dnl grateful for the helpful feedback of numerous users.
 dnl
-dnl @version $Id: aclocal.m4,v 1.33 2002/10/08 10:03:32 jimyonan Exp $
+dnl @version $Id: aclocal.m4,v 1.34 2002/10/17 01:59:40 jimyonan Exp $
 dnl @author Steven G. Johnson <stevenj@alum.mit.edu> and Alejandro Forero Cuervo <bachue@bachue.com>
 
 AC_DEFUN([ACX_PTHREAD], [

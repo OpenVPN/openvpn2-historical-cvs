@@ -284,7 +284,7 @@ link_socket_init (struct link_socket *sock,
 	       || sock->proto == PROTO_TCPv4_CLIENT)
 	{
 	  int on = 1;
-	  if ((sock->sd = socket (PF_INET, SOCK_STREAM, 0)) < 0)
+	  if ((sock->sd = socket (PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
 	    msg (M_SOCKERR, "Cannot create TCP socket");
 	  if (setsockopt (sock->sd, SOL_SOCKET, SO_REUSEADDR,
 			  (void *) &on, sizeof (on)) < 0)
@@ -512,6 +512,7 @@ link_socket_close (struct link_socket *sock)
       overlapped_io_close (&sock->reads);
       overlapped_io_close (&sock->writes);
 #endif
+      msg (D_READ_WRITE, "Closing TCP/UDP socket");
       if (openvpn_close_socket (sock->sd))
 	msg (M_WARN | M_ERRNO_SOCK, "Warning: Close Socket failed");
       sock->sd = -1;

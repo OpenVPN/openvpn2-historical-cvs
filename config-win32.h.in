@@ -371,7 +371,7 @@ typedef unsigned int ssize_t;
 /* #undef STRICT_OPTIONS_CHECK */
 
 /* A string representing our target */
-#define TARGET_ALIAS "win32-mingw"
+#define TARGET_ALIAS "Win32-MinGW"
 
 /* Are we running on Mac OS X? */
 /* #undef TARGET_DARWIN */

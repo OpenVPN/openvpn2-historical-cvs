@@ -337,8 +337,6 @@ warn_if_group_others_accessible(const char* filename)
       if (st.st_mode & (S_IRWXG|S_IRWXO))
 	msg (M_WARN, "WARNING: file '%s' is group or others accessible", filename);
     }
-#else
-  msg (M_WARN, "Note: cannot stat file '%s' (stat function missing)", filename);
 #endif
 }
 
@@ -346,9 +344,26 @@ warn_if_group_others_accessible(const char* filename)
  * convert system() return into a success/failure value
  */
 bool
-system_ok(int stat)
+system_ok (int stat)
 {
+#ifdef WIN32
+  return stat == 0;
+#else
   return stat != -1 && WIFEXITED (stat) && WEXITSTATUS (stat) == 0;
+#endif
+}
+
+/*
+ * did system() call execute the given command?
+ */
+bool
+system_executed (int stat)
+{
+#ifdef WIN32
+  return stat != -1;
+#else
+  return stat != -1 && WEXITSTATUS (stat) != 127;
+#endif
 }
 
 /*
@@ -358,6 +373,11 @@ const char *
 system_error_message (int stat)
 {
   struct buffer out = alloc_buf_gc (512);
+#ifdef WIN32
+  if (stat == -1)
+    buf_printf (&out, "shell command did not execute -- ");
+  buf_printf (&out, "system() returned error code %d", stat);
+#else
   if (stat == -1)
     buf_printf (&out, "shell command fork failed");
   else if (!WIFEXITED (stat))
@@ -372,6 +392,7 @@ system_error_message (int stat)
       else
 	buf_printf (&out, "shell command exited with error status: %d", cmd_ret);
     }
+#endif
   return (const char *)out.data;
 }
 

@@ -78,7 +78,7 @@ tarball except it has a .\win32-binaries directory.
 Within win32-binaries, the bin directory has the
 OpenVPN exe and the OpenSSL DLLs.  Either copy all
 files in bin to a directory on your PATH, or add
-the bin directory to your PATH.
+the location of the bin directory to your PATH.
 
 Install the TAP-Win32 kernel driver
 -----------------------------------
@@ -112,8 +112,8 @@ application, I have personally built, installed, and
 uninstalled this driver multiple times on my WinXP
 laptop without any problems.  If you want more information
 on the kernel driver, you should check out the Cipe-Win32
-list on sourceforge, where its development and problems
-are discussed.
+list on sourceforge, where its development and usage
+is discussed.
 
 Assuming you are comfortable installing a non-Microsoft
 approved driver, click on Continue Anyway.
@@ -155,6 +155,19 @@ Fri Jul 18 14:17:09 2003 1: [1] 'my-tap'
 You can list all network interfaces with the
 Windows "ipconfig" command, and all TAP-Win32
 interfaces should be included among them.
+
+Windows and TAP device naming
+-----------------------------
+
+One major change in usage between running on Windows vs.
+the Posix world is the lack of an "ifconfig" command on
+Windows.  Basically what happens when you install the
+TAP-Win32 driver is that you get a new network adapter
+that shows up in your network control panel.  You right
+click on the TAP adapter and set the TCP/IP properties,
+i.e. IP address and netmask.  Then you rename the TAP
+adapter icon to something like "my-tap" and reference
+it using the --dev-node option in OpenVPN.
 
 Example running a VPN between Windows and Linux
 -----------------------------------------------
@@ -238,6 +251,36 @@ Upgrade the Tap-Win32 driver
 I found that I need to uninstall the driver,
 reboot my system, and reinstall the new
 driver.
+
+Notes -- ARP/MAC Issues with the TAP-Win32 driver
+-------------------------------------------------
+
+Most TAP drivers allocate a random MAC to their virtual NIC.
+If OpenVPN running on Windows disconnects and reconnects to
+a remote peer, it is possible that that peer will reinitialize
+its TAP device and generate a new random MAC, causing Windows to
+temporarily lose access to the IP addresses exported by that
+remote peer.  This is because Windows doesn't know that a given
+IP address on the virtual TAP network now is associated with a
+new MAC, so it tries to send packets to the old MAC, causing
+them to be dropped.
+
+Luckily, there is an easy solution to this problem.
+Create a batch file with one or more of the following commands:
+
+  arp -d [ip-address]
+
+Where ip-address is a remote IP address at the other end of the
+virtual TAP network whose access was lost due to an OpenVPN
+restart.  The arp -d command will cause Windows
+to "forget" the MAC address which it previously associated with
+the given IP address.  Next time that IP address is used,
+Windows will actively query the remote peer
+(with an "arp who-has" message) to get the new MAC address.
+
+You can use the --up option in OpenVPN to automatically run a
+given batch file immediately after TAP device initialization --
+such a batch file can contain arp commands as described above.
 
 Performance
 -----------

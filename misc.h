@@ -94,6 +94,7 @@ int openvpn_system (const char *command);
 
 /* interpret the status code returned by system() */
 bool system_ok(int);
+int system_executed (int stat);
 const char *system_error_message (int);
 
 /* run system() with error check, return true if success,

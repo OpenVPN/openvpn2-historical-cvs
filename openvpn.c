@@ -693,10 +693,12 @@ openvpn (const struct options *options,
 #endif
 
   max_rw_size_link = MAX_RW_SIZE_LINK (&frame);
-  frame_print (&frame, D_MTU_INFO, "Data Channel MTU parms");
+  frame_print (&frame, D_MTU_INFO, "Data Channel MTU parms",
+	       check_debug_level (D_MTU_DEBUG));
 #ifdef FRAGMENT_ENABLE
   if (fragment)
-    frame_print (&frame_fragment, D_FRAG_DEBUG, "Fragmentation MTU parms");
+    frame_print (&frame_fragment, D_FRAG_DEBUG, "Fragmentation MTU parms",
+		 check_debug_level (D_MTU_DEBUG));
 #endif
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
@@ -710,7 +712,11 @@ openvpn (const struct options *options,
       size = MAX_RW_SIZE_LINK (&tls_multi->opt.frame);
       if (size > max_rw_size_link)
 	max_rw_size_link = size;
-      frame_print (&tls_multi->opt.frame, D_MTU_INFO, "Control Channel MTU parms");
+
+      frame_print (&tls_multi->opt.frame,
+		   D_MTU_INFO,
+		   "Control Channel MTU parms",
+		   check_debug_level (D_MTU_DEBUG));
     }
 #endif
 
@@ -1264,7 +1270,7 @@ openvpn (const struct options *options,
 		{
 		  /* received a disconnect from a connection-oriented protocol */
 		  signal_received = SIGUSR1;
-		  msg (M_INFO|M_ERRNO_SOCK, "Connection reset, restarting [%d]", status);
+		  msg (M_INFO, "Connection reset, restarting [%d]", status);
 		  sleep (2);
 		  break;		  
 		}

@@ -193,7 +193,7 @@ void frame_dynamic_finalize (struct frame *frame);
 void frame_set_mtu_dynamic (struct frame *frame, int mtu_dynamic);
 bool frame_mtu_change_pct (struct frame *frame, int pct);
 void frame_subtract_extra (struct frame *frame, const struct frame *src);
-void frame_print (const struct frame *frame, int level, const char *prefix);
+void frame_print (const struct frame *frame, int level, const char *prefix, bool long_form);
 
 void set_mtu_discover_type (int sd, int mtu_type);
 int translate_mtu_discover_type_name (const char *name);

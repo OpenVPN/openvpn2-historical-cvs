@@ -1244,7 +1244,8 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
     }
   else
     {
-      /* translate high-level device name into a GUID using the registry */
+      /* translate high-level device name into a device instance
+	 GUID using the registry */
       device_guid = get_device_guid (dev_node);
     }
 
@@ -1282,7 +1283,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   msg (M_INFO, "TAP-WIN32 device [%s] opened: %s", dev_node, device_path);
 
   /* tt->actual is passed to up and down scripts and used as the ifconfig dev name */
-  strncpynt (tt->actual, device_path, sizeof (tt->actual));
+  strncpynt (tt->actual, dev_node, sizeof (tt->actual));
 }
 
 void
@@ -1299,6 +1300,8 @@ close_tun (struct tuntap *tt)
   overlapped_io_close (&tt->writes);
   if (tt->hand != NULL)
     {
+      if (!CancelIo (tt->hand))
+	msg (M_WARN | M_ERRNO, "Warning: CancelIO failed on TAP-Win32 device");
       if (!CloseHandle (tt->hand))
 	msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on TAP-Win32 device");
     }

@@ -63,7 +63,7 @@ frame_finalize (struct frame *frame,
   if (TUN_MTU_SIZE (frame) < TUN_MTU_MIN)
     {
       msg (M_WARN, "TUN MTU value (%d) must be at least %d", TUN_MTU_SIZE (frame), TUN_MTU_MIN);
-      frame_print (frame, M_FATAL, "MTU is too small");
+      frame_print (frame, M_FATAL, "MTU is too small", false);
     }
 
   /*
@@ -81,7 +81,7 @@ frame_finalize (struct frame *frame,
     frame->dynamic.mtu_max_initial = MTU_INITIAL_UNDEF;
 
   if (link_mtu_min_defined && link_mtu_max_defined && link_mtu_min > link_mtu_max)
-    frame_print (frame, M_FATAL, "Dynamic MTU min is larger than dynamic MTU max");
+    frame_print (frame, M_FATAL, "Dynamic MTU min is larger than dynamic MTU max", true);
 
   frame_set_mtu_dynamic (frame, MTU_SET_TO_MAX);
   frame_dynamic_finalize (frame);
@@ -177,7 +177,7 @@ frame_subtract_extra (struct frame *frame, const struct frame *src)
 }
 
 void
-frame_print (const struct frame *frame, int level, const char *prefix)
+frame_print (const struct frame *frame, int level, const char *prefix, bool long_form)
 {
   struct buffer out = alloc_buf_gc (256);
   if (prefix)
@@ -187,28 +187,33 @@ frame_print (const struct frame *frame, int level, const char *prefix)
   buf_printf (&out, " extra_frame=%d", frame->extra_frame);
   buf_printf (&out, " extra_buffer=%d", frame->extra_buffer);
   buf_printf (&out, " extra_tun=%d", frame->extra_tun);
-  buf_printf (&out, " dynamic = [");
-  buf_printf (&out, " mtu_min_initial=");
-  if (frame->dynamic.mtu_min_initial == MTU_INITIAL_UNDEF)
-    buf_printf (&out, "MTU_INITIAL_UNDEF");
-  else
-    buf_printf (&out, "%d", frame->dynamic.mtu_min_initial);
-  buf_printf (&out, " mtu_max_initial=");
-  if (frame->dynamic.mtu_max_initial == MTU_INITIAL_UNDEF)
-    buf_printf (&out, "MTU_INITIAL_UNDEF");
-  else
-    buf_printf (&out, "%d", frame->dynamic.mtu_max_initial);
-  buf_printf (&out, " mtu_initial=");
-  if (frame->dynamic.mtu_initial == MTU_SET_TO_MIN)
-    buf_printf (&out, "MTU_SET_TO_MIN");
-  else if (frame->dynamic.mtu_initial == MTU_SET_TO_MAX)
-    buf_printf (&out, "MTU_SET_TO_MAX");
-  else
-    buf_printf (&out, "%d", frame->dynamic.mtu_initial);
-  buf_printf (&out, " mtu_min=%d", frame->dynamic.mtu_min);
-  buf_printf (&out, " mtu_max=%d", frame->dynamic.mtu_max);
-  buf_printf (&out, " mtu=%d", frame->dynamic.mtu);
-  buf_printf (&out, " ]]");
+
+  if (long_form)
+    {
+      buf_printf (&out, " dynamic = [");
+      buf_printf (&out, " mtu_min_initial=");
+      if (frame->dynamic.mtu_min_initial == MTU_INITIAL_UNDEF)
+	buf_printf (&out, "MTU_INITIAL_UNDEF");
+      else
+	buf_printf (&out, "%d", frame->dynamic.mtu_min_initial);
+      buf_printf (&out, " mtu_max_initial=");
+      if (frame->dynamic.mtu_max_initial == MTU_INITIAL_UNDEF)
+	buf_printf (&out, "MTU_INITIAL_UNDEF");
+      else
+	buf_printf (&out, "%d", frame->dynamic.mtu_max_initial);
+      buf_printf (&out, " mtu_initial=");
+      if (frame->dynamic.mtu_initial == MTU_SET_TO_MIN)
+	buf_printf (&out, "MTU_SET_TO_MIN");
+      else if (frame->dynamic.mtu_initial == MTU_SET_TO_MAX)
+	buf_printf (&out, "MTU_SET_TO_MAX");
+      else
+	buf_printf (&out, "%d", frame->dynamic.mtu_initial);
+      buf_printf (&out, " mtu_min=%d", frame->dynamic.mtu_min);
+      buf_printf (&out, " mtu_max=%d", frame->dynamic.mtu_max);
+      buf_printf (&out, " mtu=%d", frame->dynamic.mtu);
+      buf_printf (&out, " ]");
+    }
+  buf_printf (&out, " ]");
 
   msg (level, "%s", out.data);
 }

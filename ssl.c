@@ -311,7 +311,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
       buf_printf (&out, "%s %d %s", verify_command, ctx->error_depth, txt);
       msg (D_TLS_DEBUG, "executing verify command: %s", command);
       ret = openvpn_system (command);
-      if (ret != -1 && WEXITSTATUS (ret) == 0)
+      if (system_ok (ret))
 	{
 	  msg (D_HANDSHAKE, "VERIFY SCRIPT OK: depth=%d, %s",
 	       ctx->error_depth, txt);
@@ -319,7 +319,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 	}
       else
 	{
-	  if (ret == -1 || WEXITSTATUS (ret) == 127)
+	  if (!system_executed (ret))
 	    msg (M_ERR, "Verify command failed to execute: %s", command);
 	  msg (D_HANDSHAKE, "VERIFY SCRIPT ERROR: depth=%d, %s",
 	       ctx->error_depth, txt);

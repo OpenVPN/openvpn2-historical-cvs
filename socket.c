@@ -256,7 +256,7 @@ socket_listen_accept (int sd,
 	}
       else if (remote_len != sizeof (*remote))
 	{
-	  msg (D_LINK_ERRORS, "received strange incoming connection with unknown address length=%d", remote_len);
+	  msg (D_LINK_ERRORS, "WARNING: Received strange incoming connection with unknown address length=%d", remote_len);
 	}
       else
 	{
@@ -265,7 +265,7 @@ socket_listen_accept (int sd,
 	      && !addr_match (&remote_verify, remote))
 	    {
 	      msg (M_WARN,
-		   "Rejected connection attempt from %s due to --remote setting",
+		   "NOTE: Rejected connection attempt from %s due to --remote setting",
 		   print_sockaddr (remote));
 	      if (openvpn_close_socket (new_sd))
 		msg (M_SOCKERR, "close socket failed (new_sd)");
@@ -337,6 +337,16 @@ socket_frame_init (const struct frame *frame, struct link_socket *sock)
       stream_buf_init (&sock->stream_buf, &sock->stream_buf_data);
 #endif
     }
+}
+
+/*
+ * Adjust frame structure based on a Path MTU value given
+ * to us by the OS.
+ */
+void
+frame_adjust_path_mtu (struct frame *frame, int pmtu, int proto)
+{
+  frame_set_mtu_dynamic_upper_bound (frame, pmtu - datagram_overhead (proto), false);
 }
 
 /*
@@ -671,7 +681,7 @@ link_socket_incoming_addr (struct buffer *buf,
 
 bad:
   msg (D_LINK_ERRORS,
-       "Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
+       "NOTE: Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
        print_sockaddr (from_addr),
        (int)from_addr->sin_family,
        print_sockaddr (&sock->lsa->remote));
@@ -732,6 +742,30 @@ link_socket_close (struct link_socket *sock)
  */
 
 static inline void
+stream_buf_reset (struct stream_buf *sb)
+{
+  msg (D_STREAM_DEBUG, "STREAM: RESET");
+  sb->residual_fully_formed = false;
+  sb->buf = sb->buf_init;
+  CLEAR (sb->next);
+  sb->len = -1;
+}
+
+void
+stream_buf_init (struct stream_buf *sb,
+		 struct buffer *buf)
+{
+  sb->buf_init = *buf;
+  sb->maxlen = sb->buf_init.len;
+  sb->buf_init.len = 0;
+  sb->residual = alloc_buf (sb->maxlen);
+  sb->error = false;
+  stream_buf_reset (sb);
+
+  msg (D_STREAM_DEBUG, "STREAM: INIT maxlen=%d", sb->maxlen);
+}
+
+static inline void
 stream_buf_set_next (struct stream_buf *sb)
 {
   /* set up 'next' for next i/o read */
@@ -744,16 +778,6 @@ stream_buf_set_next (struct stream_buf *sb)
        sb->len, sb->maxlen);
   ASSERT (sb->next.len > 0);
   ASSERT (buf_safe (&sb->buf, sb->next.len));
-}
-
-static inline void
-stream_buf_reset (struct stream_buf *sb)
-{
-  msg (D_STREAM_DEBUG, "STREAM: RESET");
-  sb->residual_fully_formed = false;
-  sb->buf = sb->buf_init;
-  CLEAR (sb->next);
-  sb->len = -1;
 }
 
 static inline void
@@ -774,25 +798,6 @@ stream_buf_get_next (struct stream_buf *sb, struct buffer *buf)
   *buf = sb->next;
 }
 
-void
-stream_buf_init (struct stream_buf *sb,
-		 struct buffer *buf)
-{
-  sb->buf_init = *buf;
-  sb->maxlen = sb->buf_init.len;
-  sb->buf_init.len = 0;
-  sb->residual = alloc_buf (sb->maxlen);
-  stream_buf_reset (sb);
-
-  msg (D_STREAM_DEBUG, "STREAM: INIT maxlen=%d", sb->maxlen);
-}
-
-void
-stream_buf_close (struct stream_buf* sb)
-{
-  free_buf (&sb->residual);
-}
-
 bool
 stream_buf_read_setup (struct link_socket* sock)
 {
@@ -803,9 +808,9 @@ stream_buf_read_setup (struct link_socket* sock)
 	  ASSERT (buf_copy (&sock->stream_buf.buf, &sock->stream_buf.residual));
 	  ASSERT (buf_init (&sock->stream_buf.residual, 0));
 	  sock->stream_buf.residual_fully_formed = stream_buf_added (&sock->stream_buf, 0);
-	    msg (D_STREAM_DEBUG, "STREAM: RESIDUAL FULLY FORMED [%s], len=%d",
-		 sock->stream_buf.residual_fully_formed ? "YES" : "NO",
-		 sock->stream_buf.residual.len);
+	  msg (D_STREAM_DEBUG, "STREAM: RESIDUAL FULLY FORMED [%s], len=%d",
+	       sock->stream_buf.residual_fully_formed ? "YES" : "NO",
+	       sock->stream_buf.residual.len);
 	}
       if (!sock->stream_buf.residual_fully_formed)
 	stream_buf_set_next (&sock->stream_buf);
@@ -830,8 +835,14 @@ stream_buf_added (struct stream_buf *sb,
       packet_size_type net_size;
       ASSERT (buf_read (&sb->buf, &net_size, sizeof (net_size)));
       sb->len = ntohps (net_size);
+
       if (sb->len < 1 || sb->len > sb->maxlen)
-	msg (M_FATAL, "Bad encapsulated packet length from peer (%d), which must be > 0 and <= %d -- please ensure that --link-mtu is equal on both peers -- this condition could also indicate a possible active attack on the TCP link", sb->len, sb->maxlen); /* it might be better behaviour to restart than crash at this point */
+	{
+	  msg (M_WARN, "WARNING: Bad encapsulated packet length from peer (%d), which must be > 0 and <= %d -- please ensure that --tun-mtu or --link-mtu is equal on both peers -- this condition could also indicate a possible active attack on the TCP link -- [Attemping restart...]", sb->len, sb->maxlen);
+	  stream_buf_reset (sb);
+	  sb->error = true;
+	  return false;
+	}
     }
 
   /* is our incoming packet fully read? */
@@ -852,6 +863,12 @@ stream_buf_added (struct stream_buf *sb,
       stream_buf_set_next (sb);
       return false;
     }
+}
+
+void
+stream_buf_close (struct stream_buf* sb)
+{
+  free_buf (&sb->residual);
 }
 
 /*
@@ -974,6 +991,40 @@ proto2ascii_all ()
 }
 
 /*
+ * Given a local proto, return local proto
+ * if !remote, or compatible remote proto
+ * if remote.
+ *
+ * This is used for options compatibility
+ * checking.
+ */
+int
+proto_remote (int proto, bool remote)
+{
+  ASSERT (proto >= 0 && proto < PROTO_N);
+  if (remote)
+    {
+      if (proto == PROTO_TCPv4_SERVER)
+	return PROTO_TCPv4_CLIENT;
+      if (proto == PROTO_TCPv4_CLIENT)
+	return PROTO_TCPv4_SERVER;
+    }
+  return proto;
+}
+
+/*
+ * Bad incoming address lengths that differ from what
+ * we expect are considered to be fatal errors.
+ */
+void
+bad_address_length (int actual, int expected)
+{
+  msg (M_FATAL, "ERROR: received strange incoming packet with an address length of %d -- we only accept address lengths of %d.",
+       actual,
+       expected);
+}
+
+/*
  * Socket Read Routines
  */
 
@@ -1082,7 +1133,10 @@ socket_recv_queue (struct link_socket *sock, int maxsize)
 
       if (!status) /* operation completed immediately? */
 	{
-	  ASSERT (!sock->reads.addr_defined || sock->reads.addrlen == sizeof (sock->reads.addr));
+	  ASSERT (sock->reads.addr_defined);
+	  if (sock->reads.addrlen != sizeof (sock->reads.addr))
+	    bad_address_length (sock->reads.addrlen, sizeof (sock->reads.addr));
+
 	  sock->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 
 	  /* since we got an immediate return, we must signal the event object ourselves */
@@ -1294,7 +1348,8 @@ socket_finalize (
     {
       if (ret >= 0 && io->addr_defined)
 	{
-	  ASSERT (io->addrlen == sizeof (io->addr));
+	  if (io->addrlen != sizeof (io->addr))
+	    bad_address_length (io->addrlen, sizeof (io->addr));
 	  *from = io->addr;
 	}
       else

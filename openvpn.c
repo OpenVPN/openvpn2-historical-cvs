@@ -54,6 +54,169 @@
 #include "memdbg.h"
 
 /*
+ * This random string identifies an OpenVPN ping packet.
+ * It should be of sufficient length and randomness
+ * so as not to collide with other tunnel data.
+ */
+static const uint8_t ping_string[] = {
+  0x2a, 0x18, 0x7b, 0xf3, 0x64, 0x1e, 0xb4, 0xcb,
+  0x07, 0xed, 0x2d, 0x0a, 0x98, 0x1f, 0xc7, 0x48
+};
+
+/*
+ * This random string identifies an OpenVPN
+ * options consistency check packet.
+ * It should be of sufficient length and randomness
+ * so as not to collide with other tunnel data.
+ *
+ * The OCC protocol is as follows:
+ *
+ * occ_magic -- (16 octets)
+ *
+ * type [OCC_REQUEST | OCC_REPLY] (1 octet)
+ * null terminated options string if OCC_REPLY (variable)
+ *
+ * When encryption is used, the OCC packet
+ * is encapsulated within the encrypted
+ * envelope.
+ */
+
+static const uint8_t occ_magic[] = {
+  0x28, 0x7f, 0x34, 0x6b, 0xd4, 0xef, 0x7a, 0x81,
+  0x2d, 0x56, 0xb8, 0xd3, 0xaf, 0xc5, 0x45, 0x9c
+};
+
+/*
+ * OCC protocol opcodes used for options consistency checks.
+ */
+
+#define OCC_REQUEST   0  /* request options string from peer */
+#define OCC_REPLY     1  /* deliver options string to peer */
+
+/*
+ * Send an OCC_REQUEST once every OCC_INTERVAL
+ * seconds until a reply is received.
+ *
+ * If we haven't received a reply after
+ * OCC_N_TRIES, give up.
+ */
+#define OCC_INTERVAL_SECONDS 10
+#define OCC_N_TRIES          12
+
+/*
+ * Other OCC protocol opcodes used to estimate the MTU empirically.
+ */
+#define OCC_MTU_LOAD_REQUEST   2 /* Ask peer to send a big packet to us */
+#define OCC_MTU_LOAD           3 /* Send a big packet to peer */
+#define OCC_MTU_REQUEST        4 /* Ask peer to tell us the largest
+				    packet it has received from us so far */
+#define OCC_MTU_REPLY          5 /* Send largest packet size to peer */
+
+/*
+ * Process one command from mtu_load_test_sequence
+ * once every n seconds, if --mtu-test is specified.
+ */
+#define OCC_MTU_LOAD_INTERVAL_SECONDS 3
+
+/*
+ * Used to conduct a load test command sequence
+ * of UDP connection for empirical MTU measurement.
+ */
+struct mtu_load_test
+{
+  int op;     /* OCC opcode to send to peer */
+  int delta;  /* determine packet size to send by using
+		 this delta against currently
+	         configured MTU */
+};
+
+static const struct mtu_load_test mtu_load_test_sequence[] = {
+
+  { OCC_MTU_LOAD_REQUEST, -1000 },
+  { OCC_MTU_LOAD,         -1000 },
+  { OCC_MTU_LOAD_REQUEST, -1000 },
+  { OCC_MTU_LOAD,         -1000 },
+  { OCC_MTU_LOAD_REQUEST, -1000 },
+  { OCC_MTU_LOAD,         -1000 },
+
+  { OCC_MTU_LOAD_REQUEST, -500 },
+  { OCC_MTU_LOAD,         -500 },
+  { OCC_MTU_LOAD_REQUEST, -500 },
+  { OCC_MTU_LOAD,         -500 },
+  { OCC_MTU_LOAD_REQUEST, -500 },
+  { OCC_MTU_LOAD,         -500 },
+
+  { OCC_MTU_LOAD_REQUEST, -750 },
+  { OCC_MTU_LOAD,         -750 },
+  { OCC_MTU_LOAD_REQUEST, -750 },
+  { OCC_MTU_LOAD,         -750 },
+  { OCC_MTU_LOAD_REQUEST, -750 },
+  { OCC_MTU_LOAD,         -750 },
+
+  { OCC_MTU_LOAD_REQUEST, -400 },
+  { OCC_MTU_LOAD,         -400 },
+  { OCC_MTU_LOAD_REQUEST, -400 },
+  { OCC_MTU_LOAD,         -400 },
+  { OCC_MTU_LOAD_REQUEST, -400 },
+  { OCC_MTU_LOAD,         -400 },
+
+  { OCC_MTU_LOAD_REQUEST, -300 },
+  { OCC_MTU_LOAD,         -300 },
+  { OCC_MTU_LOAD_REQUEST, -300 },
+  { OCC_MTU_LOAD,         -300 },
+  { OCC_MTU_LOAD_REQUEST, -300 },
+  { OCC_MTU_LOAD,         -300 },
+
+  { OCC_MTU_LOAD_REQUEST, -200 },
+  { OCC_MTU_LOAD,         -200 },
+  { OCC_MTU_LOAD_REQUEST, -200 },
+  { OCC_MTU_LOAD,         -200 },
+  { OCC_MTU_LOAD_REQUEST, -200 },
+  { OCC_MTU_LOAD,         -200 },
+
+  { OCC_MTU_LOAD_REQUEST, -150 },
+  { OCC_MTU_LOAD,         -150 },
+  { OCC_MTU_LOAD_REQUEST, -150 },
+  { OCC_MTU_LOAD,         -150 },
+  { OCC_MTU_LOAD_REQUEST, -150 },
+  { OCC_MTU_LOAD,         -150 },
+
+  { OCC_MTU_LOAD_REQUEST, -100 },
+  { OCC_MTU_LOAD,         -100 },
+  { OCC_MTU_LOAD_REQUEST, -100 },
+  { OCC_MTU_LOAD,         -100 },
+  { OCC_MTU_LOAD_REQUEST, -100 },
+  { OCC_MTU_LOAD,         -100 },
+
+  { OCC_MTU_LOAD_REQUEST, -50 },
+  { OCC_MTU_LOAD,         -50 },
+  { OCC_MTU_LOAD_REQUEST, -50 },
+  { OCC_MTU_LOAD,         -50 },
+  { OCC_MTU_LOAD_REQUEST, -50 },
+  { OCC_MTU_LOAD,         -50 },
+
+  { OCC_MTU_LOAD_REQUEST, 0 },
+  { OCC_MTU_LOAD,         0 },
+  { OCC_MTU_LOAD_REQUEST, 0 },
+  { OCC_MTU_LOAD,         0 },
+  { OCC_MTU_LOAD_REQUEST, 0 },
+  { OCC_MTU_LOAD,         0 },
+
+  { OCC_MTU_REQUEST,      0 },
+  { OCC_MTU_REQUEST,      0 },
+  { OCC_MTU_REQUEST,      0 },
+  { OCC_MTU_REQUEST,      0 },
+  { OCC_MTU_REQUEST,      0 },
+  { OCC_MTU_REQUEST,      0 },
+  { OCC_MTU_REQUEST,      0 },
+  { OCC_MTU_REQUEST,      0 },
+  { OCC_MTU_REQUEST,      0 },
+  { OCC_MTU_REQUEST,      0 },
+
+  { -1, 0 }
+};
+
+/*
  * Should we become a daemon?
  *  level == 0 after parameters have been parsed but before any initialization
  *  level == 1 after initialization but before any SSL/TLS negotiation or
@@ -77,6 +240,24 @@ possibly_become_daemon (int level, const struct options* options, const bool fir
 	}
     }
   return ret;
+}
+
+
+/*
+ * Possibly add routes and/or call route-up script
+ * based on options.
+ */
+static void
+do_route (const struct options* options,
+	  struct route_list *route_list)
+{
+  if (!options->route_noexec)
+    add_routes (route_list, false);
+  if (options->route_script)
+    {
+      setenv_str ("script_type", "route-up");
+      system_check (options->route_script, "Route script failed", false);
+    }
 }
 
 /* Handle signals */
@@ -144,7 +325,7 @@ signal_handler_exit (int signum)
 #endif
 
 #ifdef USE_CRYPTO
-#define MD5SUM(buf, len) md5sum(buf, len)
+#define MD5SUM(buf, len) md5sum(buf, len, 0)
 #else
 #define MD5SUM(buf, len) "[unavailable]"
 #endif
@@ -268,7 +449,7 @@ openvpn (const struct options *options,
   struct buffer to_tun = clear_buf ();
   struct buffer to_link = clear_buf ();
   struct buffer buf = clear_buf ();
-  struct buffer ping_buf = clear_buf ();
+  struct buffer aux_buf = clear_buf ();
   struct buffer nullbuf = clear_buf ();
 
   /* tells us to free to_link buffer after it has been written to TCP/UDP port */
@@ -305,25 +486,41 @@ openvpn (const struct options *options,
   counter_type tun_read_bytes = 0;
   counter_type tun_write_bytes = 0;
   counter_type link_read_bytes = 0;
+  counter_type link_read_bytes_auth = 0;
   counter_type link_write_bytes = 0;
 
   /*
    * Timer objects for ping and inactivity
    * timeout features.
    */
+  struct event_timeout wait_for_connect = event_timeout_clear_ret ();
   struct event_timeout inactivity_interval = event_timeout_clear_ret ();
   struct event_timeout ping_send_interval = event_timeout_clear_ret ();
   struct event_timeout ping_rec_interval = event_timeout_clear_ret ();
 
+  /* the option strings must match across peers */
+  char *options_string_local = NULL;
+  char *options_string_remote = NULL;
+
+  int occ_op = -1;               /* OCC request code received from remote */
+  int occ_n_tries = 0;
+  struct event_timeout occ_interval = event_timeout_clear_ret ();
+
   /*
-   * This random string identifies an OpenVPN ping packet.
-   * It should be of sufficient length and randomness
-   * so as not to collide with other tunnel data.
+   * Keep track of maximum packet size received so far
+   * (of authenticated packets).
    */
-  static const uint8_t ping_string[] = {
-    0x2a, 0x18, 0x7b, 0xf3, 0x64, 0x1e, 0xb4, 0xcb,
-    0x07, 0xed, 0x2d, 0x0a, 0x98, 0x1f, 0xc7, 0x48
-  };
+  int original_recv_size = 0;    /* temporary */
+  int max_recv_size_local = 0;   /* max packet size received */
+  int max_recv_size_remote = 0;  /* max packet size received by remote */
+  int max_send_size_local = 0;   /* max packet size sent */
+  int max_send_size_remote = 0;  /* max packet size sent by remote */
+
+  /* remote wants us to send back a load test packet of this size */
+  int occ_mtu_load_size = 0;
+
+  struct event_timeout occ_mtu_load_test_interval = event_timeout_clear_ret ();
+  int occ_mtu_load_n_tries = 0;
 
 #ifdef USE_CRYPTO
 
@@ -334,9 +531,6 @@ openvpn (const struct options *options,
 
   /* master OpenVPN SSL/TLS object */
   struct tls_multi *tls_multi = NULL;
-
-  /* an options string that must match on TLS client and server */
-  char *data_channel_options = NULL;
 
 #ifdef USE_PTHREAD
 
@@ -414,7 +608,6 @@ openvpn (const struct options *options,
 #endif
 
   /* route stuff */
-  bool add_route_flag = false;
   struct event_timeout route_wakeup = event_timeout_clear_ret ();
 
 #ifdef HAVE_SIGNAL_H
@@ -636,7 +829,7 @@ openvpn (const struct options *options,
       to.renegotiate_packets = options->renegotiate_packets;
       to.renegotiate_seconds = options->renegotiate_seconds;
       to.single_session = options->single_session;
-      to.disable_occ = options->disable_occ;
+      to.disable_occ = !options->occ;
 
       /* TLS handshake authentication (--tls-auth) */
       if (options->tls_auth_file)
@@ -732,9 +925,7 @@ openvpn (const struct options *options,
     {
       int size;
 
-      data_channel_options = options_string (options, &frame);
-      msg (D_SHOW_DC_OPT, "Data Channel Options String: '%s'", data_channel_options);
-      tls_multi_init_finalize (tls_multi, &frame, data_channel_options);
+      tls_multi_init_finalize (tls_multi, &frame);
       size = MAX_RW_SIZE_LINK (&tls_multi->opt.frame);
       if (size > max_rw_size_link)
 	max_rw_size_link = size;
@@ -742,7 +933,7 @@ openvpn (const struct options *options,
       frame_print (&tls_multi->opt.frame,
 		   D_MTU_INFO,
 		   "Control Channel MTU parms",
-		   check_debug_level (D_MTU_DEBUG));
+		   true);
     }
 #endif
 
@@ -753,6 +944,7 @@ openvpn (const struct options *options,
 
   read_link_buf = alloc_buf (BUF_SIZE (&frame));
   read_tun_buf = alloc_buf (BUF_SIZE (&frame));
+  aux_buf = alloc_buf (BUF_SIZE (&frame));
 
 #ifdef USE_CRYPTO
   encrypt_buf = alloc_buf (BUF_SIZE (&frame));
@@ -770,8 +962,7 @@ openvpn (const struct options *options,
 #ifdef FRAGMENT_ENABLE
   /* fragmenting code has buffers to initialize once frame parameters are known */
   if (fragment)
-    fragment_frame_init (fragment, &frame_fragment,
-			 (options->mtu_icmp && ipv4_tun));
+    fragment_frame_init (fragment, &frame_fragment);
 #endif
 
   /* tun code has buffers to initialize once frame parameters are known */
@@ -829,14 +1020,16 @@ openvpn (const struct options *options,
 	  const char *guess = guess_tuntap_dev (options->dev,
 						options->dev_type,
 						options->dev_node);
-
 	  do_ifconfig (tuntap,
 		       options->dev,
 		       options->dev_type,
 		       guess,
 		       options->ifconfig_local,
 		       options->ifconfig_remote_netmask,
-		       TUN_MTU_SIZE (&frame));
+		       TUN_MTU_SIZE (&frame),
+		       addr_host (&link_socket.lsa->local),
+		       addr_host (&link_socket.lsa->remote),
+		       options->ifconfig_noexec);
 	}
 
       /* open the tun device */
@@ -851,7 +1044,10 @@ openvpn (const struct options *options,
 		     tuntap->actual,
 		     options->ifconfig_local,
 		     options->ifconfig_remote_netmask,
-		     TUN_MTU_SIZE (&frame));
+		     TUN_MTU_SIZE (&frame),
+		     addr_host (&link_socket.lsa->local),
+		     addr_host (&link_socket.lsa->remote),
+		     options->ifconfig_noexec);
 
       /* perform any post-tun/tap open config steps */
       open_tun_post_config (tuntap, options->tuntap_flags);
@@ -867,7 +1063,9 @@ openvpn (const struct options *options,
 		  NULL,
 		  "up");
 
-      add_route_flag = true;
+      /* possibly add routes */
+      if (!options->route_delay_defined)
+	do_route (options, route_list);
     }
   else
     {
@@ -898,12 +1096,39 @@ openvpn (const struct options *options,
   /*
    * Print MTU INFO
    */
-  frame_print (&frame, D_MTU_INFO, "Data Channel MTU parms",
-	       check_debug_level (D_MTU_DEBUG));
+  frame_print (&frame, D_MTU_INFO,
+	       "Data Channel MTU parms",
+	       true);
 #ifdef FRAGMENT_ENABLE
   if (fragment)
-    frame_print (&frame_fragment, D_MTU_INFO, "Fragmentation MTU parms",
-		 check_debug_level (D_MTU_DEBUG));
+    frame_print (&frame_fragment, D_MTU_INFO,
+		 "Fragmentation MTU parms",
+		 true);
+#endif
+
+  /*
+   * Get local and remote options compatibility strings.
+   */
+  options_string_local = options_string (options, &frame, tuntap, false);
+  options_string_remote = options_string (options, &frame, tuntap, true);
+
+  msg (D_SHOW_OCC, "Local Options String: '%s'", options_string_local);
+  msg (D_SHOW_OCC, "Expected Remote Options String: '%s'", options_string_remote);
+
+#ifdef USE_CRYPTO
+  msg (D_SHOW_OCC_HASH, "Local Options hash (VER=%s): '%s'",
+       options_string_version (options_string_local),
+       md5sum (options_string_local, strlen(options_string_local), 9));
+  msg (D_SHOW_OCC_HASH, "Expected Remote Options hash (VER=%s): '%s'",
+       options_string_version (options_string_remote),
+       md5sum (options_string_remote, strlen (options_string_remote), 9));
+#endif
+
+#if defined(USE_CRYPTO) && defined(USE_SSL)
+  if (tls_multi)
+    tls_multi_init_set_options(tls_multi,
+			       options_string_local,
+			       options_string_remote);
 #endif
 
 #ifdef HAVE_GETTIMEOFDAY
@@ -998,6 +1223,9 @@ openvpn (const struct options *options,
 
   current = time (NULL);
 
+  /* initialize connection establishment timer */
+  event_timeout_init (&wait_for_connect, current, 5);
+
   /* initialize inactivity timeout */
   if (options->inactivity_timeout)
     event_timeout_init (&inactivity_interval, current, options->inactivity_timeout);
@@ -1005,13 +1233,21 @@ openvpn (const struct options *options,
   /* initialize pings */
 
   if (options->ping_send_timeout)
-    {
-      ping_buf = alloc_buf (BUF_SIZE (&frame));
-      event_timeout_init (&ping_send_interval, 0, options->ping_send_timeout);
-    }
+    event_timeout_init (&ping_send_interval, 0, options->ping_send_timeout);
 
   if (options->ping_rec_timeout)
     event_timeout_init (&ping_rec_interval, current, options->ping_rec_timeout);
+
+  /* initialize occ timers */
+
+  if (options->occ
+      && !TLS_MODE
+      && options_string_local
+      && options_string_remote)
+    event_timeout_init (&occ_interval, current, OCC_INTERVAL_SECONDS);
+
+  if (options->mtu_test)
+    event_timeout_init (&occ_mtu_load_test_interval, current, OCC_MTU_LOAD_INTERVAL_SECONDS);
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
 #ifdef USE_PTHREAD
@@ -1037,6 +1273,7 @@ openvpn (const struct options *options,
       /* initialize select() timeout */
       timeval.tv_sec = BIG_TIMEOUT;
       timeval.tv_usec = 0;
+      tv = &timeval;
 
 #ifdef USE_CRYPTO
       /* flush current packet-id to file once per 60
@@ -1075,7 +1312,6 @@ openvpn (const struct options *options,
 	    {
 	      timeval.tv_sec = wakeup;
 	      timeval.tv_usec = 0;
-	      tv = &timeval;
 	    }
 	}
 #endif
@@ -1083,45 +1319,35 @@ openvpn (const struct options *options,
       current = time (NULL);
 
       /*
+       * Things that need to happen immediately after connection initiation should go here.
+       */
+      if (event_timeout_defined (&wait_for_connect))
+	{
+	  if (event_timeout_trigger (&wait_for_connect, current, &timeval))
+	    {
+	      if (CONNECTION_ESTABLISHED (&link_socket))
+		{
+		  /* perform connection-establishment config steps
+		     on tun/tap device */
+		  open_tun_connection_establishment (tuntap, options->tuntap_flags);
+
+		  /* if --route-delay was specified, start timer */
+		  if (options->route_delay_defined)
+		    event_timeout_init (&route_wakeup, current, options->route_delay);
+
+		  event_timeout_clear (&wait_for_connect);
+		}
+	    }
+	}
+
+      /*
        * Should we add routes?
        */
-      if (add_route_flag)
+      if (event_timeout_trigger (&route_wakeup, current, &timeval))
 	{
-	  if (!event_timeout_defined (&route_wakeup))
-	    {
-	      /* this variable becomes true upon connection initiation */
-	      if (link_socket.set_outgoing_initial)
-		event_timeout_init (&route_wakeup, current, options->route_delay);
-	      else
-		{
-		  /* check set_outgoing_initial once per second */
-		  if (timeval.tv_sec > 1)
-		    timeval.tv_sec = 1;
-		  tv = &timeval;
-		}
-	    }
-
-	  /* has our delay since connection initiation elapsed yet? */
-	  if (event_timeout_trigger (&route_wakeup, current))
-	    {
-	      if (!options->route_noauto)
-		add_routes (route_list, false);
-	      if (options->route_script)
-		{
-		  setenv_str ("script_type", "route-up");
-		  system_check (options->route_script, "Route script failed", false);
-		  current = time (NULL);
-		}
-	      add_route_flag = false;
-	      event_timeout_clear (&route_wakeup);
-	    }
-
-	  if (event_timeout_defined (&route_wakeup))
-	    {
-	      /* delay still pending, make sure to wake up at correct time */
-	      event_timeout_wakeup (&route_wakeup, current, &timeval);
-	      tv = &timeval;
-	    }
+	  do_route (options, route_list);
+	  current = time (NULL);
+	  event_timeout_clear (&route_wakeup);
 	}
 
       /*
@@ -1129,15 +1355,13 @@ openvpn (const struct options *options,
        */
       if (options->inactivity_timeout)
 	{
-	  if (event_timeout_trigger (&inactivity_interval, current)) 
+	  if (event_timeout_trigger (&inactivity_interval, current, &timeval)) 
 	    {
 	      msg (M_INFO, "Inactivity timeout (--inactive), exiting");
 	      signal_received = 0;
 	      signal_text = "inactive";
 	      break;
 	    }
-	  event_timeout_wakeup (&inactivity_interval, current, &timeval);
-	  tv = &timeval;
 	}
 
       /*
@@ -1147,7 +1371,7 @@ openvpn (const struct options *options,
       if (options->ping_rec_timeout &&
 	  (!options->ping_timer_remote || addr_defined (&link_socket_addr->actual)))
 	{
-	  if (event_timeout_trigger (&ping_rec_interval, current)) 
+	  if (event_timeout_trigger (&ping_rec_interval, current, &timeval)) 
 	    {
 	      switch (options->ping_rec_timeout_action)
 		{
@@ -1166,8 +1390,169 @@ openvpn (const struct options *options,
 		}
 	      break;
 	    }
-	  event_timeout_wakeup (&ping_rec_interval, current, &timeval);
-	  tv = &timeval;
+	}
+
+      /*
+       * Should we send an OCC_REQUEST message?
+       */
+      if (event_timeout_defined (&occ_interval)
+	  && !to_link.len
+	  && occ_op < 0)
+	{
+	  if (event_timeout_trigger (&occ_interval, current, &timeval))
+	    {
+	      if (++occ_n_tries >= OCC_N_TRIES)
+		{
+		  if (options->remote)
+		    /*
+		     * No OCC_REPLY from peer after repeated attempts.
+		     * Give up.
+		     */
+		    msg (D_SHOW_OCC, "NOTE: failed to obtain options consistency info from peer -- this could occur if the remote peer is running a version of OpenVPN before 1.5-beta8 or if there is a network connectivity problem, and will not necessarily prevent OpenVPN from running (%u bytes received from peer, %u bytes authenticated data channel traffic) -- you can disable the options consistency check with --disable-occ.", (unsigned int) link_read_bytes, (unsigned int) link_read_bytes_auth);
+		  event_timeout_clear (&occ_interval);
+		}
+	      else
+		{
+		  occ_op = OCC_REQUEST;
+
+		  /*
+		   * If we don't hear back from peer, send another
+		   * OCC_REQUEST in OCC_INTERVAL_SECONDS.
+		   */
+		  event_timeout_reset (&occ_interval, current);
+		}
+	    }
+	}
+
+      /*
+       * Should we send an MTU load test?
+       */
+      if (event_timeout_defined (&occ_mtu_load_test_interval)
+	  && !to_link.len
+	  && occ_op < 0)
+	{
+	  if (event_timeout_trigger (&occ_mtu_load_test_interval, current, &timeval))
+	    {
+	      if (CONNECTION_ESTABLISHED (&link_socket))
+		{
+		  const struct mtu_load_test *entry;
+
+		  if (!occ_mtu_load_n_tries)
+		    msg (M_INFO, "NOTE: Beginning empirical MTU test -- results should be available in 3 to 4 minutes.");
+
+		  entry = &mtu_load_test_sequence[occ_mtu_load_n_tries++];
+		  if (entry->op >= 0)
+		    {
+		      occ_op = entry->op;
+		      occ_mtu_load_size = MAX_RW_SIZE_LINK (&frame) + entry->delta;
+		    }
+		  else
+		    {
+		      msg (M_INFO,  "NOTE: failed to empirically measure MTU (requires 1.5-beta8 or higher at other end of connection).");
+		      event_timeout_clear (&occ_mtu_load_test_interval);
+		      occ_mtu_load_n_tries = 0;
+		    }
+		}
+	    }
+	}
+
+      /*
+       * Should we send an OCC message?
+       */
+      if (occ_op >= 0 && !to_link.len)
+	{
+	  bool doit = false;
+
+	  buf = aux_buf;
+	  ASSERT (buf_init (&buf, EXTRA_FRAME (&frame)));
+	  ASSERT (buf_safe (&buf, MAX_RW_SIZE_TUN (&frame)));
+	  ASSERT (buf_write (&buf, occ_magic, sizeof (occ_magic)));
+
+	  switch (occ_op)
+	    {
+	    case OCC_REQUEST:
+	      if (!buf_write_u8 (&buf, OCC_REQUEST))
+		break;
+	      msg (D_PACKET_CONTENT, "SENT OCC_REQUEST");
+	      doit = true;
+	      break;
+
+	    case OCC_REPLY:
+	      if (!options_string_local)
+		break;
+	      if (!buf_write_u8 (&buf, OCC_REPLY))
+		break;
+	      if (!buf_write (&buf, options_string_local,
+			      strlen (options_string_local) + 1))
+		break;
+	      msg (D_PACKET_CONTENT, "SENT OCC_REPLY");
+	      doit = true;
+	      break;
+
+	    case OCC_MTU_REQUEST:
+	      if (!buf_write_u8 (&buf, OCC_MTU_REQUEST))
+		break;
+	      msg (D_PACKET_CONTENT, "SENT OCC_MTU_REQUEST");
+	      doit = true;
+	      break;
+
+	    case OCC_MTU_REPLY:
+	      if (!buf_write_u8 (&buf, OCC_MTU_REPLY))
+		break;
+	      if (!buf_write_u16 (&buf, max_recv_size_local))
+		break;
+	      if (!buf_write_u16 (&buf, max_send_size_local))
+		break;
+	      msg (D_PACKET_CONTENT, "SENT OCC_MTU_REPLY");
+	      doit = true;
+	      break;
+
+	    case OCC_MTU_LOAD_REQUEST:
+	      if (!buf_write_u8 (&buf, OCC_MTU_LOAD_REQUEST))
+		break;
+	      if (!buf_write_u16 (&buf, occ_mtu_load_size))
+		break;
+	      msg (D_PACKET_CONTENT, "SENT OCC_MTU_LOAD_REQUEST");
+	      doit = true;
+	      break;
+
+	    case OCC_MTU_LOAD:
+	      {
+		int need_to_add;
+
+		if (!buf_write_u8 (&buf, OCC_MTU_LOAD))
+		  break;
+		need_to_add = min_int (
+				       occ_mtu_load_size
+				       - sizeof (occ_magic)
+				       - sizeof (uint8_t)
+				       - EXTRA_FRAME (&frame),
+				       MAX_RW_SIZE_TUN (&frame)); 
+		while (need_to_add > 0)
+		  {
+		    /*
+		     * Fill the load test packet with pseudo-random bytes.
+		     */
+		    if (!buf_write_u8 (&buf, get_random() & 0xFF))
+		      break;
+		    --need_to_add;
+		  }
+		msg (D_PACKET_CONTENT, "SENT OCC_MTU_LOAD %d", occ_mtu_load_size);
+		doit = true;
+	      }
+	      break;
+	    }
+
+	  if (doit)
+	    {
+	      /*
+	       * We will treat the packet like any other outgoing packet,
+	       * compress, encrypt, sign, etc.
+	       */
+#             include "encrypt_sign.h"
+	    }
+
+	  occ_op = -1;
 	}
 
 #ifdef FRAGMENT_ENABLE
@@ -1186,47 +1571,8 @@ openvpn (const struct options *options,
 	      && fragment_outgoing_defined (fragment)
 	      && fragment_ready_to_send (fragment, &buf, &frame_fragment))
 	    {
-#ifdef USE_CRYPTO
-#ifdef USE_SSL
-	      /*
-	       * If TLS mode, get the key we will use to encrypt
-	       * the packet.
-	       */
-	      mutex_lock (L_TLS);
-	      if (tls_multi)
-		tls_pre_encrypt (tls_multi, &buf, &crypto_options);
-#endif
-	      /*
-	       * Encrypt the packet and write an optional
-	       * HMAC authentication record.
-	       */
-	      openvpn_encrypt (&buf, encrypt_buf, &crypto_options, &frame, current);
-#endif
-	      /*
-	       * Get the address we will be sending the packet to.
-	       */
-	      link_socket_get_outgoing_addr (&buf, &link_socket,
-					    &to_link_addr);
-#ifdef USE_CRYPTO
-#ifdef USE_SSL
-	      /*
-	       * In TLS mode, prepend the appropriate one-byte opcode
-	       * to the packet which identifies it as a data channel
-	       * packet and gives the low-permutation version of
-	       * the key-id to the recipient so it knows which
-	       * decrypt key to use.
-	       */
-	      if (tls_multi)
-		tls_post_encrypt (tls_multi, &buf);
-	      mutex_unlock (L_TLS);
-#endif
-#endif
-	      to_link = buf;
-	      free_to_link = false;
-	    }
-	  if (!to_tun.len && fragment_icmp (fragment, &buf))
-	    {
-	      to_tun = buf;
+#             define NO_COMP_FRAG
+#             include "encrypt_sign.h"
 	    }
 	  fragment_housekeeping (fragment, &frame_fragment, current, &timeval);
 	  tv = &timeval;
@@ -1240,48 +1586,20 @@ openvpn (const struct options *options,
 	{
 	  if (!to_link.len)
 	    {
-	      if (event_timeout_trigger (&ping_send_interval, current))
+	      if (event_timeout_trigger (&ping_send_interval, current, &timeval))
 		{
-		  buf = ping_buf;
+		  buf = aux_buf;
 		  ASSERT (buf_init (&buf, EXTRA_FRAME (&frame)));
 		  ASSERT (buf_safe (&buf, MAX_RW_SIZE_TUN (&frame)));
 		  ASSERT (buf_write (&buf, ping_string, sizeof (ping_string)));
 
 		  /*
 		   * We will treat the ping like any other outgoing packet,
-		   * encrypt, authenticate, etc.
+		   * encrypt, sign, etc.
 		   */
-#ifdef USE_LZO
-		  if (options->comp_lzo)
-		    lzo_compress (&buf, lzo_compress_buf, &lzo_compwork, &frame, current);
-#endif
-#ifdef FRAGMENT_ENABLE
-		  if (fragment)
-		    fragment_outgoing (fragment, &buf, &frame_fragment, current);
-#endif
-#ifdef USE_CRYPTO
-#ifdef USE_SSL
-		  mutex_lock (L_TLS);
-		  if (tls_multi)
-		    tls_pre_encrypt (tls_multi, &buf, &crypto_options);
-#endif
-		  openvpn_encrypt (&buf, encrypt_buf, &crypto_options, &frame, current);
-#endif
-		  link_socket_get_outgoing_addr (&buf, &link_socket,
-						&to_link_addr);
-#ifdef USE_CRYPTO
-#ifdef USE_SSL
-		  if (tls_multi)
-		    tls_post_encrypt (tls_multi, &buf);
-		  mutex_unlock (L_TLS);
-#endif
-#endif
-		  to_link = buf;
-		  free_to_link = false;
+#                 include "encrypt_sign.h"
 		  msg (D_PACKET_CONTENT, "SENT PING");
 		}
-	      event_timeout_wakeup (&ping_send_interval, current, &timeval);
-	      tv = &timeval;
 	    }
 	}
 
@@ -1409,6 +1727,7 @@ openvpn (const struct options *options,
 	      msg (M_INFO, " TUN/TAP write bytes:  " counter_format, tun_write_bytes);
 	      msg (M_INFO, " TCP/UDP read bytes:   " counter_format, link_read_bytes);
 	      msg (M_INFO, " TCP/UDP write bytes:  " counter_format, link_write_bytes);
+	      msg (M_INFO, " Auth read bytes:      " counter_format, link_read_bytes_auth);
 #ifdef USE_LZO
 	      if (options->comp_lzo)
 		  lzo_print_stats (&lzo_compwork);		  
@@ -1481,7 +1800,12 @@ openvpn (const struct options *options,
 		}
 
 	      if (buf.len > 0)
-		link_read_bytes += buf.len;
+		{
+		  link_read_bytes += buf.len;
+		  original_recv_size = buf.len;
+		}
+	      else
+		original_recv_size = 0;
 
 	      /* check recvfrom status */
 	      check_status (status, "read", &link_socket, NULL);
@@ -1581,11 +1905,87 @@ openvpn (const struct options *options,
 		  if (options->ping_rec_timeout && buf.len > 0)
 		    event_timeout_reset (&ping_rec_interval, current);
 
+		  /* increment authenticated receive byte count */
+		  if (buf.len > 0)
+		    {
+		      link_read_bytes_auth += buf.len;
+		      max_recv_size_local = max_int (original_recv_size, max_recv_size_local);
+		    }
+
 		  /* Did we just receive an openvpn ping packet? */
 		  if (buf_string_match (&buf, ping_string, sizeof (ping_string)))
 		    {
-		      msg (D_PACKET_CONTENT, "RECEIVED PING");
-		      buf.len = 0; /* drop it */
+		      msg (D_PACKET_CONTENT, "RECEIVED PING PACKET");
+		      buf.len = 0; /* drop packet */
+		    }
+
+		  /* Did we just receive an OCC packet? */
+		  if (buf_string_match_head (&buf, occ_magic, sizeof (occ_magic)))
+		    {
+		      ASSERT (buf_advance (&buf, sizeof (occ_magic)));
+		      switch (buf_read_u8 (&buf))
+			{
+			case OCC_REQUEST:
+			  msg (D_PACKET_CONTENT, "RECEIVED OCC_REQUEST");
+			  occ_op = OCC_REPLY;
+			  break;
+
+			case OCC_MTU_REQUEST:
+			  msg (D_PACKET_CONTENT, "RECEIVED OCC_MTU_REQUEST");
+			  occ_op = OCC_MTU_REPLY;
+			  break;
+
+			case OCC_MTU_LOAD_REQUEST:
+			  msg (D_PACKET_CONTENT, "RECEIVED OCC_MTU_LOAD_REQUEST");
+			  occ_mtu_load_size = buf_read_u16 (&buf);
+			  if (occ_mtu_load_size >= 0)
+			    occ_op = OCC_MTU_LOAD;
+			  break;
+
+			case OCC_REPLY:
+			  msg (D_PACKET_CONTENT, "RECEIVED OCC_REPLY");
+			  if (options->occ && !TLS_MODE && options_string_remote)
+			    {
+			      if (!options_cmp_equal (BPTR (&buf),
+						      options_string_remote,
+						      buf.len))
+				{
+				  options_warning (BPTR (&buf),
+						   options_string_remote,
+						   buf.len);
+				}
+			    }
+			  event_timeout_clear (&occ_interval);
+			  break;
+
+			case OCC_MTU_REPLY:
+			  msg (D_PACKET_CONTENT, "RECEIVED OCC_MTU_REPLY");
+			  max_recv_size_remote = buf_read_u16 (&buf);
+			  max_send_size_remote = buf_read_u16 (&buf);
+			  if (options->mtu_test
+			      && max_recv_size_remote > 0
+			      && max_send_size_remote > 0)
+			    {
+			      msg (M_INFO, "NOTE: Empirical MTU test completed [Tried,Actual] local->remote=[%d,%d] remote->local=[%d,%d]",
+				   max_send_size_local,
+				   max_recv_size_remote,
+				   max_send_size_remote,
+				   max_recv_size_local);
+			      if (!options->mssfix_defined
+#ifdef FRAGMENT_ENABLE
+				  && !options->mtu_dynamic
+#endif
+				  && options->proto == PROTO_UDPv4
+				  && max_send_size_local > TUN_MTU_MIN
+				  && (max_recv_size_remote < max_send_size_local
+				      || max_recv_size_local < max_send_size_remote))
+				msg (M_INFO, "NOTE: This connection is unable to accomodate a UDP packet size of %d. Consider using --fragment or --mssfix options as a workaround.",
+				     max_send_size_local);
+			    }
+			  event_timeout_clear (&occ_mtu_load_test_interval);
+			  break;
+			}
+		      buf.len = 0; /* don't pass packet on */
 		    }
 
 		  to_tun = buf;
@@ -1671,13 +2071,6 @@ openvpn (const struct options *options,
 		   format_hex (BPTR (&buf), BLEN (&buf), 80),
 		   MD5SUM (BPTR (&buf), BLEN (&buf)));
 
-#ifdef FRAGMENT_ENABLE
-	      /* If packet is too big, we might want to bounce back a "fragmentation
-		 needed but DF set ICMP message */
-	      if (fragment)
-		fragment_check_fragmentability (fragment, &frame_fragment, &buf);
-#endif
-
 	      if (buf.len > 0)
 		{
 		  /*
@@ -1709,57 +2102,13 @@ openvpn (const struct options *options,
 			    mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&frame)));
 			}
 		    }
-#ifdef USE_LZO
-		  /* Compress the packet. */
-		  if (options->comp_lzo)
-		    lzo_compress (&buf, lzo_compress_buf, &lzo_compwork, &frame, current);
-#endif
-#ifdef FRAGMENT_ENABLE
-		  if (fragment)
-		    fragment_outgoing (fragment, &buf, &frame_fragment, current);
-#endif
-#ifdef USE_CRYPTO
-#ifdef USE_SSL
-		  /*
-		   * If TLS mode, get the key we will use to encrypt
-		   * the packet.
-		   */
-		  mutex_lock (L_TLS);
-		  if (tls_multi)
-		    tls_pre_encrypt (tls_multi, &buf, &crypto_options);
-#endif
-		  /*
-		   * Encrypt the packet and write an optional
-		   * HMAC authentication record.
-		   */
-		  openvpn_encrypt (&buf, encrypt_buf, &crypto_options, &frame, current);
-#endif
-		  /*
-		   * Get the address we will be sending the packet to.
-		   */
-		  link_socket_get_outgoing_addr (&buf, &link_socket,
-						&to_link_addr);
-#ifdef USE_CRYPTO
-#ifdef USE_SSL
-		  /*
-		   * In TLS mode, prepend the appropriate one-byte opcode
-		   * to the packet which identifies it as a data channel
-		   * packet and gives the low-permutation version of
-		   * the key-id to the recipient so it knows which
-		   * decrypt key to use.
-		   */
-		  if (tls_multi)
-		    tls_post_encrypt (tls_multi, &buf);
-		  mutex_unlock (L_TLS);
-#endif
-#endif
-		  to_link = buf;
+#                   include "encrypt_sign.h"
 		}
 	      else
 		{
 		  to_link = nullbuf;
+		  free_to_link = false;
 		}
-	      free_to_link = false;
 	    }
 
 	  /* TUN device ready to accept write */
@@ -1868,11 +2217,6 @@ openvpn (const struct options *options,
 			shaper_wrote_bytes (&shaper, BLEN (&to_link)
 					    + datagram_overhead (options->proto));
 #endif
-#ifdef FRAGMENT_ENABLE
-		      if (fragment)
-			fragment_post_send (fragment, BLEN (&to_link)
-					    + datagram_overhead (options->proto));
-#endif
 		      /*
 		       * Let the pinger know that we sent a packet.
 		       */
@@ -1900,7 +2244,10 @@ openvpn (const struct options *options,
 		      size = link_socket_write (&link_socket, &to_link, &to_link_addr);
 
 		      if (size > 0)
-			link_write_bytes += size;
+			{
+			  max_send_size_local = max_int (size, max_send_size_local);
+			  link_write_bytes += size;
+			}
 		    }
 		  else
 		    size = 0;
@@ -1967,7 +2314,7 @@ openvpn (const struct options *options,
 
   free_buf (&read_link_buf);
   free_buf (&read_tun_buf);
-  free_buf (&ping_buf);
+  free_buf (&aux_buf);
 
 #ifdef USE_LZO
   if (options->comp_lzo)
@@ -1987,8 +2334,11 @@ openvpn (const struct options *options,
   if (tls_multi)
     tls_multi_free (tls_multi, true);
 
-  if (data_channel_options)
-    free (data_channel_options);
+  /* free options compatibility strings */
+  if (options_string_local)
+    free (options_string_local);
+  if (options_string_remote)
+    free (options_string_remote);
 
 #endif
 #endif /* USE_CRYPTO */
@@ -2379,7 +2729,6 @@ main (int argc, char *argv[])
 	  MUST_BE_UNDEF (transition_window);
 	  MUST_BE_UNDEF (tls_auth_file);
 	  MUST_BE_UNDEF (single_session);
-	  MUST_BE_UNDEF (disable_occ);
 	}
 #undef MUST_BE_UNDEF
 #endif /* USE_CRYPTO */

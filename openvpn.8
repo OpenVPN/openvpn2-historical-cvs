@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "18 September 2003"
+.TH openvpn 8 "29 September 2003"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -130,6 +130,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-mlock\fR\ ]
 [\ \fB\-\-mssfix\fR\ \fImax\fR\ ]
 [\ \fB\-\-mtu\-disc\fR\ \fItype\fR\ ]
+[\ \fB\-\-mtu\-test\fR\ ]
 [\ \fB\-\-mute\fR\ \fIn\fR\ ]
 [\ \fB\-\-nice\-work\fR\ \fIn\fR\ ]
 [\ \fB\-\-nice\fR\ \fIn\fR\ ]
@@ -710,11 +711,28 @@ Specify a default gateway
 for use with
 .B --route.
 .TP
-.B --route-delay n
+.B --route-delay [n]
 Delay
 .B n
-seconds after connection initiation before adding routes.
-This is designed for scenarios where DHCP is used to set
+seconds (default=0) after connection
+establishment, before adding routes. If
+.B n
+is 0, routes will be added immediately upon connection
+establishment.  If
+.B --route-delay
+is omitted, routes will be added immediately after tun/tap device
+open and
+.B --up
+script execution, before any
+.B --user
+or 
+.B --group
+privilege downgrade (or
+.B --chroot
+execution.)
+
+This option is designed to be useful in scenarios where DHCP is
+used to set
 tap adapter addresses.  The delay will give the DHCP handshake
 time to complete before routes are added.
 
@@ -816,7 +834,7 @@ bytes more than the
 .B --tun-mtu
 size on read.  This parameter defaults to 0, which is sufficient for
 most TUN devices.  TAP devices may introduce additional overhead in excess
-of the MTU size, and a setting of 64 is the default when TAP devices are used.
+of the MTU size, and a setting of 32 is the default when TAP devices are used.
 This parameter only controls internal OpenVPN buffer sizing,
 so there is no transmission overhead associated with using a larger value.
 .TP
@@ -833,6 +851,17 @@ as Linux that supports the necessary system call to set.
 .B 'yes'
 -- Always DF (Don't Fragment)
 .br
+.TP
+.B --mtu-test
+To empirically measure MTU on connection startup,
+add the
+.B --mtu-test
+option to your configuration.
+OpenVPN will send ping packets of various sizes
+to the remote peer and measure the largest packets
+which were successfully received.  The
+.B --mtu-test
+process normally takes about 3 minutes to complete.
 .TP
 .B --fragment max
 Enable internal datagram fragmentation so
@@ -2186,10 +2215,36 @@ command provides similar functionality.
 .TP
 .B --no-arp-del
 By default, the Windows version of OpenVPN executes an "arp -d *"
-command after the TAP-Win32 devices is opened to force the
+command after the TAP-Win32 device is opened to force the
 refresh of the MAC cache.
 .B --no-arp-del
 will disable this behaviour.
+.TP
+.B --tap-delay
+Delay the seting of the TAP-Win32
+adapter media state to "connected" until after TCP/UDP connection
+establishment with peer.  This may require the use of the
+.B --ping
+option to trigger connection establishment when using
+connectionless protocols such as UDP as the tunnel data
+carrier.
+.TP
+.B --show-valid-subnets
+Show valid subnets for
+.B --dev tun
+emulation.  Since the TAP-Win32 driver
+exports an ethernet interface to Windows, and since TUN devices are
+point-to-point in nature, it is necessary for the TAP-Win32 driver
+to impose certain constraints on TUN endpoint address selection.
+
+Namely, the point-to-point endpoints used in TUN device emulation
+must be the middle two addresses of a /30 subnet (netmask 255.255.255.252).
+.TP
+.B --pause-exit
+Put up a "press any key to continue" message on the console prior
+to OpenVPN program exit.  This option is automatically used by the
+Windows explorer when OpenVPN is run on a configuration
+file using the right-click explorer menu.
 .SH SCRIPTING AND ENVIRONMENTAL VARIABLES
 Starting with 1.5-beta7, OpenVPN now exports a series
 of environmental variables for use by

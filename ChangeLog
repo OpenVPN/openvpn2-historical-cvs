@@ -2,7 +2,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.13 2003/09/24 07:18:31 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.14 2003/09/30 08:50:42 jimyonan Exp $
 	
 Upcoming version 1.5.0
 
@@ -128,8 +128,26 @@ Upcoming version 1.5.0
 * Eliminated reference to malloc.o in configure.ac (beta8).
 * Added tun device emulation to the TAP-Win32 driver (beta8).
 * Added --route and related options (beta8).
-* Added init script for SuSE Linux (Frank Plohmann)
-* (beta8).
+* Added init script for SuSE Linux (Frank Plohmann) (beta8).
+* Extended option consistency check between peers to function
+  in all crypto modes, including static-key and cleartext modes.
+  Previously only TLS mode was supported.  Disable with
+  --disable-occ (beta8).
+* Overall, increased the amount of configuration option sanity
+  checking, especially of networking parameters (beta8).
+* Added --mtu-test option for empirical MTU measurement
+  (beta8).
+* Added Windows-only option --tap-delay to not set the TAP-Win32
+  adapter media state to 'connected' until TCP/UDP connection
+  establishment with peer (beta8).
+* Slightly modified --route/--route-delay semantics so that when
+  --route is given without --route-delay, routes are added
+  immediately after tun/tap device open.  When --route-delay is
+  specified, routes will be added n seconds after connection
+  initiation, where n is the --route-delay parameter (which
+  can be set to 0) (beta8).
+* Made TCP framing error into a non-fatal error that triggers a
+  connection reset (beta8).
 
 2003.08.04 -- Version 1.4.3
 

@@ -178,6 +178,7 @@ typedef unsigned char UDPBUFFER [UDP_DATAGRAM_BUFFER_SIZE];
 #define TAP_IOCTL_GET_MTU               TAP_CONTROL_CODE (4, METHOD_BUFFERED)
 #define TAP_IOCTL_GET_INFO              TAP_CONTROL_CODE (5, METHOD_BUFFERED)
 #define TAP_IOCTL_CONFIG_POINT_TO_POINT TAP_CONTROL_CODE (6, METHOD_BUFFERED)
+#define TAP_IOCTL_SET_MEDIA_STATUS      TAP_CONTROL_CODE (7, METHOD_BUFFERED)
 
 //=======================================================================
 // Registry keys

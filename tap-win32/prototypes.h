@@ -157,6 +157,12 @@ void ProcessARP
     const PARP_PACKET src
    );
 
+VOID SetMediaStatus
+   (
+    TapAdapterPointer p_Adapter,
+    BOOLEAN state
+   );
+
 VOID HookDispatchFunctions();
 
 #endif

@@ -170,7 +170,7 @@ tls_init_control_channel_frame_parameters(const struct frame *data_channel_frame
   tls_adjust_frame_parameters (frame);
   reliable_ack_adjust_frame_parameters (frame, CONTROL_SEND_ACK_MAX);
   frame_add_to_extra_frame (frame, SID_SIZE + sizeof (packet_id_type));
-  frame_set_mtu_dynamic (frame, MTU_SET_TO_MIN);
+  frame_set_mtu_dynamic_initial (frame, MTU_SET_TO_MIN);
   frame_finalize_derivative (frame, data_channel_frame);
 }
 
@@ -1067,19 +1067,31 @@ tls_multi_init (struct tls_options *tls_options)
 }
 
 /*
- * Finalize our computation of frame sizes, and set options string.
+ * Finalize our computation of frame sizes.
  */
 void
-tls_multi_init_finalize(struct tls_multi* multi, const struct frame* frame, const char *options)
+tls_multi_init_finalize(struct tls_multi* multi, const struct frame* frame)
 {
   tls_init_control_channel_frame_parameters(frame, &multi->opt.frame);
   
   /* initialize the active and untrusted sessions */
   tls_session_init (multi, &multi->session[TM_ACTIVE]);
   tls_session_init (multi, &multi->session[TM_UNTRUSTED]);
+}
 
+/*
+ * Set local and remote option compatibility strings.
+ * Used to verify compatibility of local and remote option
+ * sets.
+ */
+void
+tls_multi_init_set_options(struct tls_multi* multi,
+			   const char *local,
+			   const char *remote)
+{
   /* initialize options string */
-  multi->opt.options = options;
+  multi->opt.local_options = local;
+  multi->opt.remote_options = remote;
 }
 
 void
@@ -1498,9 +1510,12 @@ tls_process (struct tls_multi *multi,
 	      init_key_ctx (&ks->key.encrypt, &key, &session->opt->key_type,
 			    DO_ENCRYPT, "Data Channel Encrypt");
 	      CLEAR (key);
+
+	      /* send local options string */
 	      ASSERT (buf_write
-		      (buf, session->opt->options,
-		       strlen (session->opt->options) + 1));
+		      (buf, session->opt->local_options,
+		       strlen (session->opt->local_options) + 1));
+
 	      state_change = true;
 	      msg (D_TLS_DEBUG_MED, "STATE S_SENT_KEY");
 	      ks->state = S_SENT_KEY;
@@ -1530,13 +1545,16 @@ tls_process (struct tls_multi *multi,
 		}
 
 	      ASSERT (buf->len > 0);
+
+	      /* compare received remote options string
+		 with our locally computed options string */
 	      if (!session->opt->disable_occ &&
-		  !options_cmp_equal ((const char *)BPTR (buf),
-				      session->opt->options, buf->len))
+		  !options_cmp_equal (BPTR (buf),
+				      session->opt->remote_options, buf->len))
 		{
-		  msg (D_TLS_ERRORS | M_WARN,
-		       "WARNING: TLS Error: Local ('%s') and Remote ('%s') options are incompatible -- NOTE: use --disable-occ to suppress this error",
-		       session->opt->options, BPTR (buf));
+		  options_warning (BPTR (buf),
+				   session->opt->remote_options, buf->len);
+
 #if 0
 		  /* enable this line to make options incompatibility
 		     a handshake-fatal error */

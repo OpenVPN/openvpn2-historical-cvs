@@ -1426,6 +1426,7 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		}
 	      else
 		{
+		  NOTE_ERROR (l_Adapter);
 		  p_IRP->IoStatus.Status = l_Status = STATUS_BUFFER_TOO_SMALL;
 		}
 	      break;
@@ -1450,6 +1451,7 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		}
 	      else
 		{
+		  NOTE_ERROR (l_Adapter);
 		  p_IRP->IoStatus.Status = l_Status = STATUS_BUFFER_TOO_SMALL;
 		}
 
@@ -1467,6 +1469,7 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		}
 	      else
 		{
+		  NOTE_ERROR (l_Adapter);
 		  p_IRP->IoStatus.Status = l_Status = STATUS_BUFFER_TOO_SMALL;
 		}
 
@@ -1526,6 +1529,7 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		}
 	      else
 		{
+		  NOTE_ERROR (l_Adapter);
 		  p_IRP->IoStatus.Status = l_Status = STATUS_BUFFER_TOO_SMALL;
 		}
 
@@ -1551,6 +1555,7 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		}
 	      else
 		{
+		  NOTE_ERROR (l_Adapter);
 		  p_IRP->IoStatus.Status = l_Status = STATUS_INVALID_PARAMETER;
 		}
 	      
@@ -1570,9 +1575,9 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		  l_Adapter->m_PointToPoint = TRUE;
 
 		  l_Adapter->m_localIP =
-		    ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[0];
+		    ((IPADDR*) (p_IRP->AssociatedIrp.SystemBuffer))[0];
 		  l_Adapter->m_remoteIP =
-		    ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[1];
+		    ((IPADDR*) (p_IRP->AssociatedIrp.SystemBuffer))[1];
 
 		  COPY_MAC (l_Adapter->m_TapToUser.src, l_Adapter->m_MAC);
 		  COPY_MAC (l_Adapter->m_TapToUser.dest, dest);
@@ -1587,14 +1592,33 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 		}
 	      else
 		{
+		  NOTE_ERROR (l_Adapter);
 		  p_IRP->IoStatus.Status = l_Status = STATUS_INVALID_PARAMETER;
 		}
 	      
 	      break;
 	    }
 
+	  case TAP_IOCTL_SET_MEDIA_STATUS:
+	    {
+	      if (l_IrpSp->Parameters.DeviceIoControl.InputBufferLength >=
+		  (sizeof (ULONG) * 1))
+		{
+		  ULONG parm = ((PULONG) (p_IRP->AssociatedIrp.SystemBuffer))[0];
+		  SetMediaStatus (l_Adapter, (BOOLEAN) parm);
+		  p_IRP->IoStatus.Information = 1;
+		}
+	      else
+		{
+		  NOTE_ERROR (l_Adapter);
+		  p_IRP->IoStatus.Status = l_Status = STATUS_INVALID_PARAMETER;
+		}
+	      break;
+	    }
+
 	  default:
 	    {
+	      NOTE_ERROR (l_Adapter);
 	      p_IRP->IoStatus.Status = l_Status = STATUS_INVALID_PARAMETER;
 	      break;
 	    }
@@ -1848,13 +1872,11 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 	      ResetPointToPointMode (l_Adapter);
 	    NdisReleaseSpinLock (&l_Adapter->m_Lock);
 
+#ifdef SET_MEDIA_STATUS_ON_OPEN
 	    if (first_open)
-	      {
-		NdisMIndicateStatus (l_Adapter->m_MiniportAdapterHandle,
-				     NDIS_STATUS_MEDIA_CONNECT, NULL, 0);
-		NdisMIndicateStatusComplete (l_Adapter->
-					     m_MiniportAdapterHandle);
-	      }
+	      SetMediaStatus (l_Adapter, TRUE);
+#endif
+
 	    INCREMENT_STAT (l_Adapter->m_NumTapOpens);
 	    p_IRP->IoStatus.Status = l_Status = STATUS_SUCCESS;
 	    p_IRP->IoStatus.Information = 0;
@@ -1898,11 +1920,7 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 	if (fully_closed)
 	  {
 	    FlushQueues (l_Adapter);
-
-	    NdisMIndicateStatus (l_Adapter->m_MiniportAdapterHandle,
-				 NDIS_STATUS_MEDIA_DISCONNECT, NULL, 0);
-	    NdisMIndicateStatusComplete (l_Adapter->
-					 m_MiniportAdapterHandle);
+	    SetMediaStatus (l_Adapter, FALSE);
 	  }
 
 	IoCompleteRequest (p_IRP, IO_NO_INCREMENT);
@@ -2119,6 +2137,25 @@ FlushQueues (TapAdapterPointer p_Adapter)
 	   l_Extension->m_PacketQueue->max_size,
 	   PACKET_QUEUE_SIZE
 	   ));
+}
+
+//===================================================
+// Tell Windows whether the TAP device should be
+// considered "connected" or "disconnected".
+//===================================================
+VOID
+SetMediaStatus (TapAdapterPointer p_Adapter, BOOLEAN state)
+{
+  if (p_Adapter->m_MediaState != state)
+    {
+      if (state)
+	NdisMIndicateStatus (p_Adapter->m_MiniportAdapterHandle, NDIS_STATUS_MEDIA_CONNECT, NULL, 0);
+      else
+	NdisMIndicateStatus (p_Adapter->m_MiniportAdapterHandle, NDIS_STATUS_MEDIA_DISCONNECT, NULL, 0);
+
+      NdisMIndicateStatusComplete (p_Adapter->m_MiniportAdapterHandle);
+      p_Adapter->m_MediaState = state;
+    }
 }
 
 //===================================================

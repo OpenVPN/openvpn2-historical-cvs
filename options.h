@@ -23,9 +23,13 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#ifndef OPTIONS_H
+#define OPTIONS_H
+
 #include "basic.h"
 #include "mtu.h"
 #include "route.h"
+#include "tun.h"
 
 /*
  * Maximum number of parameters to an options,
@@ -68,6 +72,7 @@ struct options
   const char *dev_node;
   const char *ifconfig_local;
   const char *ifconfig_remote_netmask;
+  bool ifconfig_noexec;
 #ifdef HAVE_GETTIMEOFDAY
   int shaper;
 #endif
@@ -83,6 +88,8 @@ struct options
 
   /* Advanced MTU negotiation and datagram fragmentation options */
   int mtu_discover_type; /* used if OS supports setting Path MTU discovery options on socket */
+  bool mtu_test;
+
 #ifdef FRAGMENT_ENABLE
   bool mtu_dynamic;      /* should we fragment and reassemble packets? */
   int mtu_min;
@@ -148,9 +155,13 @@ struct options
   /* route management */
   const char *route_script;
   const char *route_default_gateway;
-  bool route_noauto;
+  bool route_noexec;
   int route_delay;
+  bool route_delay_defined;
   struct route_option_list routes;
+
+  /* Enable options consistency check between peers */
+  bool occ;
 
 #ifdef USE_CRYPTO
   /* Cipher parms */
@@ -197,8 +208,6 @@ struct options
   /* Allow only one session */
   bool single_session;
 
-  /* Disable options check between peers */
-  bool disable_occ;
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
 };
@@ -212,10 +221,20 @@ void usage_small (void);
 void init_options (struct options *o);
 void setenv_settings (const struct options *o);
 void show_settings (const struct options *o);
-char *options_string (const struct options *o, const struct frame *frame);
 
 void parse_argv (struct options* options, int argc, char *argv[]);
 
 bool string_defined_equal (const char *s1, const char *s2);
 
-int options_cmp_equal (const char *s1, const char *s2, size_t n);
+const char *options_string_version (const char* s);
+
+char *options_string (const struct options *o,
+		      const struct frame *frame,
+		      const struct tuntap *tt,
+		      bool remote);
+
+int options_cmp_equal (char *actual, const char *expected, size_t actual_n);
+
+void options_warning (char *actual, const char *expected, size_t actual_n);
+
+#endif

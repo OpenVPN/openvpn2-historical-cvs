@@ -347,5 +347,16 @@ packet_id_write (const struct packet_id_net *pin, struct buffer *buf, bool long_
   return true;
 }
 
+static inline bool
+check_timestamp_delta (time_t current, time_t remote, unsigned int max_delta)
+{
+  unsigned int abs;
+  if (current >= remote)
+    abs = current - remote;
+  else
+    abs = remote - current;
+  return abs <= max_delta;
+}
+
 #endif /* PACKET_ID_H */
 #endif /* USE_CRYPTO */

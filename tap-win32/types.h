@@ -89,6 +89,9 @@ typedef struct _TapAdapter
   ULONG m_TapOpens;
   ULONG m_MTU;
 
+  // TRUE if device is "connected"
+  BOOLEAN m_MediaState;
+
   // Info for point-to-point mode
   BOOLEAN m_PointToPoint;
   IPADDR m_localIP;

@@ -83,7 +83,7 @@ frame_finalize (struct frame *frame,
   if (link_mtu_min_defined && link_mtu_max_defined && link_mtu_min > link_mtu_max)
     frame_print (frame, M_FATAL, "Dynamic MTU min is larger than dynamic MTU max", true);
 
-  frame_set_mtu_dynamic (frame, MTU_SET_TO_MAX);
+  frame_set_mtu_dynamic_initial (frame, MTU_SET_TO_MAX);
   frame_dynamic_finalize (frame);
 }
 
@@ -122,7 +122,7 @@ frame_dynamic_finalize (struct frame *frame)
 
 /*
  * Client initializes a struct frame by zeroing, then calling,
- *   frame_set_mtu_dynamic
+ *   frame_set_mtu_dynamic_initial
  *   frame_add_to_extra_frame
  *   frame_add_to_extra_tun
  *   frame_add_to_extra_buffer
@@ -140,11 +140,12 @@ frame_finalize_derivative (struct frame *frame, const struct frame *src)
 }
 
 /*
- * Sets the dynamic mtu value (requires call to frame_dynamic_finalize to finalize).
+ * Sets the dynamic mtu value (requires call to
+ * frame_dynamic_finalize to finalize).
  * mtu_dynamic can be a value or MTU_SET_TO_MIN or MTU_SET_TO_MAX.
  */
 void
-frame_set_mtu_dynamic (struct frame *frame, int mtu)
+frame_set_mtu_dynamic_initial (struct frame *frame, int mtu)
 {
   frame->dynamic.mtu_initial = mtu;
 }
@@ -178,7 +179,7 @@ frame_mtu_change_pct (struct frame *frame, int pct)
 {
   const int orig_mtu = frame->link_mtu;
   const int new_mtu = orig_mtu + (orig_mtu * pct / 100);
-  frame_set_mtu_dynamic (frame, new_mtu);
+  frame_set_mtu_dynamic_initial (frame, new_mtu);
   frame_dynamic_finalize (frame);
   return frame->link_mtu != orig_mtu;
 }

@@ -52,6 +52,7 @@
 #define D_HANDSHAKE          LOGLEV(2, 20, 0)        /* show data & control channel handshakes */
 #define D_MTU_INFO           LOGLEV(2, 21, 0)        /* show terse MTU info */
 #define D_CLOSE              LOGLEV(2, 22, 0)        /* show socket and TUN/TAP close */
+#define D_SHOW_OCC_HASH      LOGLEV(2, 23, 0)        /* show MD5 hash of option compatibility string */
 
 #define D_TLS_DEBUG_LOW      LOGLEV(3, 20, 0)        /* low frequency info from tls_session routines */
 #define D_GREMLIN            LOGLEV(3, 30, 0)        /* show simulated outage info from gremlin module */
@@ -61,9 +62,8 @@
 #define D_TUNTAP_INFO        LOGLEV(3, 34, 0)        /* show debugging info from TUN/TAP driver */
 
 #define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
-#define D_SHOW_DC_OPT        LOGLEV(4, 41, 0)        /* show data channel options string */
-#define D_MTU_DEBUG          LOGLEV(4, 42, 0)        /* show dynamic MTU info */
-#define D_MSS                LOGLEV(4, 43, 0)        /* show MSS adjustments */
+#define D_SHOW_OCC           LOGLEV(4, 41, 0)        /* show options compatibility string */
+#define D_MSS                LOGLEV(4, 42, 0)        /* show MSS adjustments */
 
 #define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 
@@ -74,6 +74,7 @@
 #define D_FRAG_DEBUG         LOGLEV(7, 70, M_DEBUG)  /* show fragment debugging info */
 #define D_WIN32_IO_LOW       LOGLEV(7, 70, M_DEBUG)  /* low freq win32 I/O debugging info */
 #define D_SEMAPHORE          LOGLEV(7, 70, M_DEBUG)  /* show Win32 semaphore waits */
+#define D_MTU_DEBUG          LOGLEV(7, 70, M_DEBUG)  /* show MTU debugging info */
 
 #define D_HANDSHAKE_VERBOSE  LOGLEV(8, 70, M_DEBUG)  /* show detailed description of each handshake */
 #define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* limited info from tls_session routines */

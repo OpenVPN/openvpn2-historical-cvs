@@ -292,6 +292,20 @@ buf_write_prepend (struct buffer *dest, const void *src, int size)
 }
 
 static inline bool
+buf_write_u8 (struct buffer *dest, int data)
+{
+  uint8_t u8 = (uint8_t) data;
+  return buf_write (dest, &u8, sizeof (uint8_t));
+}
+
+static inline bool
+buf_write_u16 (struct buffer *dest, int data)
+{
+  uint16_t u16 = htons ((uint16_t) data);
+  return buf_write (dest, &u16, sizeof (uint16_t));
+}
+
+static inline bool
 buf_copy (struct buffer *dest, const struct buffer *src)
 {
   return buf_write (dest, BPTR (src), BLEN (src));
@@ -357,10 +371,38 @@ buf_read (struct buffer *src, void *dest, int size)
   return true;
 }
 
+static inline int
+buf_read_u8 (struct buffer *buf)
+{
+  int ret;
+  if (BLEN (buf) < 1)
+    return -1;
+  ret = *BPTR(buf);
+  buf_advance (buf, 1);
+  return ret;
+}
+
+static inline int
+buf_read_u16 (struct buffer *buf)
+{
+  uint16_t ret;
+  if (!buf_read (buf, &ret, sizeof (uint16_t)))
+    return -1;
+  return ntohs (ret);
+}
+
 static inline bool
 buf_string_match (struct buffer *src, const void *match, int size)
 {
   if (size != src->len)
+    return false;
+  return memcmp (BPTR (src), match, size) == 0;
+}
+
+static inline bool
+buf_string_match_head (struct buffer *src, const void *match, int size)
+{
+  if (size < 0 || size > src->len)
     return false;
   return memcmp (BPTR (src), match, size) == 0;
 }

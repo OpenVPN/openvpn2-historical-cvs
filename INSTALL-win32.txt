@@ -5,8 +5,11 @@ This is a BETA release.  Please report any bugs
 to openvpn-users AT lists DOT sourceforge DOT net
 (you don't need to subscribe in order to post).
 
-Before you post, check out the "troubleshooting"
-section below for common problems.
+Before you post, check out the troubleshooting
+guide for more info:
+
+http://openvpn.sourceforge.net/trouble.html
+
 
 As of 1.5-beta3, OpenVPN runs on Win 2000
 and XP.  OpenVPN also runs on Linux, Mac OS X,
@@ -28,8 +31,8 @@ below.
 A number of usability improvements have been
 made in this release.
 
-The --dev-node option is now optional when exactly one
-TAP-Win32 adapter exists on a system -- such an
+The --dev-node option is now optional when exactly
+one TAP-Win32 adapter exists on a system -- such an
 adapter will now be chosen automatically as
 the default.
 
@@ -92,6 +95,17 @@ packet fragmentation in the first place,
 and if big packets come through anyhow
 (from protocols other than TCP), --fragment
 will internally fragment them.
+
+The --mtu-test option has been added
+for empirical measurement of MTU, to assist
+in determining whether the 'fragment' or
+'mssfix' options should be used, and if so,
+what the ideal settings should be.
+
+The --tap-delay option has been added to delay
+setting the TAP-Win32 adapter media state to
+'connected' until TCP/UDP connection establishment
+with peer.
 
 The TAP-Win32 driver has been significantly
 reworked for both efficiency and SMP capabilities.
@@ -469,48 +483,10 @@ configs:
 Troubleshooting
 ---------------
 
-Make sure that your options match on both sides
-of the connection.  See the FAQ for more info.
+For solutions to common troubleshooting problems,
+consult the OpenVPN Troubleshooting guide
 
-TUN and TAP devices CANNOT be mixed on either side
-of the connection.  Use one or the other
-consistently.
-
-Make sure that each host can ping the other
-using the "remote" address from the config file
-BEFORE starting up OpenVPN.
-
-Make sure that the "remote" address used in the
-config file IS NOT part of the subnet used
-in the "ifconfig" option.
-
-If your connection appears to start successfully
-but then locks up under real usage, try adding
-the following to your config files on both sides
-of the connection:
-
-  fragment 1300
-  mssfix
-
-This will reduce the maximum packet size which
-OpenVPN sends to its peer to 1300 and can be
-used to work around Path MTU Discovery problems.
-
-While different versions of OpenVPN can talk to
-one another, for troubleshooting purposes
-you will reduce the set of
-potential problems by using the most recent
-OpenVPN version on both sides of the connection.
-
-The "verb 5" option can be used to diagnose
-connection problems by printing an 'R' or 'W'
-on the console to signify network packets
-read or written.
-
-If all else fails, using tcpdump (or WinDump on
-Windows) can allow you to debug connection
-problems by showing actual packets traversing
-the network.
+http://openvpn.sourceforge.net/trouble.html
 
 Setting up routing
 ------------------
@@ -1158,9 +1134,12 @@ significant changes:
      configured MTU value, driver version number,
      and extended error status information (beta8).
 
-(14) Added "tun" device emulation (beta8).
+(13) Added "tun" device emulation (beta8).
 
-(13) To a certain extent, backwards compatibility with NT 4 has
+(14) Adapter media state is now controlled directly from
+     userspace using the TAP_IOCTL_SET_MEDIA_STATUS ioctl.
+
+(15) To a certain extent, backwards compatibility with NT 4 has
      been sacrificed in the interest of better usability and
      stability on Win2K/XP.
 

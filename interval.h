@@ -35,6 +35,8 @@
 #include "error.h"
 #include "misc.h"
 
+#define INTERVAL_DEBUG 0
+
 /*
  * Used to determine in how many seconds we should be
  * called again.
@@ -101,7 +103,9 @@ interval_test (struct interval* top, time_t current)
       trigger)
     {
       top->last_test_true = current;
+#if INTERVAL_DEBUG
       msg (D_INTERVAL, "INTERVAL interval_test true");
+#endif
       return true;
     }
   else
@@ -115,7 +119,9 @@ interval_schedule_wakeup (struct interval* top, time_t current, interval_t *wake
 {
   interval_earliest_wakeup (wakeup, top->last_test_true + top->refresh, current);
   interval_earliest_wakeup (wakeup, top->future_trigger, current);
+#if INTERVAL_DEBUG
   msg (D_INTERVAL, "INTERVAL interval_schedule wakeup=%d", (int)*wakeup);
+#endif
 }
 
 /*
@@ -125,7 +131,9 @@ static inline void
 interval_future_trigger (struct interval* top, interval_t wakeup, time_t current) {
   if (wakeup)
     {
+#if INTERVAL_DEBUG
       msg (D_INTERVAL, "INTERVAL interval_future_trigger %d", (int)wakeup);
+#endif
       top->future_trigger = current + wakeup;
     }
 }
@@ -137,7 +145,9 @@ interval_future_trigger (struct interval* top, interval_t wakeup, time_t current
 static inline void
 interval_action (struct interval* top, time_t current)
 {
+#if INTERVAL_DEBUG
   msg (D_INTERVAL, "INTERVAL action");
+#endif
   top->last_action = current;
 }
 
@@ -178,7 +188,7 @@ static inline void
 event_timeout_init (struct event_timeout* et, time_t current, interval_t n)
 {
   et->defined = true;
-  et->n = n;
+  et->n = (n >= 0) ? n : 0;
   et->last = current;
 }
 
@@ -190,30 +200,32 @@ event_timeout_reset (struct event_timeout* et, time_t current)
 }
 
 static inline bool
-event_timeout_trigger (struct event_timeout* et, time_t current)
+event_timeout_trigger (struct event_timeout* et, time_t current, struct timeval* tv)
 {
-  if (et->defined && et->last + et->n <= current)
-    {
-      msg (D_INTERVAL, "EVENT event_timeout_trigger (%d)", et->n);
-      et->last = current;
-      return true;
-    }
-  return false;
-}
-
-static inline void
-event_timeout_wakeup (struct event_timeout* et, time_t current, struct timeval* tv)
-{
+  bool ret = false;
   if (et->defined)
     {
-      const int wakeup = max_int ((int) (et->last + et->n - current), 0);
+      int wakeup = (int) et->last + et->n - current;
+      if (wakeup <= 0)
+	{
+#if INTERVAL_DEBUG
+	  msg (D_INTERVAL, "EVENT event_timeout_trigger (%d)", et->n);
+#endif
+	  et->last = current;
+	  wakeup = et->n;
+	  ret = true;
+	}
+
       if (wakeup < tv->tv_sec)
 	{
+#if INTERVAL_DEBUG
 	  msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d)", wakeup, et->n);
+#endif
 	  tv->tv_sec = wakeup;
 	  tv->tv_usec = 0;
 	}
     }
+  return ret;
 }
 
 /*

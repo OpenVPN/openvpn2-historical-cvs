@@ -23,6 +23,9 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#ifndef TUN_H
+#define TUN_H
+
 #ifdef WIN32
 #include <winioctl.h>
 #include "tap-win32/constants.h"
@@ -42,7 +45,10 @@ struct tuntap
 {
   int type; /* DEV_TYPE_x as defined in proto.h */
 
+  bool did_ifconfig_setup;
+
   bool ipv6;
+
   char actual[256]; /* actual name of TUN/TAP dev, usually including unit number */
 
   /* ifconfig parameters */
@@ -115,6 +121,8 @@ void open_tun (const char *dev, const char *dev_type, const char *dev_node,
 
 void open_tun_post_config (struct tuntap *tt, unsigned int flags);
 
+void open_tun_connection_establishment (struct tuntap *tt, unsigned int flags);
+
 void close_tun (struct tuntap *tt);
 
 int write_tun (struct tuntap* tt, uint8_t *buf, int len);
@@ -133,13 +141,19 @@ void do_ifconfig (struct tuntap *tt,
 		  const char *actual,    /* actual device name */
 		  const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
 		  const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
-		  int tun_mtu);
+		  int tun_mtu,
+		  in_addr_t local_public,
+		  in_addr_t remote_public,
+		  bool noexec);
 
 const char *dev_component_in_dev_node (const char *dev_node);
 
 bool is_dev_type (const char *dev, const char *dev_type, const char *match_type);
 int dev_type_enum (const char *dev, const char *dev_type);
 const char *dev_type_string (const char *dev, const char *dev_type);
+
+const char *ifconfig_options_string (const struct tuntap* tt,
+				     bool remote);
 
 /*
  * Inline functions
@@ -192,7 +206,8 @@ ifconfig_order(void)
 
 #ifdef WIN32
 
-#define TUNTAP_FLAGS_WIN32_NO_ARP_DEL 0x00000001
+#define TUNTAP_FLAGS_WIN32_NO_ARP_DEL (1<<0)
+#define TUNTAP_FLAGS_WIN32_TAP_DELAY  (1<<1)
 
 #define TUN_PASS_BUFFER
 
@@ -275,3 +290,5 @@ tuntap_stop (int status)
 }
 
 #endif
+
+#endif /* TUN_H */

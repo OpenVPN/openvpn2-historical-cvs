@@ -35,7 +35,6 @@
 #include "error.h"
 #include "openvpn.h"
 #include "common.h"
-#include "tun.h"
 #include "shaper.h"
 #include "crypto.h"
 #include "options.h"
@@ -104,6 +103,8 @@ static const char usage_message[] =
   "                  addresses outside of the subnets used by either peer.\n"
   "                  TAP: configure device to use IP address l as a local\n"
   "                  endpoint and rn as a subnet mask.\n"
+  "--ifconfig-noexec : Don't actually execute ifconfig/netsh command, instead\n"
+  "                    pass --ifconfig parms by environment to scripts.\n"
   "--route network [netmask] [gateway] [metric] :\n"
   "                  Add route to routing table after connection\n"
   "                  is established.  Multiple routes can be specified.\n"
@@ -112,9 +113,10 @@ static const char usage_message[] =
   "                  Specify default by leaving blank or setting to \"nil\".\n"
   "--route-gateway gw : Specify a default gateway for use with --route.\n"
   "--route-delay n : Delay n seconds after connection initiation before\n"
-  "                  adding routes.\n"
+  "                  adding routes (may be 0).  If not specified, routes will"
+  "                  be added immediately after tun/tap open.\n"
   "--route-up cmd  : Execute shell cmd after routes are added.\n"
-  "--route-noauto  : Don't add routes automatically.  Instead pass routes to\n"
+  "--route-noexec  : Don't add routes automatically.  Instead pass routes to\n"
   "                  --route-up script using environmental variables.\n"
   "--setenv name value : Set a custom environmental variable to pass to script.\n"
   "--shaper n      : Restrict output to peer to n bytes per second.\n"
@@ -142,6 +144,7 @@ static const char usage_message[] =
   "                  'no'    -- Never send DF (Don't Fragment) frames\n"
   "                  'maybe' -- Use per-route hints\n"
   "                  'yes'   -- Always DF (Don't Fragment)\n"
+  "--mtu-test      : Empirically measure and report MTU.\n"
 #ifdef FRAGMENT_ENABLE
   "--fragment max  : Enable internal datagram fragmentation so that no UDP\n"
   "                  datagrams are sent which are larger than max bytes.\n"
@@ -192,6 +195,7 @@ static const char usage_message[] =
   "--mute n        : Log at most n consecutive messages in the same category.\n"
   "--gremlin       : Simulate dropped & corrupted packets + network outages\n"
   "                  to test robustness of protocol (for debugging only).\n"
+  "--disable-occ   : Disable options consistency check between peers.\n"
 #ifdef USE_LZO
   "--comp-lzo      : Use fast LZO compression -- may add up to 1 byte per\n"
   "                  packet for uncompressible data.\n"
@@ -256,7 +260,6 @@ static const char usage_message[] =
   "                  tests of certification.  cmd should return 0 to allow\n"
   "                  TLS handshake to proceed, or 1 to fail.  (cmd is\n"
   "                  executed as 'cmd certificate_depth X509_NAME_oneline')\n"
-  "--disable-occ   : Disable options compatibility check between peers.\n"
 #endif				/* USE_SSL */
   "\n"
   "SSL Library information:\n"
@@ -272,6 +275,8 @@ static const char usage_message[] =
   "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n" 
   "--no-arp-del    : Don't do an 'arp -d *' after TAP-Win32 open.\n"
   "--pause-exit    : When run from a console window, pause before exiting.\n"
+  "--tap-delay     : Don't set TAP-Win32 media state to 'connected' until\n"
+  "                  TCP/UDP connection establishment with peer.\n"
 #endif
   "\n"
   "Generate a random key (only for non-TLS static key encryption mode):\n"
@@ -308,6 +313,7 @@ init_options (struct options *o)
   o->tun_mtu = TUN_MTU_DEFAULT;
   o->link_mtu = LINK_MTU_DEFAULT;
   o->mtu_discover_type = -1;
+  o->occ = true;
 #ifdef FRAGMENT_ENABLE
   o->mtu_icmp = true;
 #endif
@@ -384,6 +390,7 @@ show_settings (const struct options *o)
   SHOW_BOOL (tun_ipv6);
   SHOW_STR (ifconfig_local);
   SHOW_STR (ifconfig_remote_netmask);
+  SHOW_BOOL (ifconfig_noexec);
 #ifdef HAVE_GETTIMEOFDAY
   SHOW_INT (shaper);
 #endif
@@ -402,6 +409,8 @@ show_settings (const struct options *o)
   SHOW_BOOL (mtu_icmp);
 #endif
   SHOW_INT (mtu_discover_type);
+  SHOW_INT (mtu_test);
+
   SHOW_BOOL (mlock);
   SHOW_INT (inactivity_timeout);
   SHOW_INT (ping_send_timeout);
@@ -440,6 +449,8 @@ show_settings (const struct options *o)
   SHOW_BOOL (gremlin);
   SHOW_BOOL (tuntap_flags);
 
+  SHOW_BOOL (occ);
+
 #ifdef USE_LZO
   SHOW_BOOL (comp_lzo);
   SHOW_BOOL (comp_lzo_adaptive);
@@ -447,8 +458,9 @@ show_settings (const struct options *o)
 
   SHOW_STR (route_script);
   SHOW_STR (route_default_gateway);
-  SHOW_BOOL (route_noauto);
+  SHOW_BOOL (route_noexec);
   SHOW_INT (route_delay);
+  SHOW_BOOL (route_delay_defined);
   print_route_options (&o->routes, D_SHOW_PARMS);
 
 #ifdef USE_CRYPTO
@@ -483,7 +495,6 @@ show_settings (const struct options *o)
   SHOW_INT (transition_window);
 
   SHOW_BOOL (single_session);
-  SHOW_BOOL (disable_occ);
 
   SHOW_STR (tls_auth_file);
 #endif
@@ -495,54 +506,152 @@ show_settings (const struct options *o)
 #undef SHOW_INT
 #undef SHOW_BOOL
 
-#if defined(USE_CRYPTO) && defined(USE_SSL)
-
 /*
  * Build an options string to represent data channel encryption options.
  * This string must match exactly between peers.  The keysize is checked
  * separately by read_key().
+ *
+ * The following options must match on both peers:
+ *
+ * Tunnel options:
+ *
+ * --dev tun|tap [unit number need not match]
+ * --dev-type tun|tap
+ * --link-mtu
+ * --udp-mtu
+ * --tun-mtu
+ * --proto udp
+ * --proto tcp-client [matched with --proto tcp-server
+ *                     on the other end of the connection]
+ * --proto tcp-server [matched with --proto tcp-client on
+ *                     the other end of the connection]
+ * --tun-ipv6
+ * --ifconfig x y [matched with --ifconfig y x on
+ *                 the other end of the connection]
+ *
+ * --comp-lzo
+ * --mtu-dynamic
+ *
+ * Crypto Options:
+ *
+ * --cipher
+ * --auth
+ * --keysize
+ * --secret
+ * --no-replay
+ * --no-iv
+ *
+ * SSL Options:
+ *
+ * --tls-auth
+ * --tls-client [matched with --tls-server on
+ *               the other end of the connection]
+ * --tls-server [matched with --tls-client on
+ *               the other end of the connection]
  */
+
 char *
-options_string (const struct options *o, const struct frame *frame)
+options_string (const struct options *o,
+		const struct frame *frame,
+		const struct tuntap *tt,
+		bool remote)
 {
   struct buffer out = alloc_buf (256);
-  struct key_type kt;
 
-  init_key_type (&kt, o->ciphername, o->ciphername_defined,
-		 o->authname, o->authname_defined,
-		 o->keysize, true, false);
+  buf_printf (&out, "V3");
 
-  buf_printf (&out, "V2");
+  /*
+   * Tunnel Options
+   */
 
-  buf_printf (&out, " --dev-type %s", dev_type_string (o->dev, o->dev_type));
-  buf_printf (&out, " --link-mtu %d", MAX_RW_SIZE_LINK(frame));
-  buf_printf (&out, " --tun-mtu %d", MAX_RW_SIZE_TUN(frame));
-  buf_printf (&out, " --cipher %s", kt_cipher_name (&kt));
-  buf_printf (&out, " --auth %s", kt_digest_name (&kt));
-  buf_printf (&out, " --keysize %d", kt_key_size (&kt));
-
-  if (!o->packet_id)
-    buf_printf (&out, " --no-replay");
-  if (!o->iv)
-    buf_printf (&out, " --no-iv");
+  buf_printf (&out, ",dev-type %s", dev_type_string (o->dev, o->dev_type));
+  buf_printf (&out, ",link-mtu %d", MAX_RW_SIZE_LINK(frame));
+  buf_printf (&out, ",tun-mtu %d", MAX_RW_SIZE_TUN(frame));
+  buf_printf (&out, ",proto %s", proto2ascii (proto_remote (o->proto, remote), true));
+  if (o->tun_ipv6)
+    buf_printf (&out, ",tun-ipv6");
+  if (tt)
+    buf_printf (&out, ",ifconfig %s", ifconfig_options_string (tt, remote));
 
 #ifdef USE_LZO
   if (o->comp_lzo)
-    buf_printf (&out, " --comp-lzo");
+    buf_printf (&out, ",comp-lzo");
 #endif
 
 #ifdef FRAGMENT_ENABLE
   if (o->mtu_dynamic)
-    buf_printf (&out, " --mtu-dynamic");
+    buf_printf (&out, ",mtu-dynamic");
 #endif
 
-  if (o->tun_ipv6)
-    buf_printf (&out, " --tun-ipv6");
+#ifdef USE_CRYPTO
+
+#ifdef USE_SSL
+#define TLS_CLIENT (o->tls_client)
+#define TLS_SERVER (o->tls_server)
+#else
+#define TLS_CLIENT (false)
+#define TLS_SERVER (false)
+#endif
+
+  /*
+   * Crypto Options
+   */
+    if (o->shared_secret_file || TLS_CLIENT || TLS_SERVER)
+      {
+	struct key_type kt;
+
+	ASSERT ((o->shared_secret_file != NULL)
+		+ (TLS_CLIENT == true)
+		+ (TLS_SERVER == true)
+		<= 1);
+
+	init_key_type (&kt, o->ciphername, o->ciphername_defined,
+		       o->authname, o->authname_defined,
+		       o->keysize, true, false);
+
+	buf_printf (&out, ",cipher %s", kt_cipher_name (&kt));
+	buf_printf (&out, ",auth %s", kt_digest_name (&kt));
+	buf_printf (&out, ",keysize %d", kt_key_size (&kt));
+	if (o->shared_secret_file)
+	  buf_printf (&out, ",secret");
+	if (!o->packet_id)
+	  buf_printf (&out, ",no-replay");
+	if (!o->iv)
+	  buf_printf (&out, ",no-iv");
+      }
+
+#ifdef USE_SSL
+  /*
+   * SSL Options
+   */
+  {
+    if (o->tls_auth_file)
+	buf_printf (&out, ",tls-auth");
+
+    if (remote)
+      {
+	if (TLS_CLIENT)
+	  buf_printf (&out, ",tls-server");
+	else if (TLS_SERVER)
+	  buf_printf (&out, ",tls-client");
+      }
+    else
+      {
+	if (TLS_CLIENT)
+	  buf_printf (&out, ",tls-client");
+	else if (TLS_SERVER)
+	  buf_printf (&out, ",tls-server");
+      }
+  }
+#endif /* USE_SSL */
+
+#undef TLS_CLIENT
+#undef TLS_SERVER
+
+#endif /* USE_CRYPTO */
 
   return BSTR (&out);
 }
-
-#endif
 
 /*
  * Compare option strings for equality.
@@ -550,14 +659,45 @@ options_string (const struct options *o, const struct frame *frame)
  * we are looking at different versions of the options string,
  * therefore don't compare them and return true.
  */
-bool options_cmp_equal (const char *s1, const char *s2, size_t n)
+bool
+options_cmp_equal (char *actual, const char *expected, size_t actual_n)
 {
+  if (actual_n > 0)
+    {
+      actual[actual_n - 1] = 0;
 #ifndef STRICT_OPTIONS_CHECK
-  if (strncmp (s1, s2, 2))
-    return true;
-  else
+      if (strncmp (actual, expected, 2))
+	{
+	  msg (D_SHOW_OCC, "NOTE: failed to perform options consistency check between peers because of OpenVPN version differences -- you can disable the options consistency check with --disable-occ (Required for TLS connections between OpenVPN 1.3.x and later versions).  Actual Remote Options: '%s'.  Expected Remote Options: '%s'", actual, expected);
+	  return true;
+	}
+      else
 #endif
-    return !strncmp (s1, s2, n);
+	return !strcmp (actual, expected);
+    }
+  else
+    return true;
+}
+
+void
+options_warning (char *actual, const char *expected, size_t actual_n)
+{
+  if (actual_n > 0)
+    {
+      actual[actual_n - 1] = 0;
+      msg (M_WARN,
+	   "WARNING: Actual Remote Options ('%s') are inconsistent with Expected Remote Options ('%s')",
+	   actual,
+	   expected);
+    }
+}
+
+const char *
+options_string_version (const char* s)
+{
+  struct buffer out = alloc_buf (4);
+  strncpynt (BPTR (&out), s, 3);
+  return BSTR (&out);
 }
 
 static char *
@@ -870,6 +1010,10 @@ add_option (struct options *options, int i, char *p[],
       options->ifconfig_remote_netmask = p[2];
       i += 2;
     }
+  else if (streq (p[0], "ifconfig-noexec"))
+    {
+      options->ifconfig_noexec = true;
+    }
   else if (streq (p[0], "local") && p[1])
     {
       ++i;
@@ -1037,6 +1181,10 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       options->mtu_discover_type = translate_mtu_discover_type_name (p[1]);
     }
+  else if (streq (p[0], "mtu-test"))
+    {
+      options->mtu_test = true;
+    }
   else if (streq (p[0], "nice") && p[1])
     {
       ++i;
@@ -1173,19 +1321,27 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       options->route_default_gateway = p[1];      
     }
-  else if (streq (p[0], "route-delay") && p[1])
+  else if (streq (p[0], "route-delay"))
     {
-      ++i;
-      options->route_delay = positive (atoi (p[1]));      
+      options->route_delay_defined = true;
+      if (p[1])
+	{
+	  ++i;
+	  options->route_delay = positive (atoi (p[1]));
+	}
+      else
+	{
+	  options->route_delay = 0;
+	}
     }
   else if (streq (p[0], "route-up") && p[1])
     {
       ++i;
       options->route_script = p[1];
     }
-  else if (streq (p[0], "route_noauto"))
+  else if (streq (p[0], "route_noexec"))
     {
-      options->route_noauto = true;
+      options->route_noexec = true;
     }
   else if (streq (p[0], "setenv") && p[1] && p[2])
     {
@@ -1200,6 +1356,10 @@ add_option (struct options *options, int i, char *p[],
 	  ++i;
 	  options->mssfix = positive (atoi (p[1]));
 	}
+    }
+  else if (streq (p[0], "disable-occ"))
+    {
+      options->occ = false;
     }
 #ifdef WIN32
   else if (streq (p[0], "show-adapters"))
@@ -1219,6 +1379,10 @@ add_option (struct options *options, int i, char *p[],
   else if (streq (p[0], "no-arp-del"))
     {
       options->tuntap_flags |= TUNTAP_FLAGS_WIN32_NO_ARP_DEL;
+    }
+  else if (streq (p[0], "tap-delay"))
+    {
+      options->tuntap_flags |= TUNTAP_FLAGS_WIN32_TAP_DELAY;
     }
 #endif
 #if PASSTOS_CAPABILITY
@@ -1354,10 +1518,6 @@ add_option (struct options *options, int i, char *p[],
   else if (streq (p[0], "single-session"))
     {
       options->single_session = true;
-    }
-  else if (streq (p[0], "disable-occ"))
-    {
-      options->disable_occ = true;
     }
   else if (streq (p[0], "tls-cipher") && p[1])
     {

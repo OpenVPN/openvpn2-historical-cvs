@@ -146,6 +146,33 @@ void open_tun_post_config (struct tuntap *tt, unsigned int flags)
       system_check (command_line, NULL, false);
       netcmd_semaphore_release ();
     }
+  if (!(flags & TUNTAP_FLAGS_WIN32_TAP_DELAY) && tt->hand)
+    {
+      DWORD len;
+      ULONG status = TRUE;
+      if (!DeviceIoControl (tt->hand, TAP_IOCTL_SET_MEDIA_STATUS,
+			    &status, sizeof (status),
+			    &status, sizeof (status), &len, NULL))
+	msg (M_WARN, "WARNING: The TAP-Win32 driver rejected a TAP_IOCTL_SET_MEDIA_STATUS DeviceIoControl call.");
+    }
+#endif
+}
+
+/*
+ * Called on TCP/UDP connection establishment with peer.
+ */
+void open_tun_connection_establishment (struct tuntap *tt, unsigned int flags)
+{
+#ifdef WIN32
+  if ((flags & TUNTAP_FLAGS_WIN32_TAP_DELAY) && tt->hand)
+    {
+      DWORD len;
+      ULONG status = TRUE;
+      if (!DeviceIoControl (tt->hand, TAP_IOCTL_SET_MEDIA_STATUS,
+			    &status, sizeof (status),
+			    &status, sizeof (status), &len, NULL))
+	msg (M_WARN, "WARNING: The TAP-Win32 driver rejected a TAP_IOCTL_SET_MEDIA_STATUS DeviceIoControl call.");
+    }
 #endif
 }
 
@@ -208,6 +235,65 @@ generate_ifconfig_broadcast_addr (in_addr_t local,
 }
 
 /*
+ * Check that --local and --remote addresses do not
+ * clash with ifconfig addresses or subnet.
+ */
+static void
+check_addr_clash (const char *name,
+		  int type,
+		  in_addr_t public,
+		  in_addr_t local,
+		  in_addr_t remote_netmask)
+{
+#if 0
+  msg (M_INFO, "CHECK_ADDR_CLASH type=%d public=%s local=%s, remote_netmask=%s",
+       type,
+       print_in_addr_t (public, false),
+       print_in_addr_t (local, false),
+       print_in_addr_t (remote_netmask, false));
+#endif
+
+  if (public)
+    {
+      if (type == DEV_TYPE_TUN)
+	{
+	  const in_addr_t test_netmask = 0xFFFFFF00;
+	  const in_addr_t public_net = public & test_netmask;
+	  const in_addr_t local_net = local & test_netmask;
+	  const in_addr_t remote_net = remote_netmask & test_netmask;
+
+	  if (public == local || public == remote_netmask)
+	    msg (M_FATAL,
+		 "ERROR: --%s address [%s] conflicts with --ifconfig address pair [%s, %s]",
+		 name,
+		 print_in_addr_t (public, false),
+		 print_in_addr_t (local, false),
+		 print_in_addr_t (remote_netmask, false));
+
+	  if (public_net == local_net || public_net == remote_net)
+	    msg (M_WARN,
+		 "WARNING: potential conflict between --%s address [%s] and --ifconfig address pair [%s, %s] -- this is a warning only that is triggered when local/remote addresses exist within the same /24 subnet as --ifconfig endpoints",
+		 name,
+		 print_in_addr_t (public, false),
+		 print_in_addr_t (local, false),
+		 print_in_addr_t (remote_netmask, false));
+	}
+      else if (type == DEV_TYPE_TAP)
+	{
+	  const in_addr_t public_network = public & remote_netmask;
+	  const in_addr_t virtual_network = local & remote_netmask;
+	  if (public_network == virtual_network)
+	    msg (M_FATAL,
+		 "ERROR: --%s address [%s] conflicts with --ifconfig subnet [%s, %s] -- local and remote addresses cannot be inside of the --ifconfig subnet",
+		 name,
+		 print_in_addr_t (public, false),
+		 print_in_addr_t (local, false),
+		 print_in_addr_t (remote_netmask, false));
+	}
+    }
+}
+
+/*
  * Complain if --dev tap and --ifconfig is used on an OS for which
  * we don't have a custom tap ifconfig template below.
  */
@@ -215,6 +301,43 @@ static void
 no_tap_ifconfig ()
 {
   msg (M_FATAL, "Sorry but you cannot use --dev tap and --ifconfig together on this OS because I have not yet been programmed to understand the appropriate ifconfig syntax to use for TAP-style devices on this OS.  Your best alternative is to use an --up script and do the ifconfig command manually.");
+}
+
+/*
+ * Return a string to be used for options compatibility check
+ * between peers.
+ */
+const char *
+ifconfig_options_string (const struct tuntap* tt, bool remote)
+{
+  struct buffer out = alloc_buf_gc (256);
+  if (tt->did_ifconfig_setup)
+    {
+      if (tt->type == DEV_TYPE_TUN)
+	{
+	  const char *l, *r;
+	  if (remote)
+	    {
+	      r = print_in_addr_t (tt->local, false);
+	      l = print_in_addr_t (tt->remote_netmask, false);
+	    }
+	  else
+	    {
+	      l = print_in_addr_t (tt->local, false);
+	      r = print_in_addr_t (tt->remote_netmask, false);
+	    }
+	  buf_printf (&out, "%s %s", r, l);
+	}
+      else if (tt->type == DEV_TYPE_TAP)
+	{
+	  buf_printf (&out, "%s %s",
+		      print_in_addr_t (tt->local & tt->remote_netmask, false),
+		      print_in_addr_t (tt->remote_netmask, false));
+	}
+      else
+	buf_printf (&out, "[undef]");
+    }
+  return BSTR (&out);
 }
 
 /* execute the ifconfig command through the shell */
@@ -225,7 +348,10 @@ do_ifconfig (struct tuntap *tt,
 	     const char *actual,    /* actual device name */
 	     const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
 	     const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
-	     int tun_mtu)
+	     int tun_mtu,
+	     in_addr_t local_public,
+	     in_addr_t remote_public,
+	     bool noexec)
 {
   if (ifconfig_local_parm && ifconfig_remote_netmask_parm)
     {
@@ -275,6 +401,23 @@ do_ifconfig (struct tuntap *tt,
       ifconfig_sanity_check (tun, tt->remote_netmask);
 
       /*
+       * If local_public or remote_public addresses are defined,
+       * make sure they do not clash with our virtual subnet.
+       */
+
+      check_addr_clash ("local",
+			type,
+			local_public,
+			tt->local,
+			tt->remote_netmask);
+
+      check_addr_clash ("remote",
+			type,
+			remote_public,
+			tt->local,
+			tt->remote_netmask);
+
+      /*
        * Set ifconfig parameters
        */
       ifconfig_local = print_in_addr_t (tt->local, false);
@@ -302,6 +445,11 @@ do_ifconfig (struct tuntap *tt,
 	  setenv_str ("ifconfig_netmask", ifconfig_remote_netmask);
 	  setenv_str ("ifconfig_broadcast", ifconfig_broadcast);
 	}
+
+      tt->did_ifconfig_setup = true;
+
+      if (noexec)
+	return;
 
 #if defined(TARGET_LINUX)
 
@@ -475,6 +623,7 @@ do_ifconfig (struct tuntap *tt,
 #else
       msg (M_FATAL, "Sorry, but I don't know how to do 'ifconfig' commands on this operating system.  You should ifconfig your TUN/TAP device manually or use an --up script.");
 #endif
+
     }
 }
 

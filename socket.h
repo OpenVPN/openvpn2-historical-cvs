@@ -68,6 +68,9 @@ struct stream_buf
   struct buffer buf;
   struct buffer next;
   int len;     /* -1 if not yet known */
+
+  bool error;  /* if true, fatal TCP error has occurred,
+		  requiring that connection be restarted */
 };
 
 /*
@@ -121,6 +124,8 @@ struct link_socket
 
   int mtu;                      /* OS discovered MTU, or 0 if unknown */
   int mtu_changed;              /* Set to true when mtu value is changed */
+
+# define CONNECTION_ESTABLISHED(ls) ((ls)->set_outgoing_initial)
   bool set_outgoing_initial;
 
   /* for stream sockets */
@@ -185,6 +190,8 @@ void link_socket_init_phase2 (struct link_socket *sock,
 
 void socket_adjust_frame_parameters (struct frame *frame, int proto);
 
+void frame_adjust_path_mtu (struct frame *frame, int pmtu, int proto);
+
 void link_socket_set_outgoing_addr (const struct buffer *buf,
 				    struct link_socket *sock,
 				    const struct sockaddr_in *addr);
@@ -209,6 +216,8 @@ const char *print_in_addr_t (in_addr_t addr, bool empty_if_undef);
 
 void setenv_sockaddr (const char *name_prefix,
 		      const struct sockaddr_in *addr);
+
+void bad_address_length (int actual, int expected);
 
 /*
  * DNS resolution
@@ -236,14 +245,11 @@ in_addr_t getaddr (unsigned int flags,
 #define PROTO_TCPv4_CLIENT 2
 #define PROTO_N            3
 
-int
-ascii2proto (const char* proto_name);
+int ascii2proto (const char* proto_name);
+const char *proto2ascii (int proto, bool display_form);
+const char *proto2ascii_all ();
+int proto_remote (int proto, bool remote);
 
-const char *
-proto2ascii (int proto, bool display_form);
-
-const char *
-proto2ascii_all ();
 
 /*
  * Overhead added to packets by various protocols.
@@ -263,17 +269,6 @@ datagram_overhead (int proto)
 {
   ASSERT (proto >= 0 && proto < PROTO_N);
   return proto_overhead [proto];
-}
-
-/*
- * Adjust frame structure based on a Path MTU value given
- * to us by the OS.
- */
-static inline void
-frame_adjust_path_mtu (struct frame *frame, int pmtu, int proto)
-{
-  frame_set_mtu_dynamic (frame, pmtu - datagram_overhead (proto));
-  frame_dynamic_finalize (frame);
 }
 
 /*
@@ -304,6 +299,12 @@ addr_match (const struct sockaddr_in *a1, const struct sockaddr_in *a2)
   return a1->sin_addr.s_addr == a2->sin_addr.s_addr;
 }
 
+static inline in_addr_t
+addr_host (const struct sockaddr_in *s)
+{
+  return ntohl (s->sin_addr.s_addr);
+}
+
 static inline bool
 addr_port_match (const struct sockaddr_in *a1, const struct sockaddr_in *a2)
 {
@@ -326,7 +327,7 @@ socket_connection_reset (const struct link_socket *sock, int status)
 {
   if (link_socket_connection_oriented (sock))
     {
-      if (sock->stream_reset)
+      if (sock->stream_reset || sock->stream_buf.error)
 	return true;
       else if (status < 0)
 	{
@@ -380,7 +381,8 @@ link_socket_read_udp_posix (struct link_socket *sock,
   ASSERT (buf_safe (buf, maxsize));
   buf->len = recvfrom (sock->sd, BPTR (buf), maxsize, 0,
 		       (struct sockaddr *) from, &fromlen);
-  ASSERT (fromlen == sizeof (*from));
+  if (fromlen != sizeof (*from))
+    bad_address_length (fromlen, sizeof (*from));
   return buf->len;
 }
 

@@ -191,7 +191,7 @@ void frame_finalize (struct frame *frame,
 
 void frame_finalize_derivative (struct frame *frame, const struct frame *src);
 void frame_dynamic_finalize (struct frame *frame);
-void frame_set_mtu_dynamic (struct frame *frame, int mtu);
+void frame_set_mtu_dynamic_initial (struct frame *frame, int mtu);
 void frame_set_mtu_dynamic_upper_bound (struct frame *frame, int mtu, bool tun);
 bool frame_mtu_change_pct (struct frame *frame, int pct);
 void frame_subtract_extra (struct frame *frame, const struct frame *src);

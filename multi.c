@@ -382,6 +382,7 @@ multi_open_instance (struct multi_context *m, struct context *t)
   mi->gc = gc_new ();
   mroute_addr_init (&mi->real);
   mi->vaddr_handle = -1;
+  mi->created = now;
 
   /* remember source address for subsequent references to this instance */
   if (!mroute_extract_sockaddr_in (&mi->real, &t->c2.from, true))
@@ -1014,7 +1015,7 @@ multi_process_incoming_link (struct multi_context *m, struct context *t)
 	      mroute_flags = mroute_extract_addr_from_packet (&src,
 							      &dest,
 							      &c->c2.to_tun,
-							      DEV_TYPE_TAP);
+							      DEV_TYPE_TUN);
 
 	      if (mroute_flags & MROUTE_EXTRACT_SUCCEEDED)
 		{

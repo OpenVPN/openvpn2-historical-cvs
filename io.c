@@ -480,7 +480,6 @@ void
 wait_init (struct event_wait *ew, unsigned int rwflags)
 {
   CLEAR (*ew);
-  ew->max_fd_plus_one = -1;
   if (rwflags & WAIT_READ)
     {
       ALLOC_OBJ (ew->reads, fd_set);

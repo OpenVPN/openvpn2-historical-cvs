@@ -1,7 +1,15 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.22 2004/04/11 06:34:20 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.23 2004/04/13 08:06:58 jimyonan Exp $
+
+2004.04.13 -- Version 2.0-test23
+
+* Fixed bug in --dev tun --client-to-client routing.
+* Fixed a potential deadlock in --pull.
+* Fixed a problem with select() usage which could
+  cause a repeating sequence of "select : Invalid
+  argument (code=22)"
 
 2004.04.11 -- Version 2.0-test22
 

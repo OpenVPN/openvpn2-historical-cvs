@@ -1108,6 +1108,9 @@ process_io (struct context *c)
 	  read_incoming_link (c);
 	  if (!IS_SIG (c))
 	    process_incoming_link (c);
+	  /* JYFIXME -- to_tun defined + unopened tuntap can cause deadlock, move to end of process_incoming_link */
+	  if (!tuntap_defined (&c->c1.tuntap))
+	    c->c2.to_tun.len = 0;
 	}
       /* Incoming data on TUN device */
       else if (TUNTAP_ISSET (&c->c2.event_wait, &c->c1.tuntap, reads))

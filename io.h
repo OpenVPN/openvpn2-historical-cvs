@@ -296,7 +296,7 @@ wait_reset (struct event_wait *ew)
       if (ew->writes)
 	FD_ZERO (ew->writes);
     }
-  ew->max_fd_plus_one = -1;
+  ew->max_fd_plus_one = 0;
 }
 
 static inline void

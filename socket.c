@@ -554,67 +554,30 @@ resolve_remote (struct link_socket *sock,
     }
 }
 
-int
-link_socket_read_socks_udp (struct link_socket *sock,
-			    struct buffer *buf,
-			    struct sockaddr_in *from)
-{
-  int atyp;
-
-  if (BLEN(buf) < 10)
-    goto error;
-
-  buf_read_u16 (buf);
-  if (buf_read_u8 (buf) != 0)
-    goto error;
-
-  atyp = buf_read_u8 (buf);
-  if (atyp != 1)		/* ATYP == 1 (IP V4) */
-    goto error;
-
-  buf_read (buf, &from->sin_addr, sizeof (from->sin_addr));
-  buf_read (buf, &from->sin_port, sizeof (from->sin_port));
-
-  return BLEN(buf);
-
- error:
-  return -1;
-}
-
-int
-link_socket_write_socks_udp (struct link_socket *sock,
-			     struct buffer *buf,
-			     struct sockaddr_in *to)
-{
-  /* 
-   * Get a 10 byte subset buffer prepended to buf --
-   * we expect these bytes will be here because
-   * we allocated frame space in socks_adjust_frame_parameters.
-   */
-  struct buffer head = buf_sub (buf, 10, true);
-
-  /* crash if not enough headroom in buf */
-  ASSERT (buf_defined (&head));
-
-  buf_write_u16 (&head, 0);	/* RSV = 0 */
-  buf_write_u8 (&head, 0);	/* FRAG = 0 */
-  buf_write_u8 (&head, '\x01'); /* ATYP = 1 (IP V4) */
-  buf_write (&head, &to->sin_addr, sizeof (to->sin_addr));
-  buf_write (&head, &to->sin_port, sizeof (to->sin_port));
-
-#ifdef WIN32
-  return link_socket_write_win32 (sock, buf, &sock->socks_relay);
-#else
-  return link_socket_write_udp_posix (sock, buf, &sock->socks_relay);
-#endif
-}
-
 void
 link_socket_reset (struct link_socket *sock)
 {
   CLEAR (*sock);
   sock->sd = -1;
   sock->ctrl_sd = -1;
+}
+
+/*
+ * Initialize a struct link_socket to be a passive child
+ * for a CM_CHILD context instance.  A passive child does
+ * not have a real socket -- it slaves off of the parent
+ * socket.
+ *
+ * Assume that link_socket_reset was called first.
+ */
+void
+link_socket_inherit_passive (struct link_socket *dest, const struct link_socket *src, struct link_socket_addr *lsa)
+{
+  dest->proto = src->proto;
+  dest->remote_float = src->remote_float;
+  dest->ipchange_command = src->ipchange_command;
+  dest->set_outgoing_initial = false;
+  dest->lsa = lsa;
 }
 
 /* bind socket if necessary */

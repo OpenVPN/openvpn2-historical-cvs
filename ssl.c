@@ -180,6 +180,21 @@ tls_init_control_channel_frame_parameters(const struct frame *data_channel_frame
   frame_set_mtu_dynamic (frame, 0, SET_MTU_TUN);
 }
 
+/*
+ * Allocate space in SSL objects
+ * in which to store a struct tls_session
+ * pointer back to parent.
+ */
+
+static int mydata_index;
+
+static void
+ssl_set_mydata_index ()
+{
+  mydata_index = SSL_get_ex_new_index (0, "struct session *", NULL, NULL, NULL);
+  ASSERT (mydata_index >= 0);
+}
+
 void
 init_ssl_lib ()
 {
@@ -197,6 +212,8 @@ init_ssl_lib ()
 #ifdef CRYPTO_MDEBUG
   CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 #endif
+
+  ssl_set_mydata_index ();
 }
 
 void
@@ -263,57 +280,101 @@ tmp_rsa_cb (SSL * s, int is_export, int keylength)
 }
 
 /*
+ * Extract common name from an X509 subject name.
+ */
+
+void // JYFIXME -- make static void
+extract_common_name (char *out, int size, const char *subject)
+{
+  /* /C=US/ST=CO/L=Denver/O=NTLP/CN=Test-CA/Email=jim@yonan.net */
+
+  char c;
+  int state = 0;
+
+  ASSERT (size > 0);
+  out[--size] = '\0';
+
+  do {
+    c = *subject++;
+    if (state == 4)
+      {
+	if (c == '/')
+	  c = '\0';
+	if (size > 0)
+	  {
+	    *out++ = c;
+	    --size;
+	  }
+	else
+	  break;
+      }
+    else if (c == '/')
+      state = 1;
+    else if (state == 1)
+      {
+	if (c == 'C')
+	  state = 2;
+	else
+	  state = 0;
+      }
+    else if (state == 2)
+      {
+	if (c == 'N')
+	  state = 3;
+	else
+	  state = 0;
+      }
+    else if (state == 3)
+      {
+	if (c == '=')
+	  state = 4;
+	else
+	  state = 0;
+      }
+  } while (c != '\0');
+}
+
+/*
  * Our verify callback function -- check
  * that an incoming peer certificate is good.
  */
 
-/* static/global */
-static const char *verify_command;
-static const char *verify_x509name;
-static const char *crl_file;
-static int verify_maxlevel;
-
-void
-tls_set_verify_command (const char *cmd)
-{
-  verify_command = cmd;
-}
-
-void
-tls_set_verify_x509name (const char *x509name)
-{
-  verify_x509name = x509name;
-}
-
-void
-tls_set_crl_verify (const char *crl)
-{
-  crl_file = crl;
-}
-
-int
-get_max_tls_verify_id ()
-{
-  return verify_maxlevel;
-}
-
 static int
 verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 {
-  char txt[512];
+  char subject[256];
   char envname[64];
+  SSL *ssl;
+  struct tls_session *session;
+  const struct tls_options *opt;
   const int max_depth = 8;
 
-  X509_NAME_oneline (X509_get_subject_name (ctx->current_cert), txt,
-		     sizeof (txt));
-  txt[sizeof (txt) - 1] = '\0';
-  safe_string (txt);
+  /*
+   * Retrieve the pointer to the SSL of the connection currently treated
+   * and the application specific data stored into the SSL object.
+   */
+  ssl = X509_STORE_CTX_get_ex_data (ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
+  ASSERT (ssl);
+  session = (struct tls_session *) SSL_get_ex_data (ssl, mydata_index);
+  ASSERT (session);
+  opt = session->opt;
+  ASSERT (opt);
+
+  X509_NAME_oneline (X509_get_subject_name (ctx->current_cert), subject,
+		     sizeof (subject));
+  subject[sizeof (subject) - 1] = '\0';
+  safe_string (subject);
+
+#if 1 // JYFIXME -- print some debugging info
+  msg (D_LOW, "LOCAL OPT: %s", opt->local_options);
+  msg (D_LOW, "X509: %s", subject);
+#endif
 
   if (!preverify_ok)
     {
       /* Remote site specified a certificate, but it's not correct */
       msg (D_TLS_ERRORS, "VERIFY ERROR: depth=%d, error=%s: %s",
-	   ctx->error_depth, X509_verify_cert_error_string (ctx->error), txt);
+	   ctx->error_depth, X509_verify_cert_error_string (ctx->error), subject);
       return 0;			/* Reject connection */
     }
 
@@ -321,9 +382,9 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
     msg (M_WARN, "TLS Warning: Convoluted certificate chain detected with depth [%d] greater than %d", ctx->error_depth, max_depth);
 
   /* export subject name string as environmental variable */
-  verify_maxlevel = max_int (verify_maxlevel, ctx->error_depth);
+  session->verify_maxlevel = max_int (session->verify_maxlevel, ctx->error_depth);
   openvpn_snprintf (envname, sizeof(envname), "tls_id_%d", ctx->error_depth);
-  setenv_str (envname, txt);
+  setenv_str (envname, subject);
 
   /* export serial number as environmental variable */
   {
@@ -332,20 +393,20 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
     setenv_int (envname, serial);
   }
   
-  if (verify_x509name)
+  if (opt->verify_x509name)
     if (ctx->error_depth == 0)
       {
-        if (strcmp (verify_x509name, txt) == 0)
-          msg (D_HANDSHAKE, "VERIFY X509NAME OK: %s", txt);
+        if (strcmp (opt->verify_x509name, subject) == 0)
+          msg (D_HANDSHAKE, "VERIFY X509NAME OK: %s", subject);
         else
           {
             msg (D_HANDSHAKE, "VERIFY X509NAME ERROR: %s, must be %s",
-                 txt, verify_x509name);
+                 subject, opt->verify_x509name);
             return 0;		/* Reject connection */
           }
       }
 
-  if (verify_command)
+  if (opt->verify_command)
     {
       char command[512];
       struct buffer out;
@@ -355,27 +416,27 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 
       buf_set_write (&out, (uint8_t*)command, sizeof (command));
       buf_printf (&out, "%s %d %s",
-		  verify_command,
+		  opt->verify_command,
 		  ctx->error_depth,
-		  txt);
+		  subject);
       msg (D_TLS_DEBUG, "executing verify command: %s", command);
       ret = openvpn_system (command);
       if (system_ok (ret))
 	{
 	  msg (D_HANDSHAKE, "VERIFY SCRIPT OK: depth=%d, %s",
-	       ctx->error_depth, txt);
+	       ctx->error_depth, subject);
 	}
       else
 	{
 	  if (!system_executed (ret))
 	    msg (M_ERR, "Verify command failed to execute: %s", command);
 	  msg (D_HANDSHAKE, "VERIFY SCRIPT ERROR: depth=%d, %s",
-	       ctx->error_depth, txt);
+	       ctx->error_depth, subject);
 	  return 0;		/* Reject connection */
 	}
     }
   
-  if (crl_file)
+  if (opt->crl_file)
     {
       X509_CRL *crl=NULL;
       X509_REVOKED *revoked;
@@ -388,13 +449,13 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 	msg (M_ERR, "CRL: BIO err");
 	goto end;
       }
-      if (BIO_read_filename(in,crl_file) <= 0) {
-	msg (M_ERR, "CRL: cannot read: %s",crl_file);
+      if (BIO_read_filename(in, opt->crl_file) <= 0) {
+	msg (M_ERR, "CRL: cannot read: %s", opt->crl_file);
 	goto end;
       }
       crl=PEM_read_bio_X509_CRL(in,NULL,NULL,NULL);
       if (crl == NULL) {
-	msg (M_ERR, "CRL: cannot read CRL from file %s",crl_file);
+	msg (M_ERR, "CRL: cannot read CRL from file %s", opt->crl_file);
 	goto end;
       }
 
@@ -403,13 +464,13 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
       for (i = 0; i < n; i++) {
 	revoked = (X509_REVOKED *)sk_value(X509_CRL_get_REVOKED(crl), i);
 	if (ASN1_INTEGER_cmp(revoked->serialNumber, X509_get_serialNumber(ctx->current_cert)) == 0) {
-	  msg (D_HANDSHAKE, "CRL CHECK FAILED: %s is REVOKED",txt);
+	  msg (D_HANDSHAKE, "CRL CHECK FAILED: %s is REVOKED",subject);
 	  goto end;
 	}
       }
 
       retval = 1;
-      msg (D_HANDSHAKE, "CRL CHECK OK: %s",txt);
+      msg (D_HANDSHAKE, "CRL CHECK OK: %s",subject);
 
     end:
 
@@ -418,9 +479,37 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 	return retval;
     }
 
-  msg (D_HANDSHAKE, "VERIFY OK: depth=%d, %s", ctx->error_depth, txt);
+  msg (D_HANDSHAKE, "VERIFY OK: depth=%d, %s", ctx->error_depth, subject);
 
+  /* save common name in session object */
+  if (ctx->error_depth == 0)
+    extract_common_name (session->common_name, TLS_CN_LEN, subject);
+  
   return 1;			/* Accept connection */
+}
+
+int
+get_max_tls_verify_id (struct tls_multi* multi)
+{
+  if (multi)
+    return multi->session[TM_ACTIVE].verify_maxlevel;
+  else
+    return 0;
+}
+
+const char *
+tls_common_name (struct tls_multi* multi)
+{
+  if (multi)
+    {
+      const char *ret = multi->session[TM_ACTIVE].common_name;
+      if (*ret == '\0')
+	return NULL;
+      else
+	return ret;
+    }
+  else
+    return NULL;
 }
 
 /*
@@ -934,6 +1023,10 @@ key_state_init (struct tls_session *session, struct key_state *ks,
   ks->ssl = SSL_new (session->opt->ssl_ctx);
   if (!ks->ssl)
     msg (M_SSLERR, "SSL_new failed");
+
+  /* put session * in ssl object so we can access it
+     from verify callback*/
+  SSL_set_ex_data (ks->ssl, mydata_index, session);
 
   ks->ssl_bio = getbio (BIO_f_ssl (), "ssl_bio");
   ks->ct_in = getbio (BIO_s_mem (), "ct_in");
@@ -1788,8 +1881,11 @@ tls_process (struct tls_multi *multi,
       /*
        * TLS activity is finished once we get to S_ACTIVE,
        * though we will still process acknowledgements.
+       *
+       * CHANGED with 2.0 -> now we may send tunnel configuration
+       * info over the control channel.
        */
-      if (ks->state < S_NORMAL)
+      if (true)
 	{
 	  /* Initial handshake */
 	  if (ks->state == S_INITIAL)
@@ -1824,6 +1920,7 @@ tls_process (struct tls_multi *multi,
 		{
 		  msg (D_TLS_DEBUG_MED, "STATE S_NORMAL");
 		  ks->state = S_NORMAL;
+		  ks->must_negotiate = 0;
 		}
 	    }
 
@@ -1975,8 +2072,9 @@ tls_process (struct tls_multi *multi,
 		  /* write a uin32 0 */
 		  ASSERT (buf_write_u32 (buf, 0));
 
-		  /* write key_method */
-		  ASSERT (buf_write_u8 (buf, session->opt->key_method));
+		  /* write key_method + flags */
+		  ASSERT (buf_write_u8 (buf, (session->opt->key_method & KEY_METHOD_MASK)
+					| (session->opt->pass_config_info ? TLS_PASS_CONFIG_INFO : 0)));
 
 		  /* write key source material */
 		  key_source2_randomize_write (&ks->key_src, buf, session->opt->server);
@@ -2055,7 +2153,7 @@ tls_process (struct tls_multi *multi,
 		}
 	      else
 		{
-		  int key_method;
+		  int key_method_flags;
 		  int status;
 		  int optlen;
 
@@ -2066,12 +2164,20 @@ tls_process (struct tls_multi *multi,
 		  ASSERT (buf_advance (buf, 4));
 
 		  /* get key method */
-		  key_method = buf_read_u8 (buf);
-		  if (key_method != 2)
+		  key_method_flags = buf_read_u8 (buf);
+		  if ((key_method_flags & KEY_METHOD_MASK) != 2)
 		    {
 		      msg (D_TLS_ERRORS,
-			   "TLS ERROR: Unknown key_method=%d received from remote host",
-			   key_method);
+			   "TLS ERROR: Unknown key_method/flags=%d received from remote host",
+			   key_method_flags);
+		      goto error;
+		    }
+
+		  /* verify TLS_PASS_CONFIG_INFO consistency between peers */
+		  if (((key_method_flags & TLS_PASS_CONFIG_INFO) != 0) 
+		      ^ (session->opt->pass_config_info == true))
+		    {
+		      msg (D_TLS_ERRORS, "TLS ERROR: Inconsistent options between peers regarding configuration info exchange over the control channel");
 		      goto error;
 		    }
 		  
@@ -2191,7 +2297,7 @@ tls_process (struct tls_multi *multi,
 
   /* When should we wake up again? */
   {
-    if (ks->state >= S_INITIAL && ks->state < S_NORMAL)
+    if (ks->state >= S_INITIAL)
       {
 	compute_earliest_wakeup (wakeup,
 	  reliable_send_timeout (&ks->send_reliable, current));
@@ -2601,6 +2707,60 @@ tls_thread_rec_buf (struct thread_parms *state, struct tt_ret* ttr, bool do_chec
 }
 
 #endif
+
+/*
+ * Send a payload over the TLS control channel.
+ * Called externally.
+ *
+ * Must be called with L_TLS lock held.
+ */
+
+bool
+tls_send_payload (struct tls_multi *multi,
+		  const struct buffer *buf)
+{
+  struct tls_session *session;
+  struct key_state *ks;
+  bool ret = false;
+
+  mutex_lock (L_TLS);
+
+  session = &multi->session[TM_ACTIVE];
+  ks = &session->key[KS_PRIMARY];
+
+  if (ks->state >= S_ACTIVE && !BLEN (&ks->plaintext_write_buf))
+    {
+      if (buf_copy (&ks->plaintext_write_buf, buf))
+	ret = true;
+    }
+
+  mutex_lock (L_TLS);
+  return ret;
+}
+
+bool
+tls_rec_payload (struct tls_multi *multi,
+		 struct buffer *buf)
+{
+  struct tls_session *session;
+  struct key_state *ks;
+  bool ret = false;
+
+  mutex_lock (L_TLS);
+
+  session = &multi->session[TM_ACTIVE];
+  ks = &session->key[KS_PRIMARY];
+
+  if (ks->state >= S_ACTIVE && BLEN (&ks->plaintext_read_buf))
+    {
+      if (buf_copy (buf, &ks->plaintext_read_buf))
+	ret = true;
+      ks->plaintext_read_buf.len = 0;
+    }
+
+  mutex_lock (L_TLS);
+  return ret;
+}
 
 /*
  * Pre and post-process the encryption & decryption buffers in order

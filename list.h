@@ -23,28 +23,10 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef FORWARD_H
-#define FORWARD_H
+#ifndef LIST_H
+#define LIST_H
 
-#include "openvpn.h"
-#include "occ.h"
-#include "ping.h"
+#if P2MP
 
-void pre_select (struct context *c);
-
-void single_select (struct context *c);
-
-void process_io (struct context *c);
-
-void encrypt_sign (struct context *c, bool comp_frag);
-
-void show_select_status (struct context *c);
-
-void read_incoming_link (struct context *c);
-void process_incoming_link (struct context *c);
-void read_incoming_tun (struct context *c);
-void process_incoming_tun (struct context *c);
-void process_outgoing_link (struct context *c, struct link_socket *ls);
-void process_outgoing_tun (struct context *c, struct tuntap *tt);
-
-#endif /* FORWARD_H */
+#endif /* P2MP */
+#endif /* LIST */

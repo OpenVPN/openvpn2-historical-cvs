@@ -89,6 +89,7 @@ struct tuntap_options {
 
 struct tuntap
 {
+# define TUNNEL_TYPE(tt) ((tt)->type)
   int type; /* DEV_TYPE_x as defined in proto.h */
 
   bool did_ifconfig_setup;
@@ -214,6 +215,8 @@ const char *dev_type_string (const char *dev, const char *dev_type);
 const char *ifconfig_options_string (const struct tuntap* tt,
 				     bool remote,
 				     bool disable);
+
+void tuntap_inherit_passive (struct tuntap *dest, const struct tuntap *src);
 
 /*
  * Inline functions

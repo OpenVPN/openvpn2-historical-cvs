@@ -164,11 +164,20 @@
 
 #define PLAINTEXT_BUFFER_SIZE 1024
 
+/* Maximum length of common name */
+#define TLS_CN_LEN 64
+
 /*
  * Range of key exchange methods
  */
 #define KEY_METHOD_MIN 1
 #define KEY_METHOD_MAX 2
+
+/* key method taken from lower 4 bits */
+#define KEY_METHOD_MASK 0x0F
+
+/* high 4 bits in key_method uint8_t is used for flags */
+#define TLS_PASS_CONFIG_INFO 0x10
 
 /*
  * Measure success rate of TLS handshakes, for debugging only
@@ -269,6 +278,15 @@ struct tls_options
   int renegotiate_packets;
   interval_t renegotiate_seconds;
 
+  /* cert verification parms */
+  const char *verify_command;
+  const char *verify_x509name;
+  const char *crl_file;
+
+  /* allow openvpn config info to be
+     passed over control channel */
+  bool pass_config_info;
+
   /* use 32 bit or 64 bit packet-id? */
   bool packet_id_long_form;
 
@@ -318,6 +336,10 @@ struct tls_session
   int key_id;			/* increments with each soft reset (for key renegotiation) */
 
   int limit_next;               /* used for traffic shaping on the control channel */
+
+  int verify_maxlevel;
+
+  char common_name[TLS_CN_LEN];
 
   struct key_state key[KS_SIZE];
 };
@@ -433,9 +455,30 @@ int pem_password_callback (char *buf, int size, int rwflag, void *u);
 void tls_set_verify_command (const char *cmd);
 void tls_set_crl_verify (const char *crl);
 void tls_set_verify_x509name (const char *x509name);
-int get_max_tls_verify_id ();
+int get_max_tls_verify_id (struct tls_multi* multi);
+const char *tls_common_name (struct tls_multi* multi);
 
 void tls_adjust_frame_parameters(struct frame *frame);
+
+bool tls_send_payload (struct tls_multi *multi,
+		       const struct buffer *buf);
+
+bool tls_rec_payload (struct tls_multi *multi,
+		      struct buffer *buf);
+
+/*
+ * inline functions
+ */
+
+static inline int
+tls_test_payload_len (const struct tls_multi *multi)
+{
+  const struct key_state *ks = &multi->session[TM_ACTIVE].key[KS_PRIMARY];
+  if (ks->state >= S_ACTIVE)
+    return BLEN (&ks->plaintext_read_buf);
+  else
+    return 0;
+}
 
 /*
  * TLS thread mode

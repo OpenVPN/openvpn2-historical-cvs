@@ -23,28 +23,38 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef FORWARD_H
-#define FORWARD_H
+#ifndef MULTI_H
+#define MULTI_H
+
+#if P2MP
 
 #include "openvpn.h"
-#include "occ.h"
-#include "ping.h"
+#include "mroute.h"
 
-void pre_select (struct context *c);
+/* Maximum number of clients */
+#define MULTI_N_INSTANCE 10
 
-void single_select (struct context *c);
+struct multi_instance {
+  bool defined;
+  struct mroute_list real;
+  struct mroute_list virtual;
+  struct context context;
+};
 
-void process_io (struct context *c);
+struct multi_context {
+  struct multi_instance *link_out;
+  struct multi_instance *tun_out;
+  struct multi_instance *array;
+};
 
-void encrypt_sign (struct context *c, bool comp_frag);
+void multi_init (struct multi_context *m, struct context *t);
+void multi_select (struct multi_context *m, struct context *t);
+void multi_print_status (struct multi_context *m, struct context *t);
+void multi_process_io (struct multi_context *m, struct context *t);
+void multi_process_timeout (struct multi_context *m, struct context *t);
+void multi_uninit (struct multi_context *m);
 
-void show_select_status (struct context *c);
+void multi_get_timeout (struct multi_context *m, struct timeval *tv, time_t current);
 
-void read_incoming_link (struct context *c);
-void process_incoming_link (struct context *c);
-void read_incoming_tun (struct context *c);
-void process_incoming_tun (struct context *c);
-void process_outgoing_link (struct context *c, struct link_socket *ls);
-void process_outgoing_tun (struct context *c, struct tuntap *tt);
-
-#endif /* FORWARD_H */
+#endif /* P2MP */
+#endif /* MULTI_H */

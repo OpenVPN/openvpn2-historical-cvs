@@ -703,6 +703,20 @@ clear_tuntap (struct tuntap *tuntap)
   tuntap->ipv6 = false;
 }
 
+/*
+ * Initialize a struct tuntap to be a passive child
+ * for a CM_CHILD context instance.  A passive child does
+ * not have a real tun/tap interface -- it slaves off of the
+ * parent interface.
+ *
+ * Assume that clear_tuntap was called first.
+ */
+void
+tuntap_inherit_passive (struct tuntap *dest, const struct tuntap *src)
+{
+  dest->type = src->type;
+}
+
 static void
 open_null (struct tuntap *tt)
 {

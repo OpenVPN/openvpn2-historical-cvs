@@ -58,4 +58,10 @@ void establish_socks_proxy_udpassoc (struct socks_proxy_info *p,
 				     struct sockaddr_in *relay_addr,
 				     volatile int *signal_received);
 
+void socks_process_incoming_udp (struct buffer *buf,
+				struct sockaddr_in *from);
+
+int socks_process_outgoing_udp (struct buffer *buf,
+				struct sockaddr_in *to);
+
 #endif

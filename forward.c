@@ -107,6 +107,31 @@ check_tls_errors_dowork (struct context *c)
 #endif
 
 /*
+ * Handle incoming configuration
+ * messages on the control channel.
+ *
+ * JYFIXME -- actually do something with incoming config message
+ */
+void
+check_incoming_control_channel_dowork (struct context *c)
+{
+  const int len = tls_test_payload_len (c->c2.tls_multi);
+  if (len)
+    {
+      struct buffer buf = alloc_buf (len);
+      if (tls_rec_payload (c->c2.tls_multi, &buf))
+	{
+	  msg (D_LOW, "RECEIVE PAYLOAD: %s", BSTR (&buf));
+	}
+      else
+	{
+	  msg (D_LOW, "RECEIVE PAYLOAD FAILED");
+	}
+      free_buf (&buf);
+    }
+}
+
+/*
  * Things that need to happen immediately after connection initiation should go here.
  */
 void
@@ -134,6 +159,22 @@ check_connection_established_dowork (struct context *c)
 		event_timeout_init (&c->c2.route_wakeup, c->c2.current,
 				    c->options.route_delay);
 	    }
+
+#if 1 // JYFIXME -- send a test control channel config message
+	  {
+	    char bigstring[] = "This is a test";
+	    struct buffer buf;
+	    bool stat;
+	    buf_set_read (&buf, bigstring, strlen (bigstring) + 1);
+	    stat = tls_send_payload (c->c2.tls_multi, &buf);
+	    interval_action (&c->c2.tmp_int, c->c2.current);
+	    c->c2.timeval.tv_sec = 0;
+	    c->c2.timeval.tv_usec = 0;
+	    msg (D_LOW, "WROTE PAYLOAD stat=%d", (int) stat);
+
+	    msg (D_LOW, "COMMON NAME: %s", tls_common_name (c->c2.tls_multi));
+	  }
+#endif
 
 	  event_timeout_clear (&c->c2.wait_for_connect);
 	}
@@ -271,15 +312,16 @@ pre_select (struct context *c)
   packet_id_persist_flush (&c->c1.pid_persist, c->c2.current, 60);
 #endif
 
-  /*
-   * Does TLS need service?
-   */
+  /* Does TLS need service? */
   check_tls (c);
 
   /* In certain cases, TLS errors will require a restart */
   check_tls_errors (c);
   if (c->sig->signal_received)
     return;
+
+  /* check for incoming configuration info on the control channel */
+  check_incoming_control_channel (c);
 
   /* process connection establishment items */
   check_connection_established (c);
@@ -420,6 +462,44 @@ single_select (struct context *c)
   SELECT_SIGNAL_RECEIVED (&c->c2.event_wait, c->sig->signal_received);
 }
 
+/*
+ * Handle addition and removal of the 10-byte Socks5 header
+ * in UDP packets.
+ */
+
+static inline void
+socks_postprocess_incoming_link (struct context *c)
+{
+  if (c->c2.link_socket.socks_proxy && c->c2.link_socket.proto == PROTO_UDPv4)
+    socks_process_incoming_udp (&c->c2.buf, &c->c2.from);
+}
+
+static inline void
+socks_preprocess_outgoing_link (struct context *c,
+				struct sockaddr_in **to_addr,
+				int *size_delta)
+{
+  if (c->c2.link_socket.socks_proxy && c->c2.link_socket.proto == PROTO_UDPv4)
+    {
+      *size_delta += socks_process_outgoing_udp (&c->c2.to_link, &c->c2.to_link_addr);
+      *to_addr = &c->c2.link_socket.socks_relay;
+    }
+}
+
+/* undo effect of socks_preprocess_outgoing_link */
+static inline void
+link_socket_write_post_size_adjust (int *size,
+				    int size_delta,
+				    struct buffer *buf)
+{
+  if (size_delta > 0 && *size > size_delta)
+    {
+      *size -= size_delta;
+      if (!buf_advance (buf, size_delta))
+	*size = 0;
+    }
+}
+
 void
 read_incoming_link (struct context *c)
 {
@@ -454,6 +534,9 @@ read_incoming_link (struct context *c)
 
   /* check recvfrom status */
   check_status (status, "read", &c->c2.link_socket, NULL);
+
+  /* Remove socks header if applicable */
+  socks_postprocess_incoming_link (c);
 }
 
 void
@@ -513,18 +596,24 @@ process_incoming_link (struct context *c)
 	  if (tls_pre_decrypt (c->c2.tls_multi, &c->c2.from, &c->c2.buf, &c->c2.crypto_options, c->c2.current))
 	    {
 #ifdef USE_PTHREAD
-	      /* tell TLS thread a packet is waiting */
-	      if (tls_thread_process (&c->c2.thread_parms) == -1)
+	      if (c->options.tls_thread)
 		{
-		  msg (M_WARN, "TLS thread is not responding, exiting (1)");
-		  c->sig->signal_received = 0;
-		  c->sig->signal_text = "error";
-		  mutex_unlock (L_TLS);
-		  return;
+		  /* tell TLS thread a packet is waiting */
+		  if (tls_thread_process (&c->c2.thread_parms) == -1)
+		    {
+		      msg (M_WARN, "TLS thread is not responding, exiting (1)");
+		      c->sig->signal_received = 0;
+		      c->sig->signal_text = "error";
+		      mutex_unlock (L_TLS);
+		      return;
+		    }
 		}
-#else
-	      interval_action (&c->c2.tmp_int, c->c2.current);
-#endif /* USE_PTHREAD */
+	      else
+#endif
+		{
+		  interval_action (&c->c2.tmp_int, c->c2.current);
+		}
+
 	      /* reset packet received timer if TLS packet */
 	      if (c->options.ping_rec_timeout)
 		event_timeout_reset (&c->c2.ping_rec_interval, c->c2.current);
@@ -540,6 +629,7 @@ process_incoming_link (struct context *c)
 	      c->sig->signal_received = SIGUSR1;
 	      msg (D_STREAM_ERRORS, "Fatal decryption error, restarting");
 	      c->sig->signal_text = "decryption-error";
+	      mutex_unlock (L_TLS);
 	      return;
 	    }
 	}
@@ -656,7 +746,7 @@ process_incoming_tun (struct context *c)
 	  )
 	{
 	  struct buffer ipbuf = c->c2.buf;
-	  if (is_ipv4 (c->c1.tuntap.type, &ipbuf))
+	  if (is_ipv4 (TUNNEL_TYPE (&c->c1.tuntap), &ipbuf))
 	    {
 #if PASSTOS_CAPABILITY
 	      /* extract TOS from IP header */
@@ -684,7 +774,7 @@ process_incoming_tun (struct context *c)
 }
 
 void
-process_outgoing_link (struct context *c)
+process_outgoing_link (struct context *c, struct link_socket *ls)
 {
   if (c->c2.to_link.len > 0 && c->c2.to_link.len <= EXPANDED_SIZE (&c->c2.frame))
     {
@@ -716,7 +806,7 @@ process_outgoing_link (struct context *c)
 #if PASSTOS_CAPABILITY
 	  /* Set TOS */
 	  if (c->c2.ptos_defined)
-	    setsockopt (c->c2.link_socket.sd, IPPROTO_IP, IP_TOS, &c->c2.ptos, sizeof (c->c2.ptos));
+	    setsockopt (ls->sd, IPPROTO_IP, IP_TOS, &c->c2.ptos, sizeof (c->c2.ptos));
 #endif
 
 	  /* Log packet send */
@@ -725,13 +815,25 @@ process_outgoing_link (struct context *c)
 	    fprintf (stderr, "W");
 #endif
 	  msg (D_LINK_RW, "%s WRITE [%d] to %s: %s",
-	       proto2ascii (c->c2.link_socket.proto, true),
+	       proto2ascii (ls->proto, true),
 	       BLEN (&c->c2.to_link),
 	       print_sockaddr (&c->c2.to_link_addr),
 	       PROTO_DUMP (&c->c2.to_link));
 
-	  /* Send packet */
-	  size = link_socket_write (&c->c2.link_socket, &c->c2.to_link, &c->c2.to_link_addr);
+	  /* Packet send complexified by possible Socks5 usage */
+	  {
+	    struct sockaddr_in *to_addr = &c->c2.to_link_addr;
+	    int size_delta = 0;
+
+	    /* If Socks5 over UDP, prepend header */
+	    socks_preprocess_outgoing_link (c, &to_addr, &size_delta);
+
+	    /* Send packet */
+	    size = link_socket_write (ls, &c->c2.to_link, to_addr);
+
+	    /* Undo effect of prepend */
+	    link_socket_write_post_size_adjust (&size, size_delta, &c->c2.to_link);
+	  }
 
 	  if (size > 0)
 	    {
@@ -743,7 +845,7 @@ process_outgoing_link (struct context *c)
 	size = 0;
 
       /* Check return status */
-      check_status (size, "write", &c->c2.link_socket, NULL);
+      check_status (size, "write", ls, NULL);
 
       if (size > 0)
 	{
@@ -778,7 +880,7 @@ process_outgoing_link (struct context *c)
 }
 
 void
-process_outgoing_tun (struct context *c)
+process_outgoing_tun (struct context *c, struct tuntap *tt)
 {
   /*
    * Set up for write() call to TUN/TAP
@@ -794,7 +896,7 @@ process_outgoing_tun (struct context *c)
     {
       struct buffer ipbuf = c->c2.to_tun;
 
-      if (is_ipv4 (c->c1.tuntap.type, &ipbuf))
+      if (is_ipv4 (tt->type, &ipbuf))
 	{
 	  /* possibly alter the TCP MSS */
 	  if (c->options.mssfix_defined)
@@ -819,14 +921,14 @@ process_outgoing_tun (struct context *c)
 	   MD5SUM (BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun)));
 
 #ifdef TUN_PASS_BUFFER
-      size = write_tun_buffered (&c->c1.tuntap, &c->c2.to_tun);
+      size = write_tun_buffered (tt, &c->c2.to_tun);
 #else
-      size = write_tun (&c->c1.tuntap, BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun));
+      size = write_tun (tt, BPTR (&c->c2.to_tun), BLEN (&c->c2.to_tun));
 #endif
 
       if (size > 0)
 	c->c2.tun_write_bytes += size;
-      check_status (size, "write to TUN/TAP", NULL, &c->c1.tuntap);
+      check_status (size, "write to TUN/TAP", NULL, tt);
 
       /* check written packet size */
       if (size > 0)
@@ -835,7 +937,7 @@ process_outgoing_tun (struct context *c)
 	  if (size != BLEN (&c->c2.to_tun))
 	    msg (D_LINK_ERRORS,
 		 "TUN/TAP packet was fragmented on write to %s (tried=%d,actual=%d)",
-		 c->c1.tuntap.actual,
+		 tt->actual,
 		 BLEN (&c->c2.to_tun),
 		 size);
 	}
@@ -914,7 +1016,7 @@ process_io (struct context *c)
 	}
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
       /* Incoming data from TLS background thread */
-      else if (TLS_THREAD_SOCKET_ISSET (c->c2.tls_multi, &c->c2.event_wait, &c->c2.thread_parms, reads))
+      else if (c->options.tls_thread && TLS_THREAD_SOCKET_ISSET (c->c2.tls_multi, &c->c2.event_wait, &c->c2.thread_parms, reads))
 	{
 	  process_incoming_tls_thread (c);
 	}
@@ -922,12 +1024,12 @@ process_io (struct context *c)
       /* TCP/UDP port ready to accept write */
       else if (SOCKET_ISSET (&c->c2.event_wait, &c->c2.link_socket, writes))
 	{
-	  process_outgoing_link (c);
+	  process_outgoing_link (c, &c->c2.link_socket);
 	}
       /* TUN device ready to accept write */
       else if (TUNTAP_ISSET (&c->c2.event_wait, &c->c1.tuntap, writes))
 	{
-	  process_outgoing_tun (c);
+	  process_outgoing_tun (c, &c->c1.tuntap);
 	}
     }
 }

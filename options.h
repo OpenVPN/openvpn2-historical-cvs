@@ -52,7 +52,7 @@ struct options
 
   /* mode of operation */
 # define MODE_POINT_TO_POINT 0
-# define MODE_MULTICLIENT_UDP_SERVER 1
+# define MODE_NONFORKING_UDP_SERVER 1
   int mode;
 
   /* persist parms */

@@ -35,7 +35,7 @@
 #include "error.h"
 #include "misc.h"
 
-#define INTERVAL_DEBUG 0
+#define INTERVAL_DEBUG 1 // JYFIXME
 
 /*
  * Used to determine in how many seconds we should be

@@ -58,17 +58,18 @@
 
 #define D_TLS_DEBUG_LOW      LOGLEV(3, 20, 0)        /* low frequency info from tls_session routines */
 #define D_GREMLIN            LOGLEV(3, 30, 0)        /* show simulated outage info from gremlin module */
-#define D_COMP_LOW           LOGLEV(3, 31, 0)        /* show adaptive compression state changes */
-#define D_GENKEY             LOGLEV(3, 32, 0)        /* print message after key generation */
-#define D_ROUTE              LOGLEV(3, 33, 0)        /* show routes added and deleted */
-#define D_TUNTAP_INFO        LOGLEV(3, 34, 0)        /* show debugging info from TUN/TAP driver */
-#define D_RESTART            LOGLEV(3, 35, 0)        /* show certain restart messages */
+#define D_GENKEY             LOGLEV(3, 31, 0)        /* print message after key generation */
+#define D_ROUTE              LOGLEV(3, 32, 0)        /* show routes added and deleted */
+#define D_TUNTAP_INFO        LOGLEV(3, 33, 0)        /* show debugging info from TUN/TAP driver */
+#define D_RESTART            LOGLEV(3, 34, 0)        /* show certain restart messages */
 
 #define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
 #define D_SHOW_OCC           LOGLEV(4, 41, 0)        /* show options compatibility string */
 #define D_MSS                LOGLEV(4, 42, 0)        /* show MSS adjustments */
 #define D_BACKTRACK          LOGLEV(4, 43, 0)        /* show replay backtracks */
 #define D_SEMAPHORE_LOW      LOGLEV(4, 44, 0)        /* show Win32 semaphore waits (low freq) */
+#define D_COMP_LOW           LOGLEV(4, 45, 0)        /* show adaptive compression state changes */
+#define D_LOW                LOGLEV(4, 46, 0)        /* miscellaneous low-frequency debug info */
 
 #define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 

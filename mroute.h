@@ -23,28 +23,51 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef FORWARD_H
-#define FORWARD_H
+#ifndef MROUTE_H
+#define MROUTE_H
 
-#include "openvpn.h"
-#include "occ.h"
-#include "ping.h"
+#if P2MP
 
-void pre_select (struct context *c);
+#include "buffer.h"
+#include "list.h"
 
-void single_select (struct context *c);
+struct mroute_list {
+};
 
-void process_io (struct context *c);
+/*
+ * Choose the largest address possible with
+ * any of our supported types, which is IPv6
+ * with port number.
+ */
+#define MR_MAX_ADDR_LEN 18
 
-void encrypt_sign (struct context *c, bool comp_frag);
+/*
+ * Address Types
+ */
+#define MR_ADDR_NONE             0
+#define MR_ADDR_ETHER            1
+#define MR_ADDR_IPV4             2
+#define MR_ADDR_IPV6             3
+#define MR_ADDR_MASK             3
 
-void show_select_status (struct context *c);
+/* Address type mask indicating that port # is part of address */
+#define MR_WITH_PORT             4
 
-void read_incoming_link (struct context *c);
-void process_incoming_link (struct context *c);
-void read_incoming_tun (struct context *c);
-void process_incoming_tun (struct context *c);
-void process_outgoing_link (struct context *c, struct link_socket *ls);
-void process_outgoing_tun (struct context *c, struct tuntap *tt);
+struct mroute_addr {
+  uint8_t type;
+  uint8_t len;
+  uint8_t addr[MR_MAX_ADDR_LEN];
+};
 
-#endif /* FORWARD_H */
+struct mroute_list {
+  struct mroute_addr addr;
+};
+
+bool mroute_extract_addr_from_packet (struct mroute_addr *addr, const struct buffer *buf, int tunnel_type, bool dest);
+bool mroute_extract_sockaddr_in (struct mroute_addr *addr, const struct sockaddr_in *saddr, bool use_port);
+
+void mroute_list_init (struct mroute_list *list);
+void mroute_list_free (struct mroute_list *list);
+
+#endif /* P2MP */
+#endif /* MROUTE_H */

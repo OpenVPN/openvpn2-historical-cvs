@@ -189,14 +189,6 @@ int socket_finalize (
 
 #endif
 
-int link_socket_read_socks_udp (struct link_socket *sock,
-				struct buffer *buf,
-				struct sockaddr_in *from);
-
-int link_socket_write_socks_udp (struct link_socket *sock,
-				 struct buffer *buf,
-				 struct sockaddr_in *to);
-
 void link_socket_reset (struct link_socket *sock);
 
 void link_socket_init_phase1 (struct link_socket *sock,
@@ -256,6 +248,8 @@ void setenv_sockaddr (const char *name_prefix,
 void bad_address_length (int actual, int expected);
 
 in_addr_t link_socket_current_remote (const struct link_socket *sock);
+
+void link_socket_inherit_passive (struct link_socket *dest, const struct link_socket *src, struct link_socket_addr *lsa);
 
 /*
  * DNS resolution
@@ -447,10 +441,6 @@ link_socket_read (struct link_socket *sock,
 #else
       res = link_socket_read_udp_posix (sock, buf, maxsize, from);
 #endif
-
-      if (sock->socks_proxy && res > 0)
-	res = link_socket_read_socks_udp (sock, buf, from);
-
       return res;
     }
   else if (sock->proto == PROTO_TCPv4_SERVER || sock->proto == PROTO_TCPv4_CLIENT)
@@ -525,18 +515,11 @@ link_socket_write_udp (struct link_socket *sock,
 		       struct buffer *buf,
 		       struct sockaddr_in *to)
 {
-  if (sock->socks_proxy)
-    {
-      return link_socket_write_socks_udp (sock, buf, to);
-    }
-  else
-    {
 #ifdef WIN32
-      return link_socket_write_win32 (sock, buf, to);
+  return link_socket_write_win32 (sock, buf, to);
 #else
-      return link_socket_write_udp_posix (sock, buf, to);
+  return link_socket_write_udp_posix (sock, buf, to);
 #endif
-    }
 }
 
 static inline int

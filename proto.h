@@ -46,10 +46,11 @@
 #define OPENVPN_ETH_ALEN 6            /* ethernet address length */
 struct openvpn_ethhdr 
 {
-  uint8_t dest[OPENVPN_ETH_ALEN];     /* destination eth addr	*/
-  uint8_t source[OPENVPN_ETH_ALEN];   /* source ether addr	*/
+  uint8_t dest[OPENVPN_ETH_ALEN];     /* destination ethernet addr	*/
+  uint8_t source[OPENVPN_ETH_ALEN];   /* source ethernet addr	*/
 
-# define OPENVPN_ETH_P_IP   0x0800    /* IPv4 protocol */
+# define OPENVPN_ETH_P_IPV4   0x0800  /* IPv4 protocol */
+# define OPENVPN_ETH_P_IPV6   0x86DD  /* IPv6 protocol */
   uint16_t proto;                     /* packet type ID field	*/
 };
 
@@ -209,7 +210,7 @@ is_ipv4 (int tunnel_type, struct buffer *buf)
 	  + sizeof (struct openvpn_iphdr)))
 	return false;
       eh = (const struct openvpn_ethhdr *) BPTR (buf);
-      if (ntohs_as (&eh->proto) != OPENVPN_ETH_P_IP)
+      if (ntohs_as (&eh->proto) != OPENVPN_ETH_P_IPV4)
 	return false;
       offset = sizeof (struct openvpn_ethhdr);
     }

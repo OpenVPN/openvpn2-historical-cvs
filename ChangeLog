@@ -1,7 +1,12 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.3 2004/02/23 05:38:49 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.4 2004/03/02 19:39:59 jimyonan Exp $
+
+2004.03.xx -- Version 2.0-test4
+
+* Move Socks5 UDP header append/remove to
+  socks.c, and is called from forward.c.
 
 2004.02.22 -- Version 2.0-test3
 

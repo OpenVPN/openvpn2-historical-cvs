@@ -339,3 +339,65 @@ establish_socks_proxy_udpassoc (struct socks_proxy_info *p,
     *signal_received = (p->retry ? SIGUSR1 : SIGTERM);
   return;
 }
+
+/*
+ * Remove the 10 byte socks5 header from an incoming
+ * UDP packet, setting *from to the source address.
+ *
+ * Run after UDP read.
+ */
+void
+socks_process_incoming_udp (struct buffer *buf,
+			    struct sockaddr_in *from)
+{
+  int atyp;
+
+  if (BLEN (buf) < 10)
+    goto error;
+
+  buf_read_u16 (buf);
+  if (buf_read_u8 (buf) != 0)
+    goto error;
+
+  atyp = buf_read_u8 (buf);
+  if (atyp != 1)		/* ATYP == 1 (IP V4) */
+    goto error;
+
+  buf_read (buf, &from->sin_addr, sizeof (from->sin_addr));
+  buf_read (buf, &from->sin_port, sizeof (from->sin_port));
+
+  return;
+
+ error:
+  buf->len = 0;
+}
+
+/*
+ * Add a 10 byte socks header prior to UDP write.
+ * *to is the destination address.
+ *
+ * Run before UDP write.
+ * Returns the size of the header.
+ */
+int
+socks_process_outgoing_udp (struct buffer *buf,
+			    struct sockaddr_in *to)
+{
+  /* 
+   * Get a 10 byte subset buffer prepended to buf --
+   * we expect these bytes will be here because
+   * we allocated frame space in socks_adjust_frame_parameters.
+   */
+  struct buffer head = buf_sub (buf, 10, true);
+
+  /* crash if not enough headroom in buf */
+  ASSERT (buf_defined (&head));
+
+  buf_write_u16 (&head, 0);	/* RSV = 0 */
+  buf_write_u8 (&head, 0);	/* FRAG = 0 */
+  buf_write_u8 (&head, '\x01'); /* ATYP = 1 (IP V4) */
+  buf_write (&head, &to->sin_addr, sizeof (to->sin_addr));
+  buf_write (&head, &to->sin_port, sizeof (to->sin_port));
+
+  return 10;
+}

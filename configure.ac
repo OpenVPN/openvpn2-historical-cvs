@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [2.0_test3], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [2.0_test4], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -384,11 +384,11 @@ if test "$CRYPTO" = "yes"; then
    AC_CHECK_HEADER(openssl/evp.h,
 	[AC_CHECK_LIB(crypto, EVP_CIPHER_CTX_init,
             [
-		   AC_CHECKING([that OpenSSL Library is at least version 0.9.5])
+		   AC_CHECKING([that OpenSSL Library is at least version 0.9.6])
 		   AC_EGREP_CPP(yes,
 		     [
 		       #include "openssl/evp.h"
-		       #if SSLEAY_VERSION_NUMBER >= 0x00905000L
+		       #if SSLEAY_VERSION_NUMBER >= 0x00906000L
 		         yes
 		       #endif
 		     ],

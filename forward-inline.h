@@ -62,6 +62,18 @@ check_tls_errors (struct context *c)
 }
 
 /*
+ * Check for possible incoming configuration
+ * messages on the control channel.
+ */
+static inline void
+check_incoming_control_channel (struct context *c)
+{
+  void check_incoming_control_channel_dowork (struct context *c);
+  if (tls_test_payload_len (c->c2.tls_multi) > 0)
+    check_incoming_control_channel_dowork (c);
+}
+
+/*
  * Options like --up-delay need to be triggered by this function which
  * checks for connection establishment.
  */
@@ -79,7 +91,7 @@ check_connection_established (struct context *c)
 static inline void
 check_add_routes (struct context *c)
 {
-  static void check_add_routes_dowork (struct context *c);
+  void check_add_routes_dowork (struct context *c);
   if (event_timeout_trigger
       (&c->c2.route_wakeup, c->c2.current, &c->c2.timeval))
     check_add_routes_dowork (c);

@@ -371,7 +371,7 @@ init_options (struct options *o)
   o->comp_lzo_adaptive = true;
 #endif
 #ifdef WIN32
-  o->tuntap_options.ip_win32_type = IPW32_SET_IPAPI;
+  o->tuntap_options.ip_win32_type = IPW32_SET_DHCP_MASQ;
 #endif
 #ifdef USE_CRYPTO
   o->ciphername = "BF-CBC";
@@ -394,7 +394,7 @@ init_options (struct options *o)
   o->handshake_window = 60;
   o->transition_window = 3600;
 #ifdef USE_PTHREAD
-  o->tls_thread = true;
+  o->tls_thread = false; // JYFIXME -- disable multithreading for test purposes
 #endif
 #endif
 #endif
@@ -740,7 +740,6 @@ options_postprocess (struct options *options, bool first_time)
     msg (M_USAGE, "Options error: local and remote/netmask --ifconfig addresses must be different");
 
 #ifdef WIN32
-      /* JYFIXME -- manual merge to 2.0 beta */
       if (dev == DEV_TYPE_TUN && !(options.ifconfig_local && options.ifconfig_remote_netmask))
 	msg (M_USAGE, "Options error: On Windows, --ifconfig is required when --dev tun is used");
 
@@ -756,7 +755,7 @@ options_postprocess (struct options *options, bool first_time)
 	  && !options.route_delay_defined)
 	{
 	  options.route_delay_defined = true;
-	  options.route_delay = 5;
+	  options.route_delay = 10;
 	}
 
       if (options.ifconfig_noexec)
@@ -808,7 +807,7 @@ options_postprocess (struct options *options, bool first_time)
 #ifdef USE_SSL
   if (options->tls_server + options->tls_client +
       (options->shared_secret_file != NULL) > 1)
-    msg (M_USAGE, "specify only one of --tls-server, --tls-client, or --secret");
+    msg (M_USAGE, "Options error: specify only one of --tls-server, --tls-client, or --secret");
 
   if (options->tls_server)
     {
@@ -831,7 +830,7 @@ options_postprocess (struct options *options, bool first_time)
 
 #define MUST_BE_UNDEF(parm) if (options->parm != defaults.parm) msg (M_USAGE, err, #parm);
 
-      const char err[] = "Parameter %s can only be specified in TLS-mode, i.e. where --tls-server or --tls-client is also specified.";
+      const char err[] = "Options error: Parameter %s can only be specified in TLS-mode, i.e. where --tls-server or --tls-client is also specified.";
 
       MUST_BE_UNDEF (ca_file);
       MUST_BE_UNDEF (dh_file);
@@ -1374,6 +1373,16 @@ add_option (struct options *options, int i, char *p[],
 
       read_config_file (options, p[1], level, file, line);
     }
+  else if (streq (p[0], "mode") && p[1])
+    {
+      ++i;
+      if (streq (p[1], "p2p"))
+	options->mode = MODE_POINT_TO_POINT;
+      else if (streq (p[1], "udp-server"))
+	options->mode = MODE_NONFORKING_UDP_SERVER;
+      else
+	msg (M_USAGE, "Options error: Bad --mode parameter: %s", p[1]);
+    }
   else if (streq (p[0], "dev") && p[1])
     {
       ++i;
@@ -1590,7 +1599,7 @@ add_option (struct options *options, int i, char *p[],
     }
   else if (streq (p[0], "mtu-dynamic"))
     {
-      msg (M_USAGE, "--mtu-dynamic has been replaced by --fragment");
+      msg (M_USAGE, "Options error: --mtu-dynamic has been replaced by --fragment");
     }
   else if (streq (p[0], "fragment") && p[1])
     {
@@ -1625,7 +1634,7 @@ add_option (struct options *options, int i, char *p[],
       options->shaper = atoi (p[1]);
       if (options->shaper < SHAPER_MIN || options->shaper > SHAPER_MAX)
 	{
-	  msg (M_USAGE, "bad shaper value, must be between %d and %d",
+	  msg (M_USAGE, "Bad shaper value, must be between %d and %d",
 	       SHAPER_MIN, SHAPER_MAX);
 	}
 #else /* HAVE_GETTIMEOFDAY */

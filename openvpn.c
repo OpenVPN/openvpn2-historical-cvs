@@ -99,7 +99,7 @@ tunnel_point_to_point (struct context *c)
  * in the context of the
  * tunnel_multiclient_udp_server function. 
  */
-#define TMUS_SIG() \
+#define TNUS_SIG() \
   if (IS_SIG (top)) \
   { \
     if (top->sig->signal_received == SIGUSR2) \
@@ -112,13 +112,15 @@ tunnel_point_to_point (struct context *c)
   }
 
 static void
-tunnel_multiclient_udp_server (struct context *top)
+tunnel_nonforking_udp_server (struct context *top)
 {
   const int gc_level = gc_new_level ();
   struct multi_context multi;
 
   ASSERT (top->options.proto == PROTO_UDPv4);
-  ASSERT (top->options.mode == MODE_MULTICLIENT_UDP_SERVER);
+  ASSERT (top->options.mode == MODE_NONFORKING_UDP_SERVER);
+
+  top->options.tls_thread = false;
 
   multi_init (&multi, top);
   context_clear_2 (top);
@@ -136,7 +138,7 @@ tunnel_multiclient_udp_server (struct context *top)
 
       /* set up and do the select() */
       multi_select (&multi, top);
-      TMUS_SIG ();
+      TNUS_SIG ();
 
       /* timeout? */
       if (!top->c2.select_status)
@@ -147,7 +149,7 @@ tunnel_multiclient_udp_server (struct context *top)
 
       /* process the I/O which triggered select */
       multi_process_io (&multi, top);
-      TMUS_SIG ();
+      TNUS_SIG ();
     }
 
   /* tear down tunnel instance (unless --persist-tun) */
@@ -230,8 +232,8 @@ main (int argc, char *argv[])
 	      tunnel_point_to_point (&c);
 	      break;
 #if P2MP
-	    case MODE_MULTICLIENT_UDP_SERVER:
-	      tunnel_multiclient_udp_server (&c);
+	    case MODE_NONFORKING_UDP_SERVER:
+	      tunnel_nonforking_udp_server (&c);
 	      break;
 #endif
 	    default:

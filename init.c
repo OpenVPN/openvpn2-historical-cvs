@@ -581,16 +581,6 @@ do_init_crypto_tls_c1 (struct context *c)
 
   if (!c->c1.ks.ssl_ctx)
     {
-      /* Let user specify a script to verify the incoming certificate */
-      tls_set_verify_command (options->tls_verify);
-
-      /* Verify the X509 name of the incoming host */
-      tls_set_verify_x509name (options->tls_remote);
-
-      /* Let user specify a certificate revocation list to
-	 check the incoming certificate */
-      tls_set_crl_verify (options->crl_file);
-  
       /*
        * Initialize the OpenSSL library's global
        * SSL context.
@@ -671,6 +661,9 @@ do_init_crypto_tls (struct context *c)
   to.renegotiate_seconds = options->renegotiate_seconds;
   to.single_session = options->single_session;
   to.disable_occ = !options->occ;
+  to.verify_command = options->tls_verify;
+  to.verify_x509name = options->tls_remote;
+  to.crl_file = options->crl_file;
 
   /* TLS handshake authentication (--tls-auth) */
   if (options->tls_auth_file)
@@ -1291,7 +1284,7 @@ do_close_remove_env (struct context *c)
 {
   del_env_nonparm (
 #if defined(USE_CRYPTO) && defined(USE_SSL)
-		    get_max_tls_verify_id ()
+		    get_max_tls_verify_id (c->c2.tls_multi)
 #else
 		    0
 #endif
@@ -1408,7 +1401,8 @@ init_instance (struct context *c)
   do_init_dynamic_mtu (c);
 
   /* bind the TCP/UDP socket */
-  do_init_socket_1 (c);
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_init_socket_1 (c);
 
   /* initialize tun/tap device object */
   if (c->mode == CM_P2P || c->mode == CM_TOP)
@@ -1448,11 +1442,14 @@ init_instance (struct context *c)
   do_init_first_time_2 (c);
 
   /* finalize the TCP/UDP socket */
-  do_init_socket_2 (c);
-  if (IS_SIG (c))
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
     {
-      c->sig->signal_text = "socket";
-      return;
+      do_init_socket_2 (c);
+      if (IS_SIG (c))
+	{
+	  c->sig->signal_text = "socket";
+	  return;
+	}
     }
 
   /* start the TLS thread */

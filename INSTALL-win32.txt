@@ -1,6 +1,8 @@
 OpenVPN on Windows notes, Copyright (C) James Yonan, 2003-2004
 --------------------------------------------------------------
 
+THIS IS A BETA RELEASE.
+
 Please report any bugs to the openvpn-users
 list.
 
@@ -17,14 +19,19 @@ This document is also available in HTML:
 
 http://openvpn.sourceforge.net/INSTALL-win32.html
 
-This document is also available in HTML:
-
-http://openvpn.sourceforge.net/INSTALL-win32.html
-
-What's new in the 1.6 beta series
+What's new in the 2.0 Beta Series
 ---------------------------------
 
-THIS IS A BETA RELEASE.
+The 2.0 beta series is focussed on improving scalability and
+offering centralized management for VPN configurations having
+a large numbers of clients.
+
+See the release notes for more info:
+
+http://openvpn.sourceforge.net/20notes.html
+
+What's new in 1.6.0
+-------------------
 
 This release is primarily focused on bug fixes and minor
 feature improvements over 1.5.

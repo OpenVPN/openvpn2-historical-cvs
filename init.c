@@ -339,6 +339,12 @@ pre_setup (const struct options *options)
   msg (M_INFO, "%s", title_string);
 }
 
+static inline void
+reset_coarse_timers (struct context *c)
+{
+  c->c2.coarse_timer_wakeup = 0;
+}
+
 /*
  * initialize timers
  */
@@ -346,7 +352,7 @@ static void
 do_init_timers (struct context *c, bool deferred)
 {
   c->c2.current = time (NULL);
-  c->c2.coarse_timer_wakeup = 0;
+  reset_coarse_timers (c);
 
   /* initialize inactivity timeout */
   if (c->options.inactivity_timeout)
@@ -626,10 +632,12 @@ do_deferred_options (struct context *c, const unsigned int found)
 }
 
 void
-do_up_delay (struct context *c, bool pulled_options, unsigned int option_types_found)
+do_up (struct context *c, bool pulled_options, unsigned int option_types_found)
 {
-  if (!c->c2.do_up_delay_ran)
+  if (!c->c2.do_up_ran)
     {
+      reset_coarse_timers (c);
+
       if (pulled_options && option_types_found)
 	do_deferred_options (c, option_types_found);
 
@@ -652,7 +660,7 @@ do_up_delay (struct context *c, bool pulled_options, unsigned int option_types_f
 	{
 	  msg (D_PUSH_ERRORS, "WARNING: Options pulled from the server relating to tun/tap interface configuration and routes were not applied");
 	}
-      c->c2.do_up_delay_ran = true;
+      c->c2.do_up_ran = true;
     }
 }
 

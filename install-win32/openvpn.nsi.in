@@ -288,6 +288,9 @@ SectionEnd
 
 Section -post
 
+  ; delete old devcon.exe
+  Delete "$INSTDIR\bin\devcon.exe"
+
   ;
   ; install/upgrade TAP-Win32 driver if selected, using tapinstall.exe
   ;

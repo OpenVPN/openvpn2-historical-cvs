@@ -1352,7 +1352,7 @@ write_tun (struct tuntap* tt, uint8_t *buf, int len)
       else 
         type = htonl (AF_INET);
 
-      iv[0].iov_base = &type;
+      iv[0].iov_base = (char *)&type;
       iv[0].iov_len = sizeof (type);
       iv[1].iov_base = buf;
       iv[1].iov_len = len;
@@ -1371,7 +1371,7 @@ read_tun (struct tuntap* tt, uint8_t *buf, int len)
       u_int32_t type;
       struct iovec iv[2];
 
-      iv[0].iov_base = &type;
+      iv[0].iov_base = (char *)&type;
       iv[0].iov_len = sizeof (type);
       iv[1].iov_base = buf;
       iv[1].iov_len = len;
@@ -2140,7 +2140,6 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   if (tt->type == DEV_TYPE_NULL)
     {
       open_null (tt);
-      netcmd_semaphore_release (); /* JYFIXME -- backport to 1.x */
       gc_free (&gc);
       return;
     }

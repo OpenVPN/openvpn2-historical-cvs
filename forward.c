@@ -132,7 +132,7 @@ check_incoming_control_channel_dowork (struct context *c)
 	      if (status == PUSH_MSG_ERROR)
 		msg (D_PUSH_ERRORS, "WARNING: Received bad push/pull message: %s", BSTR (&buf));
 	      else if (status == PUSH_MSG_REPLY)
-		do_up_delay (c, true, option_types_found); /* delay bringing tun/tap up until --push parms received from remote */
+		do_up (c, true, option_types_found); /* delay bringing tun/tap up until --push parms received from remote */
 	    }
 	  else
 	    {
@@ -166,7 +166,7 @@ check_connection_established_dowork (struct context *c)
 	  else
 #endif
 	    {
-	      do_up_delay (c, false, 0);
+	      do_up (c, false, 0);
 	    }
 
 	  event_timeout_clear (&c->c2.wait_for_connect);

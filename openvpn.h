@@ -300,7 +300,7 @@ struct context_2
   int select_status;
 
   /* indicates that the do_up_delay function has run */
-  bool do_up_delay_ran;
+  bool do_up_ran;
 
 #if P2MP
 

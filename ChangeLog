@@ -1,7 +1,13 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.18 2004/03/30 22:27:26 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.19 2004/04/02 15:01:23 jimyonan Exp $
+
+2004.04.02 -- Version 2.0-test19
+
+* Fixed bug where routes pushed from server were
+  not working correctly on Windows clients.
+* Added Mac OS X route patch (Jeremy Apple).
 
 2004.03.30 -- Version 2.0-test18
 

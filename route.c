@@ -634,6 +634,23 @@ add_route (struct route *r)
   msg (D_ROUTE, "%s", BSTR (&buf));
   status = system_check (BSTR (&buf), "ERROR: FreeBSD route add command failed", false);
 
+#elif defined(TARGET_DARWIN)
+
+  buf_printf (&buf, ROUTE_PATH " add");
+
+#if 0
+  if (r->metric_defined)
+    buf_printf (&buf, " -rtt %d", r->metric);
+#endif
+
+  buf_printf (&buf, " -net %s %s %s",
+              network,
+              gateway,
+              netmask);
+
+  msg (D_ROUTE, "%s", BSTR (&buf));
+  status = system_check (BSTR (&buf), "ERROR: FreeBSD route add command failed", false);
+
 #elif defined(TARGET_OPENBSD)
 
   buf_printf (&buf, ROUTE_PATH " add");
@@ -721,6 +738,17 @@ delete_route (const struct route *r)
 
   msg (D_ROUTE, "%s", BSTR (&buf));
   system_check (BSTR (&buf), "ERROR: FreeBSD route delete command failed", false);
+
+
+#elif defined(TARGET_DARWIN)
+
+  buf_printf (&buf, ROUTE_PATH " delete -net %s %s %s",
+              network,
+              gateway,
+              netmask);
+
+  msg (D_ROUTE, "%s", BSTR (&buf));
+  system_check (BSTR (&buf), "ERROR: Darwin route delete command failed", false);
 
 #elif defined(TARGET_OPENBSD)
 
@@ -850,6 +878,23 @@ get_default_gateway (in_addr_t *ret)
 #include <netinet/in.h>
 
 /* all of this is taken from <net/route.h> in FreeBSD */
+#define RTA_DST     0x1
+#define RTA_GATEWAY 0x2
+#define RTA_NETMASK 0x4
+
+#define RTM_GET     0x4
+#define RTM_VERSION 5
+
+#define RTF_UP      0x1
+#define RTF_GATEWAY 0x2
+
+#elif defined(TARGET_DARWUB)
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+/* all of this is taken from <net/route.h> in Darwin */
 #define RTA_DST     0x1
 #define RTA_GATEWAY 0x2
 #define RTA_NETMASK 0x4

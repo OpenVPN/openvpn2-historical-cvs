@@ -98,6 +98,7 @@
 #define D_SCHEDULER          LOGLEV(8, 70, M_DEBUG)  /* show scheduler debugging info */
 #define D_GREMLIN_VERBOSE    LOGLEV(8, 70, M_DEBUG)  /* show verbose info from gremlin module */
 #define D_REL_DEBUG          LOGLEV(8, 70, M_DEBUG)  /* show detailed info from reliable routines */
+#define D_SELECT             LOGLEV(8, 70, M_DEBUG)  /* show detailed info from main select() call */
 
 #define D_TLS_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show detailed info from TLS routines */
 #define D_CRYPTO_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show detailed info from crypto.c routines */
@@ -109,15 +110,13 @@
 #define D_PID_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show packet-id debugging info */
 #define D_PID_PERSIST_DEBUG  LOGLEV(9, 70, M_DEBUG)  /* show packet-id persist debugging info */
 #define D_LINK_RW_VERBOSE    LOGLEV(9, 70, M_DEBUG)  /* show link reads/writes with greater verbosity */
-#define D_TLS_THREAD_DEBUG   LOGLEV(9, 70, M_DEBUG)  /* show detailed info from TLS thread routines */
-#define D_SELECT             LOGLEV(9, 70, M_DEBUG)  /* show detailed info from main select() call */
 #define D_TUN_RW             LOGLEV(9, 70, M_DEBUG)  /* show TUN/TAP reads/writes */
 #define D_STREAM_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show TCP stream debug info */
-#define D_REGISTRY           LOGLEV(9, 70, M_DEBUG)  /* win32 registry debugging info */
 #define D_WIN32_IO           LOGLEV(9, 70, M_DEBUG)  /* win32 I/O debugging info */
 
 #define D_SHAPER_DEBUG       LOGLEV(10, 70, M_DEBUG) /* show traffic shaper info */
 
+#define D_REGISTRY           LOGLEV(11, 70, M_DEBUG)  /* win32 registry debugging info */
 #define D_OPENSSL_LOCK       LOGLEV(11, 70, M_DEBUG) /* show OpenSSL locks */
 
 #endif

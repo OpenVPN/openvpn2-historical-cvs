@@ -1,7 +1,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.4 2003/07/22 01:17:41 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.5 2003/07/22 22:59:49 jimyonan Exp $
 	
 Upcoming version 1.5.0
 
@@ -29,6 +29,13 @@ Upcoming version 1.5.0
   config.
 * Added --up-restart option based on
   suggestion from Sean Reifschneider.
+* If --dev tap or --dev-type tap
+  is specified, --tun-mtu
+  defaults to 1500 and --tun-mtu-extra
+  defaults to 64.
+* Enabled --verb 5 debugging mode that
+  prints 'R' and 'W' for each packet
+  read or write on the TCP/UDP socket.
 * Protocol compatibility is maintained
   with the 1.4.x and 1.3.x series.
   If you are connecting to a 1.3.x peer,

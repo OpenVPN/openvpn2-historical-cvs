@@ -63,6 +63,7 @@ struct options
 #endif
   int tun_mtu;           /* MTU of tun device */
   int tun_mtu_extra;
+  bool tun_mtu_extra_defined;
   int link_mtu;          /* MTU of device over which tunnel packets pass via TCP/UDP */
   bool tun_mtu_defined;  /* true if user overriding parm with command line option */
   bool link_mtu_defined; /* true if user overriding parm with command line option */

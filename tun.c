@@ -824,6 +824,10 @@ tun_read_queue (struct tuntap *tt, int maxsize)
 
 	  tt->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 	  tt->reads.status = 0;
+
+	  msg (D_WIN32_IO, "WIN32 I/O: TAP Read immediate return [%d,%d]",
+	       (int) len,
+	       (int) tt->reads.size);	       
 	}
       else
 	{
@@ -832,12 +836,17 @@ tun_read_queue (struct tuntap *tt, int maxsize)
 	    {
 	      tt->reads.iostate = IOSTATE_QUEUED;
 	      tt->reads.status = err;
+	      msg (D_WIN32_IO, "WIN32 I/O: TAP Read queued [%d]",
+		   (int) len);
 	    }
 	  else /* error occurred */
 	    {
 	      ASSERT (SetEvent (tt->reads.overlapped.hEvent));
 	      tt->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      tt->reads.status = err;
+	      msg (D_WIN32_IO, "WIN32 I/O: TAP Read error [%d]: %s",
+		   (int) len,
+		   strerror_win32 (status));
 	    }
 	}
     }
@@ -868,28 +877,37 @@ tun_write_queue (struct tuntap *tt, struct buffer *buf)
 			&tt->writes.overlapped
 			);
 
-      if (!status) /* operation completed immediately? */
+      if (status) /* operation completed immediately? */
 	{
-	  tt->writes.iostate = ERROR_IO_PENDING;
+	  tt->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
 
 	  /* since we got an immediate return, we must signal the event object ourselves */
 	  ASSERT (SetEvent (tt->writes.overlapped.hEvent));
 
 	  tt->writes.status = 0;
+
+	  msg (D_WIN32_IO, "WIN32 I/O: TAP Write immediate return [%d,%d]",
+	       BLEN (&tt->writes.buf),
+	       (int) tt->writes.size);	       
 	}
       else
 	{
 	  err = GetLastError (); 
-	  if (err == WSA_IO_PENDING) /* operation queued? */
+	  if (err == ERROR_IO_PENDING) /* operation queued? */
 	    {
 	      tt->writes.iostate = IOSTATE_QUEUED;
 	      tt->writes.status = err;
+	      msg (D_WIN32_IO, "WIN32 I/O: TAP Write queued [%d]",
+		   BLEN (&tt->writes.buf));
 	    }
 	  else /* error occurred */
 	    {
 	      ASSERT (SetEvent (tt->writes.overlapped.hEvent));
 	      tt->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      tt->writes.status = err;
+	      msg (D_WIN32_IO, "WIN32 I/O: TAP Write error [%d]: %s",
+		   BLEN (&tt->writes.buf),
+		   strerror_win32 (err));
 	    }
 	}
     }
@@ -922,6 +940,7 @@ tun_finalize (
 	  ret = io->size;
 	  io->iostate = IOSTATE_INITIAL;
 	  ASSERT (ResetEvent (io->overlapped.hEvent));
+	  msg (D_WIN32_IO, "WIN32 I/O: TAP Completion success [%d]", ret);
 	}
       else
 	{
@@ -932,6 +951,7 @@ tun_finalize (
 	      /* if no error (i.e. just not finished yet), then DON'T execute this code */
 	      io->iostate = IOSTATE_INITIAL;
 	      ASSERT (ResetEvent (io->overlapped.hEvent));
+	      msg (D_WIN32_IO | M_ERRNO, "WIN32 I/O: TAP Completion error");
 	    }
 	}
       break;
@@ -943,6 +963,7 @@ tun_finalize (
 	  /* error return for a non-queued operation */
 	  SetLastError (io->status);
 	  ret = -1;
+	  msg (D_WIN32_IO | M_ERRNO, "WIN32 I/O: TAP Completion non-queued error");
 	}
       else
 	{
@@ -951,12 +972,14 @@ tun_finalize (
 	    *buf = io->buf;
 	  ret = io->size;
 	  io->iostate = IOSTATE_INITIAL;
+	  msg (D_WIN32_IO, "WIN32 I/O: TAP Completion non-queued success [%d]", ret);
 	}
       break;
 
     case IOSTATE_INITIAL: /* were we called without proper queueing? */
       SetLastError (ERROR_INVALID_FUNCTION);
       ret = -1;
+      msg (D_WIN32_IO, "WIN32 I/O: TAP Completion BAD STATE");
       break;
 
     default:

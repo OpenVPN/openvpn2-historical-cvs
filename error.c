@@ -290,6 +290,7 @@ close_syslog ()
 const char *
 strerror_win32 (int errnum)
 {
+#if 0
   switch (errnum) {
   case ERROR_IO_PENDING:
     return "I/O Operation in progress (ERROR_IO_PENDING)";
@@ -382,7 +383,42 @@ strerror_win32 (int errnum)
   case WSAHOST_NOT_FOUND:
     return "Host not found (WSAHOST_NOT_FOUND)";
   default:
-    return strerror (errnum);
+    break;
+  }
+#endif
+
+  /* format a windows error message */
+  {
+    char message[256];
+    struct buffer out = alloc_buf_gc (256);
+    const int status =  FormatMessage (
+				       FORMAT_MESSAGE_IGNORE_INSERTS
+				       | FORMAT_MESSAGE_FROM_SYSTEM
+				       | FORMAT_MESSAGE_ARGUMENT_ARRAY,
+				       NULL,
+				       errnum,
+				       0,
+				       message,
+				       sizeof (message),
+				       NULL);
+    if (!status)
+      {
+	buf_printf (&out, "[Unknown Win32 Error]");
+      }
+    else
+      {
+	char *cp;
+	for (cp = message; *cp != '\0'; ++cp)
+	  {
+	    if (*cp == '\n' || *cp == '\r')
+	      *cp = ' ';
+	  }
+	
+	buf_printf(&out, "%s", message);
+      }
+    
+    return BSTR (&out);
   }
 }
+
 #endif

@@ -665,7 +665,8 @@ openvpn (const struct options *options,
   /*
    * Adjust frame size based on the --tun-mtu-extra parameter.
    */
-  tun_adjust_frame_parameters (&frame, options->tun_mtu_extra);
+  if (options->tun_mtu_extra_defined)
+    tun_adjust_frame_parameters (&frame, options->tun_mtu_extra);
 
   /*
    * Adjust frame size based on link socket parameters.
@@ -1954,16 +1955,27 @@ main (int argc, char *argv[])
 	}
 
       /*
-       * If neither --tun-mtu or --link-mtu specified,
-       * use default --link-mtu if --ifconfig specified, otherwise
-       * use default --tun-mtu.
+       * Set MTU defaults
        */
       if (!options.tun_mtu_defined && !options.link_mtu_defined)
 	{
-	  if (options.ifconfig_local || options.ifconfig_remote)
-	    options.link_mtu_defined = true;
+	  if (is_dev_type (options.dev, options.dev_type, "tap"))
+	    {
+		options.tun_mtu_defined = true;
+		options.tun_mtu = TAP_MTU_DEFAULT;
+		if (!options.tun_mtu_extra_defined)
+		  {
+		    options.tun_mtu_extra_defined = true;
+		    options.tun_mtu_extra = TAP_MTU_EXTRA_DEFAULT;
+		  }
+	    }
 	  else
-	    options.tun_mtu_defined = true;
+	    {
+	      if (options.ifconfig_local || options.ifconfig_remote)
+		options.link_mtu_defined = true;
+	      else
+		options.tun_mtu_defined = true;
+	    }
 	}
 
       /*

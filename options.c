@@ -255,7 +255,7 @@ static const char usage_message[] =
   "--show-tls      : Show all TLS ciphers (TLS used only as a control channel).\n"
 #endif
 #ifdef WIN32
-  "--show-adapters : Show all TAP-WIN32 adapters\n"
+  "--show-adapters : Show all TAP-Win32 adapters\n"
 #endif
   "\n"
   "Generate a random key (only for non-TLS static key encryption mode):\n"
@@ -362,6 +362,7 @@ show_settings (const struct options *o)
   SHOW_INT (link_mtu);
   SHOW_BOOL (link_mtu_defined);
   SHOW_INT (tun_mtu_extra);
+  SHOW_BOOL (tun_mtu_extra_defined);
 #ifdef FRAGMENT_ENABLE
   SHOW_BOOL (mtu_dynamic);
   SHOW_INT (mtu_min);
@@ -903,6 +904,7 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
     {
       ++i;
       options->tun_mtu_extra = positive (atoi (p2));
+      options->tun_mtu_extra_defined = true;
     }
 #ifdef FRAGMENT_ENABLE
   else if (streq (p1, "mtu-dynamic"))

@@ -66,6 +66,12 @@
 #define TUN_MTU_DEFAULT    1300
 
 /*
+ * MTU Defaults for TAP devices
+ */
+#define TAP_MTU_DEFAULT        1500
+#define TAP_MTU_EXTRA_DEFAULT  64 
+
+/*
  * Dynamic MTU parameters (based on frame.link_mtu).
  *
  * MIN_TUN_MTU + TUN_LINK_DELTA <= link_mtu_min <= link_mtu_dynamic <= link_mtu_max <= mtu

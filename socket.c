@@ -72,7 +72,10 @@ x_check_status (int status, const char *description, struct link_socket *sock)
   const int my_errno = openvpn_errno_socket ();
   const char *extended_msg = NULL;
 
-  msg (x_cs_verbose_level, "%s returned %d", description, status);
+  msg (x_cs_verbose_level, "%s %s returned %d",
+       sock ? proto2ascii (sock->proto, true) : "",
+       description,
+       status);
 
   if (status < 0)
     {
@@ -532,7 +535,7 @@ stream_buf_init (struct stream_buf *sb,
   sb->residual = alloc_buf (sb->maxlen);
   stream_buf_reset (sb);
 
-  msg (D_CO_DEBUG, "CO: INIT maxlen=%d", sb->maxlen);
+  msg (D_STREAM_DEBUG, "STREAM: INIT maxlen=%d", sb->maxlen);
 }
 
 void
@@ -545,8 +548,8 @@ bool
 stream_buf_added (struct stream_buf *sb,
 		  int length_added)
 {
-  msg (D_CO_DEBUG, "CO: ADD length_added=%d", length_added);
-  if (length_added > 1)
+  msg (D_STREAM_DEBUG, "STREAM: ADD length_added=%d", length_added);
+  if (length_added > 0)
     sb->buf.len += length_added;
 
   /* if length unknown, see if we can get the length prefix from
@@ -567,15 +570,15 @@ stream_buf_added (struct stream_buf *sb,
       ASSERT (buf_init (&sb->residual, 0));
       if (sb->buf.len > sb->len)
 	  ASSERT (buf_copy_excess (&sb->residual, &sb->buf, sb->len));
-      msg (D_CO_DEBUG, "CO: ADD returned TRUE, buf_len=%d, residual_len=%d",
+      msg (D_STREAM_DEBUG, "STREAM: ADD returned TRUE, buf_len=%d, residual_len=%d",
 	   BLEN (&sb->buf),
 	   BLEN (&sb->residual));
       return true;
     }
   else
     {
+      msg (D_STREAM_DEBUG, "STREAM: ADD returned FALSE (have=%d need=%d)", sb->buf.len, sb->len);
       stream_buf_set_next (sb);
-      msg (D_CO_DEBUG, "CO: ADD returned FALSE");
       return false;
     }
 }
@@ -740,6 +743,10 @@ socket_recv_queue (struct link_socket *sock, int maxsize)
 	  /* since we got an immediate return, we must signal the event object ourselves */
 	  ASSERT (SetEvent (sock->reads.overlapped.hEvent));
 	  sock->reads.status = 0;
+
+	  msg (D_WIN32_IO, "WIN32 I/O: Socket Receive immediate return [%d,%d]",
+	       (int) wsabuf[0].len,
+	       (int) sock->reads.size);	       
 	}
       else
 	{
@@ -748,12 +755,17 @@ socket_recv_queue (struct link_socket *sock, int maxsize)
 	    {
 	      sock->reads.iostate = IOSTATE_QUEUED;
 	      sock->reads.status = status;
+	      msg (D_WIN32_IO, "WIN32 I/O: Socket Receive queued [%d]",
+		   (int) wsabuf[0].len);
 	    }
 	  else /* error occurred */
 	    {
 	      ASSERT (SetEvent (sock->reads.overlapped.hEvent));
 	      sock->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      sock->reads.status = status;
+	      msg (D_WIN32_IO, "WIN32 I/O: Socket Receive error [%d]: %s",
+		   (int) wsabuf[0].len,
+		   strerror_win32 (status));
 	    }
 	}
     }
@@ -827,6 +839,10 @@ socket_send_queue (struct link_socket *sock, struct buffer *buf, const struct so
 	  ASSERT (SetEvent (sock->writes.overlapped.hEvent));
 
 	  sock->writes.status = 0;
+
+	  msg (D_WIN32_IO, "WIN32 I/O: Socket Send immediate return [%d,%d]",
+	       (int) wsabuf[0].len,
+	       (int) sock->writes.size);	       
 	}
       else
 	{
@@ -835,12 +851,18 @@ socket_send_queue (struct link_socket *sock, struct buffer *buf, const struct so
 	    {
 	      sock->writes.iostate = IOSTATE_QUEUED;
 	      sock->writes.status = status;
+	      msg (D_WIN32_IO, "WIN32 I/O: Socket Send queued [%d]",
+		   (int) wsabuf[0].len);
 	    }
 	  else /* error occurred */
 	    {
 	      ASSERT (SetEvent (sock->writes.overlapped.hEvent));
 	      sock->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      sock->writes.status = status;
+
+	      msg (D_WIN32_IO, "WIN32 I/O: Socket Send error [%d]: %s",
+		   (int) wsabuf[0].len,
+		   strerror_win32 (status));
 	    }
 	}
     }
@@ -875,6 +897,8 @@ socket_finalize (
 	  ret = io->size;
 	  io->iostate = IOSTATE_INITIAL;
 	  ASSERT (ResetEvent (io->overlapped.hEvent));
+
+	  msg (D_WIN32_IO, "WIN32 I/O: Socket Completion success [%d]", ret);
 	}
       else
 	{
@@ -885,6 +909,7 @@ socket_finalize (
 	      /* if no error (i.e. just not finished yet), then DON'T execute this code */
 	      io->iostate = IOSTATE_INITIAL;
 	      ASSERT (ResetEvent (io->overlapped.hEvent));
+	      msg (D_WIN32_IO | M_ERRNO_SOCK, "WIN32 I/O: Socket Completion error");
 	    }
 	}
       break;
@@ -896,6 +921,7 @@ socket_finalize (
 	  /* error return for a non-queued operation */
 	  WSASetLastError (io->status);
 	  ret = -1;
+	  msg (D_WIN32_IO | M_ERRNO_SOCK, "WIN32 I/O: Socket Completion non-queued error");
 	}
       else
 	{
@@ -904,12 +930,14 @@ socket_finalize (
 	    *buf = io->buf;
 	  ret = io->size;
 	  io->iostate = IOSTATE_INITIAL;
+	  msg (D_WIN32_IO, "WIN32 I/O: Socket Completion non-queued success [%d]", ret);
 	}
       break;
 
     case IOSTATE_INITIAL: /* were we called without proper queueing? */
       WSASetLastError (WSAEINVAL);
       ret = -1;
+      msg (D_WIN32_IO, "WIN32 I/O: Socket Completion BAD STATE");
       break;
 
     default:

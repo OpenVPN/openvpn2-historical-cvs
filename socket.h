@@ -295,10 +295,6 @@ socket_connection_reset (const struct link_socket *sock, int status)
  * such as TCP.
  */
 
-#undef D_CO_DEBUG
-#define D_STREAM LOGLEV(6, 40, 0) // JYFIXME
-#define D_CO_DEBUG LOGLEV(6, 40, 0) // JYFIXME
-
 void stream_buf_init (struct stream_buf *sb, struct buffer *buf);
 void stream_buf_close (struct stream_buf* sb);
 bool stream_buf_added (struct stream_buf *sb, int length_added);
@@ -310,7 +306,10 @@ stream_buf_set_next (struct stream_buf *sb)
   sb->next = sb->buf;
   sb->next.offset = sb->buf.offset + sb->buf.len;
   sb->next.len = (sb->len >= 0 ? sb->len : sb->maxlen) - sb->buf.len;
-  msg (D_STREAM, "STREAM: SET NEXT, len=%d", sb->next.len);
+  msg (D_STREAM_DEBUG, "STREAM: SET NEXT, buf=[%d,%d] next=[%d,%d] len=%d maxlen=%d",
+       sb->buf.offset, sb->buf.len,
+       sb->next.offset, sb->next.len,
+       sb->len, sb->maxlen);
   ASSERT (sb->next.len > 0);
   ASSERT (buf_safe (&sb->buf, sb->next.len));
 }
@@ -325,7 +324,7 @@ stream_buf_read_setup (struct link_socket* sock)
 	  ASSERT (buf_copy (&sock->stream_buf.buf, &sock->stream_buf.residual));
 	  ASSERT (buf_init (&sock->stream_buf.residual, 0));
 	  sock->stream_buf.residual_fully_formed = stream_buf_added (&sock->stream_buf, 0);
-	    msg (D_STREAM, "STREAM: RESIDUAL FULLY FORMED [%s], len=%d",
+	    msg (D_STREAM_DEBUG, "STREAM: RESIDUAL FULLY FORMED [%s], len=%d",
 		 sock->stream_buf.residual_fully_formed ? "YES" : "NO",
 		 sock->stream_buf.residual.len);
 	}
@@ -340,7 +339,7 @@ stream_buf_read_setup (struct link_socket* sock)
 static inline void
 stream_buf_reset (struct stream_buf *sb)
 {
-  msg (D_STREAM, "STREAM: RESET");
+  msg (D_STREAM_DEBUG, "STREAM: RESET");
   sb->residual_fully_formed = false;
   sb->buf = sb->buf_init;
   CLEAR (sb->next);
@@ -350,7 +349,7 @@ stream_buf_reset (struct stream_buf *sb)
 static inline void
 stream_buf_get_final (struct stream_buf *sb, struct buffer *buf)
 {
-  msg (D_STREAM, "STREAM: GET FINAL len=%d",
+  msg (D_STREAM_DEBUG, "STREAM: GET FINAL len=%d",
        buf_defined (&sb->buf) ? sb->buf.len : -1);
   ASSERT (buf_defined (&sb->buf));
   *buf = sb->buf;
@@ -359,7 +358,7 @@ stream_buf_get_final (struct stream_buf *sb, struct buffer *buf)
 static inline void
 stream_buf_get_next (struct stream_buf *sb, struct buffer *buf)
 {
-  msg (D_STREAM, "STREAM: GET NEXT len=%d",
+  msg (D_STREAM_DEBUG, "STREAM: GET NEXT len=%d",
        buf_defined (&sb->next) ? sb->next.len : -1);
   ASSERT (buf_defined (&sb->next));
   *buf = sb->next;
@@ -388,7 +387,7 @@ link_socket_read_tcp (struct link_socket *sock,
       if (!len)
 	sock->stream_reset = true;
       if (len <= 0)
-	return len;
+	return buf->len = len;
     }
 
   if (sock->stream_buf.residual_fully_formed
@@ -399,7 +398,7 @@ link_socket_read_tcp (struct link_socket *sock,
       return buf->len;
     }
   else
-    return 0; /* no error, but packet is still incomplete */
+    return buf->len = 0; /* no error, but packet is still incomplete */
 }
 
 #ifdef WIN32
@@ -528,7 +527,7 @@ link_socket_write_tcp (struct link_socket *sock,
 		       struct sockaddr_in *to)
 {
   packet_size_type len = BLEN (buf);
-  msg (D_CO_DEBUG, "CO: WRITE %d offset=%d", (int)len, buf->offset);
+  msg (D_STREAM_DEBUG, "STREAM: WRITE %d offset=%d", (int)len, buf->offset);
   ASSERT (len <= sock->stream_buf.maxlen);
   len = htonps (len);
   ASSERT (buf_write_prepend (buf, &len, sizeof (len)));

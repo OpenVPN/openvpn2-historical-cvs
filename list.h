@@ -91,6 +91,7 @@ bool hash_add (struct hash *hash, const void *key, void *value);
 
 void hash_iterator_init (struct hash *hash, struct hash_iterator *iter);
 void *hash_iterator_next (struct hash_iterator *hi);
+void hash_iterator_free (struct hash *hash, struct hash_iterator *hi);
 
 uint32_t hash_func (const uint8_t *k, uint32_t length, uint32_t initval);
 

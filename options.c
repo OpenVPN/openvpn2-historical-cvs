@@ -903,7 +903,7 @@ options_postprocess (struct options *options, bool first_time)
 
 #if P2MP
   /*
-   * Check consistency of point-to-multipoint mode options.
+   * Check consistency of --mode server options.
    */
   if (options->mode == MODE_SERVER)
     {
@@ -911,6 +911,14 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --mode server requires --ifconfig-pool");
       if (options->pull)
 	msg (M_USAGE, "Options error: --pull cannot be used with --mode server");
+      if (!(dev == DEV_TYPE_TUN || dev == DEV_TYPE_NULL))
+	msg (M_USAGE, "Options error: --mode server currently only supports --dev tun");
+      if (options->proto != PROTO_UDPv4)
+	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp");
+      if (!options->tls_server)
+	msg (M_USAGE, "Options error: --mode server requires --tls-server");
+      if (options->tls_auth_file)
+	msg (M_USAGE, "Options error: --tls-auth can not be used with --mode server");
     }
   else
     {

@@ -45,6 +45,7 @@ typedef int interval_t;
  * Printf formats for special types
  */
 #define counter_format          "%10lu"
+#define counter_format_simple   "%lu"
 #define ptr_format              "0x%08zx"
 #define time_format             "%lu"
 #define fragment_header_format  "0x%08x"

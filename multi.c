@@ -37,6 +37,7 @@
 #include "init.h"
 #include "forward.h"
 #include "push.h"
+#include "misc.h"
 
 #include "memdbg.h"
 
@@ -162,6 +163,8 @@ multi_uninit (struct multi_context *m)
       while ((mi = (struct multi_instance *) hash_iterator_next (&hi)) != NULL)
 	multi_close_instance (m, mi);
 
+      hash_iterator_free (m->hash, &hi);
+
       hash_free (m->hash);
       hash_free (m->vhash);
       m->hash = NULL;
@@ -216,7 +219,7 @@ multi_open_instance (struct multi_context *m, struct context *t)
 
   ALLOC_OBJ_CLEAR (mi, struct multi_instance);
 
-  t->c2.current = mi->context.c2.current = time (NULL);
+  t->c2.current = mi->context.c2.current = mi->created = time (NULL);
 
   msg (D_MULTI_DEBUG, "MULTI: multi_open_instance called");
 
@@ -385,7 +388,30 @@ multi_select (struct multi_context *m, struct context *t)
 void
 multi_print_status (struct multi_context *m, struct context *t)
 {
-  // JYFIXME -- code me
+  struct gc_arena gc = gc_new ();
+  if (m->hash)
+    {
+      struct hash_iterator hi;
+      struct multi_instance *mi;
+
+      msg (M_INFO, "Common Name,Real Address,Virtual Address,Connected Since,Read Bytes,Write Bytes");
+
+      hash_iterator_init (m->hash, &hi);
+
+      while ((mi = (struct multi_instance *) hash_iterator_next (&hi)) != NULL)
+	{
+	  msg (M_INFO, "%s,%s,%s,%s," counter_format_simple "," counter_format_simple,
+	       tls_common_name (mi->context.c2.tls_multi),
+	       mroute_addr_print (&mi->real.addr, &gc),
+	       mroute_addr_print (&mi->virtual.addr, &gc),
+	       time_string (mi->created, 0, false, &gc),
+	       mi->context.c2.link_read_bytes,
+	       mi->context.c2.link_write_bytes);
+	}
+
+      hash_iterator_free (m->hash, &hi);
+    }
+  gc_free (&gc);
 }
 
 /*

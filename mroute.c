@@ -36,6 +36,7 @@
 #include "mroute.h"
 #include "proto.h"
 #include "error.h"
+#include "socket.h"
 
 #include "memdbg.h"
 
@@ -142,6 +143,7 @@ mroute_addr_compare_function (const void *key1, const void *key2)
 			    (const struct mroute_addr *) key2);
 }
 
+#if 0
 static const char *
 mroute_addr_type_print (int type)
 {
@@ -160,17 +162,57 @@ mroute_addr_type_print (int type)
     case MR_ADDR_IPV6|MR_WITH_PORT:
       return "MR_ADDR_IPV6|MR_WITH_PORT";
     default:
-      return "[UNKNOWN]";
+      return "UNKNOWN";
     }
 }
+#endif
 
 const char *
 mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (64, gc);
-  buf_printf (&out, "%s %s",
-	      mroute_addr_type_print (ma->type),
-	      format_hex (ma->addr, ma->len, 0, gc));
+  bool with_port = false;
+  struct mroute_addr maddr = *ma;
+
+  // JYFIXME -- print addresses for all types
+  switch (maddr.type)
+    {
+    case MR_ADDR_NONE:
+      buf_printf (&out, "UNKNOWN");
+      break;
+    case MR_ADDR_ETHER:
+      buf_printf (&out, "ETHERNET"); 
+      break;
+    case MR_ADDR_IPV4|MR_WITH_PORT:
+      with_port = true;
+    case MR_ADDR_IPV4:
+      {
+	struct buffer buf;
+	in_addr_t addr;
+	int port;
+	bool status;
+	buf_set_read (&buf, maddr.addr, maddr.len);
+	addr = buf_read_u32 (&buf, &status);
+	if (status)
+	  buf_printf (&out, "%s", print_in_addr_t (addr, true, gc));
+	if (with_port)
+	  {
+	    port = buf_read_u16 (&buf);
+	    if (port >= 0)
+	      buf_printf (&out, ":%d", port);
+	  }
+      }
+      break;
+    case MR_ADDR_IPV6:
+      buf_printf (&out, "IPV6"); 
+      break;
+    case MR_ADDR_IPV6|MR_WITH_PORT:
+      buf_printf (&out, "IPV6/PORT"); 
+      break;
+    default:
+      buf_printf (&out, "UNKNOWN"); 
+      break;
+    }
   return BSTR (&out);
 }
 

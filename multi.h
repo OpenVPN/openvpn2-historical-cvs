@@ -37,6 +37,7 @@
 struct multi_instance {
   struct schedule_entry se;    /* this must be the first element of the structure */
   bool defined;
+  time_t created;
   struct timeval wakeup;       /* absolute time */
   struct mroute_list real;
   struct mroute_list virtual;

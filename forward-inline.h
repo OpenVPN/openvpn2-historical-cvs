@@ -119,6 +119,7 @@ check_fragment (struct context *c)
     check_fragment_dowork (c);
 }
 
+#ifdef USE_CRYPTO
 /*
  * Should we persist our anti-replay packet ID state to disk?
  */
@@ -130,6 +131,7 @@ check_packet_id_persist_flush (struct context *c)
 				&c->c2.timeval))
     packet_id_persist_save (&c->c1.pid_persist);
 }
+#endif
 
 /*
  * Set our wakeup to 0 seconds, so we will be rescheduled

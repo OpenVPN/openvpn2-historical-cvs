@@ -177,12 +177,18 @@ hash_add (struct hash *hash, const void *key, void *value)
 void
 hash_iterator_init (struct hash *hash, struct hash_iterator *hi)
 {
+  mutex_lock (&hash->mutex);
   hi->hash = hash;
   hi->bucket_index = -1;
   hi->elem = NULL;
 }
 
-/* not thread safe */
+void
+hash_iterator_free (struct hash *hash, struct hash_iterator *hi)
+{
+  mutex_unlock (&hash->mutex);
+}
+
 void *
 hash_iterator_next (struct hash_iterator *hi)
 {
@@ -304,6 +310,8 @@ list_test (void)
       {
 	printf ("%6d '%s'\n", w->n, w->word);
       }
+
+    hash_iterator_free (hash, &hi);
   }
 
   hash_free (hash);

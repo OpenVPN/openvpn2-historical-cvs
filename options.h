@@ -288,6 +288,12 @@ struct options
 
 #define OPT_P_ALL       (~0)
 
+#if P2MP
+#define PULL_DEFINED(opt) ((opt)->pull)
+#else
+#define PULL_DEFINED(opt) (false)
+#endif
+
 void parse_argv (struct options* options,
 		 int argc,
 		 char *argv[],

@@ -634,7 +634,7 @@ do_up_delay (struct context *c, bool pulled_options, unsigned int option_types_f
 	do_deferred_options (c, option_types_found);
 
       /* if --up-delay specified, open tun, do ifconfig, and run up script now */
-      if (c->options.up_delay || c->options.pull)
+      if (c->options.up_delay || PULL_DEFINED (&c->options))
 	{
 	  c->c2.did_open_tun = do_open_tun (c);
 	  TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
@@ -1520,7 +1520,7 @@ init_instance (struct context *c, bool init_buffers)
 
   /* initialize tun/tap device object,
      open tun/tap device, ifconfig, run up script, etc. */
-  if (!(options->up_delay || options->pull) && (c->mode == CM_P2P || c->mode == CM_TOP))
+  if (!(options->up_delay || PULL_DEFINED (options)) && (c->mode == CM_P2P || c->mode == CM_TOP))
     c->c2.did_open_tun = do_open_tun (c);
 
   /* print MTU info */

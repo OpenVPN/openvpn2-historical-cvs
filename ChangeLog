@@ -1,9 +1,9 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.74 2003/05/05 03:50:31 jimyonan Exp $
+$Id: ChangeLog,v 1.75 2003/05/08 04:07:58 jimyonan Exp $
 
-Upcoming version 1.4.0
+2003.05.07 -- Version 1.4.0
 
 * Added --replay-persist feature to allow replay
   protection across sessions.

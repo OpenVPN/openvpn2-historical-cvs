@@ -76,6 +76,18 @@ fragment_list_get_buf (struct fragment_list *list, int seq_id)
   return &list->fragments[modulo_add (list->index, diff, N_FRAG_BUF)];
 }
 
+static inline void
+fragment_shaper_init (struct fragment_master *f, const time_t current)
+{
+  f->output_bandwidth_throttle_expire = current + BANDWIDTH_THROTTLE_EXPIRE;
+  if (!f->need_output_bandwidth_throttle)
+    {
+      shaper_reset_wakeup (&f->shaper);
+      f->need_output_bandwidth_throttle = true;
+      msg (D_FRAG_DEBUG, "FRAG started adaptive bandwidth throttle");
+    }
+}
+
 struct fragment_master *
 fragment_init (struct frame *frame)
 {
@@ -119,7 +131,7 @@ fragment_frame_init (struct fragment_master *f, const struct frame *frame, bool 
   f->outgoing_return = alloc_buf (BUF_SIZE (frame));
 
   if (generate_icmp)
-    f->icmp_buf = alloc_buf (BUF_SIZE (frame));
+    f->icmp_buf = alloc_buf (BUF_SIZE (frame)); // TODO: size this correctly for our ICMP msg
 }
 
 /*
@@ -331,6 +343,7 @@ fragment_outgoing (struct fragment_master *f, struct buffer *buf,
 	  /*
 	   * Send the datagram as a series of 2 or more fragments.
 	   */
+	  fragment_shaper_init (f, current);
 	  f->outgoing_frag_size = optimal_fragment_size (buf->len, PAYLOAD_SIZE_DYNAMIC(frame));
 	  if (buf->len > f->outgoing_frag_size * MAX_FRAGS)
 	    FRAG_ERR ("too many fragments would be required to send datagram");
@@ -339,7 +352,7 @@ fragment_outgoing (struct fragment_master *f, struct buffer *buf,
 	  f->outgoing_seq_id = modulo_add (f->outgoing_seq_id, 1, N_SEQ_ID);
 	  f->outgoing_frag_id = 0;
 	  buf->len = 0;
-	  ASSERT (fragment_ready_to_send (f, buf, frame, current));
+	  ASSERT (fragment_ready_to_send (f, buf, frame));
 	}
       else
 	{
@@ -370,7 +383,7 @@ fragment_outgoing (struct fragment_master *f, struct buffer *buf,
 /* return true (and set buf) if we have an outgoing fragment which is ready to send */
 bool
 fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
-			     const struct frame* frame, const time_t current)
+			     const struct frame* frame)
 {
   if (f->outgoing.len)
     {
@@ -407,13 +420,6 @@ fragment_ready_to_send (struct fragment_master *f, struct buffer *buf,
     return false;
 }
 
-bool
-fragment_icmp (struct fragment_master *f, struct buffer *buf,
-	       const struct frame* frame, const time_t current)
-{
-  return false;
-}
-
 static void
 fragment_ttl_reap (struct fragment_master *f, time_t current)
 {
@@ -429,21 +435,41 @@ fragment_ttl_reap (struct fragment_master *f, time_t current)
     }
 }
 
-/*
- * Called when the OS is explicitly recommending an MTU value
- */
-void
-fragment_received_os_mtu_hint (struct fragment_master *f, const struct frame* frame)
-{
-  f->received_os_mtu_hint = true;
-}
-
 /* called every FRAG_WAKEUP_INTERVAL seconds */
 void
 fragment_wakeup (struct fragment_master *f, struct frame *frame, time_t current)
 {
   /* delete fragments with expired TTLs */
   fragment_ttl_reap (f, current);
+
+  /* cancel output bandwidth throttle mode if TTL expired */
+  if (f->need_output_bandwidth_throttle && current >= f->output_bandwidth_throttle_expire)
+    {
+      f->need_output_bandwidth_throttle = false;
+      msg (D_FRAG_DEBUG, "FRAG end adaptive bandwidth throttle");
+    }
+
+  /*
+   * TODO:
+   *
+   * Decide, based on possible differences between max_packet_size_sent_sync and
+   * max_packet_size_sent_confirmed, whether the Path MTU over the UDP channel
+   * may have changed.  If so, frame should be modified to reflect new dynamic MTU.
+   */
+}
+
+/*
+ * If packet is too big to avoid fragmentation, decide if we should drop the packet
+ * and return a "fragmentation needed but DF set" ICMP message to sender.
+ *
+ * TODO:
+ *   If we drop it, construct the ICMP message in icmp_buf and set buf->len to 0. 
+ */
+void
+fragment_check_fragmentability (struct fragment_master *f,
+				struct frame *frame_fragment,
+				struct buffer *buf)
+{
 }
 
 #else

@@ -29,13 +29,6 @@
 #include "memdbg.h"
 
 void
-shaper_init (struct shaper *s, int bytes_per_second)
-{
-  shaper_reset (s, bytes_per_second);
-  CLEAR (s->wakeup);
-}
-
-void
 shaper_msg (struct shaper *s)
 {
   msg (M_INFO, "Output Traffic Shaping initialized at %d bytes per second",

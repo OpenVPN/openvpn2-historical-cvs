@@ -46,7 +46,6 @@ struct shaper
   struct timeval wakeup;
 };
 
-void shaper_init (struct shaper *s, int bytes_per_second);
 void shaper_msg (struct shaper *s);
 
 /*
@@ -57,6 +56,19 @@ static inline void
 shaper_reset (struct shaper *s, int bytes_per_second)
 {
   s->bytes_per_second = bytes_per_second ? constrain_int (bytes_per_second, SHAPER_MIN, SHAPER_MAX) : 0;
+}
+
+static inline void
+shaper_reset_wakeup (struct shaper *s)
+{
+  CLEAR (s->wakeup);
+}
+
+static inline void
+shaper_init (struct shaper *s, int bytes_per_second)
+{
+  shaper_reset (s, bytes_per_second);
+  shaper_reset_wakeup (s);
 }
 
 static inline int

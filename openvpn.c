@@ -958,13 +958,14 @@ openvpn (const struct options *options,
       if (fragment)
 	{
 	  /* OS MTU Hint? */
-	  if (ipv4_tun && udp_socket.mtu_changed)
+	  if (udp_socket.mtu_changed && ipv4_tun)
 	    {
 	      frame_adjust_path_mtu (&frame_fragment, udp_socket.mtu, ipv6_udp_transport);
 	      udp_socket.mtu_changed = false;
-	      fragment_received_os_mtu_hint (fragment, &frame_fragment);
 	    }
-	  if (!to_udp.len && fragment_ready_to_send (fragment, &buf, &frame_fragment, current))
+	  if (!to_udp.len
+	      && fragment_outgoing_defined (fragment)
+	      && fragment_ready_to_send (fragment, &buf, &frame_fragment))
 	    {
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
@@ -1004,7 +1005,7 @@ openvpn (const struct options *options,
 	      to_udp = buf;
 	      free_to_udp = false;
 	    }
-	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame_fragment, current))
+	  if (!to_tun.len && fragment_icmp (fragment, &buf))
 	    {
 	      to_tun = buf;
 	    }
@@ -1093,7 +1094,7 @@ openvpn (const struct options *options,
 
 #ifdef FRAGMENT_ENABLE
 	  /* fragmenting code needs an adaptive bandwidth throttle */
-	  if (fragment)
+	  if (fragment && fragment->need_output_bandwidth_throttle)
 	    delay = shaper_delay (&fragment->shaper);
 #endif
 
@@ -1121,7 +1122,7 @@ openvpn (const struct options *options,
 	    {
 	      FD_SET (tuntap->fd, &reads);
 #ifdef FRAGMENT_ENABLE
-	      if (fragment)
+	      if (fragment && fragment->need_output_bandwidth_throttle)
 		tuntap_ready_to_read = true;
 #endif
 	    }
@@ -1152,7 +1153,7 @@ openvpn (const struct options *options,
        * not read them.
        */
 #ifdef FRAGMENT_ENABLE
-      if (fragment)
+      if (fragment && fragment->need_output_bandwidth_throttle)
 	{
 	  if (tuntap_bandwidth_sample_mode && !tuntap_ready_to_read && tuntap->fd >= 0)
 	    FD_SET (tuntap->fd, &reads);
@@ -1232,7 +1233,7 @@ openvpn (const struct options *options,
 	  bool tuntap_data_available = (tuntap->fd >= 0 && FD_ISSET (tuntap->fd, &reads));
 
 #ifdef FRAGMENT_ENABLE
-	  if (fragment)
+	  if (fragment && fragment->need_output_bandwidth_throttle)
 	    {
 	      if (tuntap_data_available)
 		{
@@ -1418,10 +1419,18 @@ openvpn (const struct options *options,
 
 	      /* Check the status return from read() */
 	      check_status (buf.len, "read from TUN/TAP", NULL);
+
+#ifdef FRAGMENT_ENABLE
+	      /* if packet is too big, we might want to bounce back a "fragmentation
+		 needed but DF set ICMP message */
+	      if (fragment)
+		fragment_check_fragmentability (fragment, &frame_fragment, &buf);
+#endif
+
 	      if (buf.len > 0)
 		{
 #ifdef FRAGMENT_ENABLE
-		  if (fragment)
+		  if (fragment && fragment->need_output_bandwidth_throttle)
 		    {
 		      fragment_transfer_event_tuntap_data_read (fragment);
 		      tuntap_bandwidth_sample_mode = true;

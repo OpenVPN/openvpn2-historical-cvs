@@ -1,7 +1,13 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.75 2003/05/08 04:07:58 jimyonan Exp $
+$Id: ChangeLog,v 1.76 2003/05/11 03:36:01 jimyonan Exp $
+
+Upcoming Version 1.4.1
+
+* Modified the Linux 2.4 TUN/TAP open code to
+  fall back to the 2.2 TUN/TAP interface if the
+  open or ioctl fails.
 
 2003.05.07 -- Version 1.4.0
 

@@ -1,12 +1,19 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.80 2003/05/27 19:05:47 jimyonan Exp $
+$Id: ChangeLog,v 1.81 2003/05/27 21:11:30 jimyonan Exp $
 
 Upcoming Version 1.4.2
 
-* Output bandwidth when using --mtu-dynamic
-  fragmentation can be overriden by --shaper.
+* Removed adaptive bandwidth from
+  --mtu-dynamic -- its absence appears
+  to work better than its existence (1.4.1.2).
+* Minor changes to --shaper to fix long
+  retransmit timeouts at low bandwidth
+  (1.4.1.2).
+* Added LOG_RW flag to openvpn.h for
+  debugging (1.4.1.2).
+* Silenced spurious configure warnings (1.4.1.2).
 
 2003.05.15 -- Version 1.4.1
 

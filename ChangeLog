@@ -1,7 +1,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.81 2003/05/27 21:11:30 jimyonan Exp $
+$Id: ChangeLog,v 1.82 2003/06/02 22:48:34 jimyonan Exp $
 
 Upcoming Version 1.4.2
 
@@ -14,6 +14,8 @@ Upcoming Version 1.4.2
 * Added LOG_RW flag to openvpn.h for
   debugging (1.4.1.2).
 * Silenced spurious configure warnings (1.4.1.2).
+* Backed out --dev-name patch, modified --dev
+  to offer equivalent functionality (1.4.1.4).
 
 2003.05.15 -- Version 1.4.1
 

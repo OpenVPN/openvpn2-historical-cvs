@@ -68,23 +68,4 @@ shaper_current_bandwidth (struct shaper *s)
   return s->bytes_per_second;
 }
 
-/*
- * Measure incoming bandwidth
- */
-
-struct incoming_bandwidth
-{
-  struct timeval tv;
-  int bytes;
-  int bytes_per_second;
-};
-
-void incoming_bandwidth_data (struct incoming_bandwidth *b, int size, int usec_max);
-
-static inline int
-incoming_bandwidth_current_bandwidth (struct incoming_bandwidth *band)
-{
-  return band->bytes_per_second;
-}
-
 #endif

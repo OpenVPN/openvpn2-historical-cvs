@@ -41,16 +41,14 @@
 
 #if 1
 
-// CHANGEME
-
-//#define CORRUPT_ENABLE
-//#define UP_DOWN_ENABLE
+#define CORRUPT_ENABLE
+#define UP_DOWN_ENABLE
 #define DROP_ENABLE
 
 /*
  * Probability that we will drop a packet is 1 / DROP_FREQ
  */
-#define DROP_FREQ 25 // CHANGEME
+#define DROP_FREQ 50
 
 /*
  * Probability that we will corrupt a packet is 1 / CORRUPT_FREQ

@@ -155,37 +155,3 @@ shaper_change_pct (struct shaper *s, int pct)
   shaper_reset (s, new_bandwidth);
   return s->bytes_per_second != orig_bandwidth;
 }
-
-void
-incoming_bandwidth_data (struct incoming_bandwidth *b, int size, int usec_max)
-{
-  struct timeval current;
-  int usec = 0;
-
-  ASSERT (!gettimeofday (&current, NULL));
-
-  if (tv_defined (&b->tv))
-    {
-      usec = tv_subtract (&current, &b->tv);
-      if (usec < 0 || usec > usec_max)
-	usec = 0;
-    }
-
-  if (usec)
-    {
-      if (b->bytes < 2048)
-	b->bytes_per_second = b->bytes * 1000000 / usec;
-      else
-	{
-	  const int overflow_preventor = (b->bytes / 2048) + 1;
-	  b->bytes_per_second = b->bytes * (1000000/overflow_preventor) / (usec/overflow_preventor);
-	}
-    }
-  else
-    b->bytes_per_second = 0;
-
-  msg (D_SHAPER_DEBUG, "SHAPER incoming_bandwidth_data bps=%d", b->bytes_per_second);
-
-  b->tv = current;
-  b->bytes = size;
-}

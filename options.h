@@ -64,13 +64,15 @@ struct options
   bool udp_mtu_defined; /* true if user overriding parm with command line option */
 
   /* Advanced MTU negotiation and datagram fragmentation options */
+  int mtu_discover_type; /* used if OS supports setting Path MTU discovery options on socket */
+#ifdef FRAGMENT_ENABLE
   bool mtu_dynamic;             /* should we fragment and reassemble packets? */
   int mtu_min;
   bool mtu_min_defined;
   int mtu_max;
   bool mtu_max_defined;
   bool mtu_icmp;         /* if fragment=true, bounce back "fragmentation needed but DF set" ICMPs */
-  int mtu_discover_type; /* used if OS supports setting Path MTU discovery options on socket */
+#endif
 
   bool mlock;
   int inactivity_timeout;

@@ -54,8 +54,9 @@ int openvpn_system (const char *command);
 bool system_ok(int stat);
 const char *system_error_message (int stat);
 
-/* run system() with error check */
-void system_check (const char* command, const char* error_message, bool fatal);
+/* run system() with error check, return true if success,
+   false if error, exit if error and fatal==true */
+bool system_check (const char* command, const char* error_message, bool fatal);
 
 /* format a time_t as ascii, or use current time if 0 */
 const char* time_string (time_t t);

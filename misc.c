@@ -292,12 +292,18 @@ system_error_message (int stat)
 /*
  * Run system(), exiting on error.
  */
-void
+bool
 system_check (const char* command, const char* error_message, bool fatal)
 {
   const int stat = openvpn_system (command);
-  if (error_message && !system_ok (stat))
-    msg ((fatal ? M_FATAL : M_WARN), "%s: %s", error_message, system_error_message (stat));
+  if (system_ok (stat))
+    return true;
+  else
+    {
+      if (error_message)
+	msg ((fatal ? M_FATAL : M_WARN), "%s: %s", error_message, system_error_message (stat));
+      return false;
+    }
 }
 
 /*

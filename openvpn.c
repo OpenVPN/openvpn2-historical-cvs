@@ -146,10 +146,18 @@ frame_finalize_options (struct frame *frame, const struct options *options)
 		  options->udp_mtu,
 		  options->tun_mtu_defined,
 		  options->tun_mtu,
+#ifdef FRAGMENT_ENABLE
 		  options->mtu_min_defined,
 		  options->mtu_min,
 		  options->mtu_max_defined,
-		  options->mtu_max);
+		  options->mtu_max
+#else
+		  false,
+		  0,
+		  false,
+		  0
+#endif
+		  );
 }
 
 /*
@@ -208,10 +216,12 @@ openvpn (const struct options *options,
   /* MTU frame parameters */
   struct frame frame;
 
+#ifdef FRAGMENT_ENABLE
   /* Object to handle advanced MTU negotiation and datagram fragmentation */
   struct fragment_master *fragment = NULL;
   struct frame frame_fragment;
   struct frame frame_fragment_omit;
+#endif
 
   /* Always set to current time. */
   time_t current;
@@ -329,7 +339,9 @@ openvpn (const struct options *options,
 
   CLEAR (udp_socket);
   CLEAR (frame);
+#ifdef FRAGMENT_ENABLE
   CLEAR (frame_fragment_omit);
+#endif
 
   if (first_time)
     {
@@ -350,8 +362,10 @@ openvpn (const struct options *options,
   /*
    * Initialize advanced MTU negotiation and datagram fragmentation
    */
+#ifdef FRAGMENT_ENABLE
   if (options->mtu_dynamic)
     fragment = fragment_init (&frame);
+#endif
 
 #ifdef USE_CRYPTO
   /* load a persisted packet-id for cross-session replay-protection */
@@ -592,7 +606,9 @@ openvpn (const struct options *options,
     {
       lzo_compress_init (&lzo_compwork, options->comp_lzo_adaptive);
       lzo_adjust_frame_parameters (&frame);
+#ifdef FRAGMENT_ENABLE
       lzo_adjust_frame_parameters (&frame_fragment_omit); /* omit LZO frame delta from final frame_fragment */
+#endif
     }
 #endif
 
@@ -612,14 +628,18 @@ openvpn (const struct options *options,
    * the fragmentation code deals with payloads which have already been
    * passed through the compression code.
    */
+#ifdef FRAGMENT_ENABLE
   frame_fragment = frame;
   frame_subtract_extra (&frame_fragment, &frame_fragment_omit);
   frame_dynamic_finalize (&frame_fragment);
+#endif
 
   max_rw_size_udp = MAX_RW_SIZE_UDP (&frame);
   frame_print (&frame, D_SHOW_PARMS, "Data Channel MTU parms");
+#ifdef FRAGMENT_ENABLE
   if (fragment)
     frame_print (&frame_fragment, D_FRAG_DEBUG, "Fragmentation MTU parms");
+#endif
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   if (tls_multi)
@@ -655,9 +675,11 @@ openvpn (const struct options *options,
     }
 #endif
 
+#ifdef FRAGMENT_ENABLE
   /* fragmenting code has buffers to initialize once frame parameters are known */
   if (fragment)
     fragment_frame_init (fragment, &frame_fragment, (options->mtu_icmp && ipv4_tun));
+#endif
 
   if (!tuntap_defined (tuntap))
     {
@@ -862,6 +884,7 @@ openvpn (const struct options *options,
 	  tv = &timeval;
 	}
 
+#ifdef FRAGMENT_ENABLE
       /*
        * Should we deliver a datagram fragment to remote?
        */
@@ -874,8 +897,6 @@ openvpn (const struct options *options,
 	      udp_socket.mtu_changed = false;
 	      fragment_received_os_mtu_hint (fragment, &frame_fragment);
 	    }
-
-	  /* Are we ready to send a fragment to remote? */
 	  if (!to_udp.len && fragment_ready_to_send (fragment, &buf, &frame_fragment, current))
 	    {
 #ifdef USE_CRYPTO
@@ -916,16 +937,13 @@ openvpn (const struct options *options,
 	      to_udp = buf;
 	      free_to_udp = false;
 	    }
-
-	  /* Should we bounce back a "Fragmentation needed but DF set" ICMP to TUN/TAP device? */
 	  if (!to_tun.len && fragment_icmp (fragment, &buf, &frame_fragment, current))
 	    {
 	      to_tun = buf;
 	    }
-
-	  /* Expire TTLs, digest potential MTU changes */
 	  fragment_housekeeping (fragment, &frame_fragment, current, &timeval);
 	}
+#endif /* FRAGMENT_ENABLE */
 
       /*
        * Should we ping the remote?
@@ -949,8 +967,10 @@ openvpn (const struct options *options,
 		  if (options->comp_lzo)
 		    lzo_compress (&buf, lzo_compress_buf, &lzo_compwork, &frame, current);
 #endif
+#ifdef FRAGMENT_ENABLE
 		  if (fragment)
 		    fragment_outgoing (fragment, &buf, &frame_fragment, current);
+#endif
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 		  mutex_lock (L_TLS);
@@ -997,9 +1017,11 @@ openvpn (const struct options *options,
 	   */
 	  int delay = 0;
 
+#ifdef FRAGMENT_ENABLE
 	  /* fragmenting code needs an adaptive bandwidth throttle */
 	  if (fragment)
 	    delay = shaper_delay (&fragment->shaper);
+#endif
 
 	  /* set traffic shaping delay in microseconds */
 	  if (options->shaper)
@@ -1015,7 +1037,11 @@ openvpn (const struct options *options,
 	      FD_SET (udp_socket.sd, &writes);
 	    }
 	}
+#ifdef FRAGMENT_ENABLE
       else if (!fragment || !fragment_outgoing_defined (fragment))
+#else
+      else
+#endif
 	{
 	  if (tuntap->fd >= 0)
 	    FD_SET (tuntap->fd, &reads);
@@ -1190,8 +1216,10 @@ openvpn (const struct options *options,
 		  mutex_unlock (L_TLS);
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
+#ifdef FRAGMENT_ENABLE
 		  if (fragment)
 		    fragment_incoming (fragment, &buf, &frame_fragment, current);
+#endif
 #ifdef USE_LZO
 		  /* decompress the incoming packet */
 		  if (options->comp_lzo)
@@ -1283,9 +1311,6 @@ openvpn (const struct options *options,
 		  if (options->tun_af_inet)
 		    tun_rm_head (&buf, AF_INET);
 #endif
-		  /* let fragment code know original (pre-compressed) size */
-		  if (fragment)
-		    fragment_receive_tun (fragment, BLEN (&buf));
 #if PASSTOS_CAPABILITY
 		  if (options->passtos)
 		    {
@@ -1306,8 +1331,10 @@ openvpn (const struct options *options,
 		  if (options->comp_lzo)
 		    lzo_compress (&buf, lzo_compress_buf, &lzo_compwork, &frame, current);
 #endif
+#ifdef FRAGMENT_ENABLE
 		  if (fragment)
 		    fragment_outgoing (fragment, &buf, &frame_fragment, current);
+#endif
 #ifdef USE_CRYPTO
 #ifdef USE_SSL
 		  /*
@@ -1428,8 +1455,10 @@ openvpn (const struct options *options,
 		       */
 		      if (options->shaper)
 			shaper_wrote_bytes (&shaper, BLEN (&to_udp));
+#ifdef FRAGMENT_ENABLE
 		      if (fragment)
 			fragment_post_send (fragment, BLEN (&to_udp));
+#endif
 
 		      /*
 		       * Let the pinger know that we sent a packet.
@@ -1581,8 +1610,10 @@ openvpn (const struct options *options,
   /*
    * Close fragmentation handler.
    */
+#ifdef FRAGMENT_ENABLE
   if (fragment)
     fragment_free (fragment);
+#endif
 
  done:
   /* pop our garbage collection level */

@@ -23,6 +23,8 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#ifdef FRAGMENT_ENABLE
+
 #include "config.h"
 #include "syshead.h"
 #include "misc.h"
@@ -94,7 +96,7 @@ fragment_init (struct frame *frame)
 
   event_timeout_init (&ret->wakeup, 0, FRAG_WAKEUP_INTERVAL);
 
-  shaper_init (&ret->shaper, 0);
+  shaper_init (&ret->shaper, 10000);
 
   return ret;
 }
@@ -514,7 +516,6 @@ fragment_adjust_mtu_bandwidth (struct fragment_master *f, struct frame *frame, t
       f->max_packet_size_sent_sync = f->max_packet_size_sent_confirmed = 0;
     }
 
-#if 0
   /*
    * Adjust bandwidth trend, based on the difference between the number
    * of packets sent by us, and the number received by our peer.
@@ -565,7 +566,6 @@ fragment_adjust_mtu_bandwidth (struct fragment_master *f, struct frame *frame, t
       
       f->n_packets_sent_sync = f->n_packets_sent_confirmed = 0;
     }
-#endif
 
   msg (D_FRAG_DEBUG, "FRAG adjust post mtu=%d mtu_trend=%d bw=%d bw_trend=%d",
        EXPANDED_SIZE_DYNAMIC (frame),
@@ -590,7 +590,13 @@ fragment_wakeup (struct fragment_master *f, struct frame *frame, time_t current)
   /* delete fragments with expired TTLs */
   fragment_ttl_reap (f, current);
 
+#if 0
   /* adjust MTU and bandwidth by looking at number of packets sent
      vs. number of packets actually received by peer. */
   fragment_adjust_mtu_bandwidth (f, frame, current);
+#endif
 }
+
+#else
+static void dummy(void) {}
+#endif /* FRAGMENT_ENABLE */

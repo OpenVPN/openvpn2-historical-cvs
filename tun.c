@@ -145,7 +145,16 @@ do_ifconfig (const char *dev, const char *dev_type,
 		tun_mtu
 		);
       msg (M_INFO, "%s", command_line);
-      system_check (command_line, "Solaris ifconfig failed", true);
+      if (!system_check (command_line, "Solaris ifconfig failed", false))
+	{
+	  snprintf (command_line, sizeof (command_line),
+		    IFCONFIG_PATH " %s unplumb",
+		    dev
+		    );
+	  msg (M_INFO, "%s", command_line);
+	  system_check (command_line, "Solaris ifconfig unplumb failed", false);
+	  msg (M_FATAL, "ifconfig failed");
+	}
 
 #elif defined(TARGET_OPENBSD)
 
@@ -341,7 +350,6 @@ close_tun_generic (struct tuntap *tt)
 #error header file linux/sockios.h required
 #endif
 
-
 #if defined(HAVE_TUN_PI) && defined(HAVE_IPHDR) && defined(HAVE_IOVEC) && defined(ETH_P_IPV6) && defined(ETH_P_IP) && defined(HAVE_READV) && defined(HAVE_WRITEV)
 #define LINUX_IPV6 1
 /* #warning IPv6 ON */
@@ -388,7 +396,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node,
 	  msg (M_FATAL, "I don't recognize device %s as a tun or tap device",
 	       dev);
 	}
-      if (strlen (dev) > 3)		/* unit number specified? */
+      if (has_digit(dev))		/* unit number specified? */
 	strncpynt (ifr.ifr_name, dev, IFNAMSIZ);
 
       if (ioctl (tt->fd, TUNSETIFF, (void *) &ifr) < 0)

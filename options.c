@@ -102,11 +102,13 @@ static const char usage_message[] =
   "                  'no'    -- Never send DF (Don't Fragment) frames\n"
   "                  'maybe' -- Use per-route hints\n"
   "                  'yes'   -- Always DF (Don't Fragment)\n"
+#ifdef FRAGMENT_ENABLE
   "--mtu-dynamic [min] [max] : Enable advanced MTU negotiation and datagram\n"
   "                  fragmentation, automatic MTU size negotiation between min\n"
   "                  and max, adds 4 octets of overhead per datagram.\n"
   "--mtu-noicmp    : Don't automatically generate 'Fragmentation needed but\n"
   "                  DF set' IPv4 ICMP messages.\n" 
+#endif
   "--mlock         : Disable Paging -- ensures key material and tunnel\n"
   "                  data will never be written to disk.\n"
   "--up cmd        : Shell cmd to execute after successful tun device open.\n"
@@ -253,7 +255,9 @@ init_options (struct options *o)
   o->tun_mtu = TUN_MTU_DEFAULT;
   o->udp_mtu = UDP_MTU_DEFAULT;
   o->mtu_discover_type = -1;
+#ifdef FRAGMENT_ENABLE
   o->mtu_icmp = true;
+#endif
 #ifdef USE_LZO
   o->comp_lzo_adaptive = true;
 #endif
@@ -319,12 +323,14 @@ show_settings (const struct options *o)
   SHOW_INT (udp_mtu);
   SHOW_BOOL (udp_mtu_defined);
   SHOW_INT (tun_mtu_extra);
+#ifdef FRAGMENT_ENABLE
   SHOW_BOOL (mtu_dynamic);
   SHOW_INT (mtu_min);
   SHOW_BOOL (mtu_min_defined);
   SHOW_INT (mtu_max);
   SHOW_BOOL (mtu_max_defined);
   SHOW_BOOL (mtu_icmp);
+#endif
   SHOW_INT (mtu_discover_type);
   SHOW_BOOL (mlock);
   SHOW_INT (inactivity_timeout);
@@ -441,8 +447,10 @@ options_string (const struct options *o)
   if (o->comp_lzo)
     buf_printf (&out, " --comp-lzo");
 #endif
+#ifdef FRAGMENT_ENABLE
   if (o->mtu_dynamic)
     buf_printf (&out, " --mtu-dynamic");
+#endif
   return BSTR (&out);
 }
 
@@ -840,6 +848,7 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
       ++i;
       options->tun_mtu_extra = positive (atoi (p2));
     }
+#ifdef FRAGMENT_ENABLE
   else if (streq (p1, "mtu-dynamic"))
     {
       options->mtu_dynamic = true;
@@ -860,6 +869,7 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
     {
       options->mtu_icmp = false;
     }
+#endif
   else if (streq (p1, "mtu-disc") && p2)
     {
       ++i;

@@ -1,7 +1,12 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.124 2005/03/13 07:54:54 jimyonan Exp $
+$Id: ChangeLog,v 1.125 2005/03/28 10:47:29 jimyonan Exp $
+
+2005.03.28 -- Version 2.0-rc18
+
+* Packaged Windows installer with OpenSSL 0.9.7f.
+* Built Windows installer with NSIS 2.06.
 
 2005.03.12 -- Version 2.0-rc17
 

@@ -1,8 +1,13 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.1 2003/07/16 04:15:28 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.2 2003/07/19 00:33:19 jimyonan Exp $
 
+Todo:
+* finish tcp
+* implement --up-restart
+* options error if mtu-dynamic + tcp
+	
 Upcoming version 1.5.0
 
 * Added TCP support via the new --proto
@@ -10,21 +15,27 @@ Upcoming version 1.5.0
 * Renamed udp-centric options such as
   --udp-mtu to --link-mtu (old option
   names preserved for compatibility).
-* Ported to Windows (still experimental).
+* Ported to Windows XP using mingw and a
+  TAP driver derived from the Cipe-Win32
+  project by Damion K. Wilson
+  (still experimental and I have not
+  yet tested on pre-XP Windows).
+* Added --show-adapters flag for
+  windows version.
 * Reworked the SSL/TLS packet acknowledge
   code to better handle certain corner
   cases.
 * Turned off the default enabling of
   IP forwarding in the
   sample-scripts/openvpn.init script
-  for Red Hat.
+  for Redhat.
   Forwarding can be enabled by users
   in their --up scripts or firewall
   config.
 * Protocol compatibility with previous
   versions is maintained.
 
-2003.07.xx -- Version 1.4.2
+2003.07.15 -- Version 1.4.2
 
 * Removed adaptive bandwidth from
   --mtu-dynamic -- its absence appears

@@ -369,8 +369,8 @@ void
 socket_frame_init (struct frame *frame, struct link_socket *sock)
 {
 #ifdef WIN32
-  overlapped_io_init (&sock->reads, frame, FALSE);
-  overlapped_io_init (&sock->writes, frame, TRUE);
+  overlapped_io_init (&sock->reads, frame, FALSE, false);
+  overlapped_io_init (&sock->writes, frame, TRUE, false);
 #endif
 
   if (link_socket_connection_oriented (sock))
@@ -459,8 +459,8 @@ socket_recv_queue (struct link_socket *sock, int maxsize)
 	    }
 	  else /* error occurred */
 	    {
-	      sock->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      ASSERT (SetEvent (sock->reads.overlapped.hEvent));
+	      sock->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      sock->reads.status = status;
 	    }
 	}
@@ -482,8 +482,8 @@ socket_send_queue (struct link_socket *sock, struct buffer *buf, const struct so
       ASSERT (buf_copy (&sock->writes.buf, buf));
 
       /* Win32 docs say it's okay to allocate the wsabuf on the stack */
-      wsabuf[0].buf = BPTR (buf);
-      wsabuf[0].len = BLEN (buf);
+      wsabuf[0].buf = BPTR (&sock->writes.buf);
+      wsabuf[0].len = BLEN (&sock->writes.buf);
 
       /* the overlapped write will signal this event on I/O completion */
       ASSERT (ResetEvent (sock->writes.overlapped.hEvent));
@@ -546,8 +546,8 @@ socket_send_queue (struct link_socket *sock, struct buffer *buf, const struct so
 	    }
 	  else /* error occurred */
 	    {
-	      sock->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      ASSERT (SetEvent (sock->writes.overlapped.hEvent));
+	      sock->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
 	      sock->writes.status = status;
 	    }
 	}

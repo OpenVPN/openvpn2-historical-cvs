@@ -48,7 +48,9 @@ EXTRA_DIST = $(man_MANS) \
 	     config-win32.h \
 	     openvpn-win32.h \
 	     openvpn-win32.c \
-	     makefile.w32
+	     makefile.w32 \
+	     INSTALL.w32 \
+	     tap-win32
 
 dist-hook:
 	cd $(distdir) && for i in $(EXTRA_DIST) ; do find $$i -name CVS -type d -prune -exec rm -r '{}' ';' ; rm -f `find $$i -type f | grep -E '(^|\/)\.?\#|\~$$'` ; done

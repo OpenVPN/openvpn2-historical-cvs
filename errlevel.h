@@ -87,6 +87,7 @@
 #define D_SELECT             LOGLEV(9, 70, M_DEBUG)  /* show detailed info from main select() call */
 #define D_TUN_RW             LOGLEV(9, 70, M_DEBUG)  /* show TUN/TAP reads/writes */
 #define D_CO_DEBUG           LOGLEV(9, 70, M_DEBUG)  /* show connection-oriented debug info */
+#define D_REGISTRY           LOGLEV(9, 70, M_DEBUG)  /* win32 registry debugging info */
 
 #define D_SHAPER_DEBUG       LOGLEV(10, 70, M_DEBUG) /* show traffic shaper info */
 

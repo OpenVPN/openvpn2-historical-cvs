@@ -42,6 +42,7 @@
 #include "buffer.h"
 #include "common.h"
 #include "misc.h"
+#include "mtu.h"
 
 #include "memdbg.h"
 
@@ -342,20 +343,16 @@ open_tun_generic (const char *dev, const char *dev_node,
       strncpynt (tt->actual, (dynamic_opened ? dynamic_name : dev), sizeof (tt->actual));
     }
 }
-#endif
 
 static void
 close_tun_generic (struct tuntap *tt)
 {
-#ifdef WIN32
-  if (tt->hand != NULL)
-    CloseHandle (tt->hand);
-#else
   if (tt->fd >= 0)
     close (tt->fd);
-#endif
   clear_tuntap (tt);
 }
+
+#endif
 
 #if defined(TARGET_LINUX)
 
@@ -794,28 +791,492 @@ read_tun (struct tuntap* tt, uint8_t *buf, int len)
 
 #elif defined(WIN32)
 
+int
+tun_read_queue (struct tuntap *tt, int maxsize)
+{
+  if (tt->reads.iostate == IOSTATE_INITIAL)
+    {
+      DWORD len;
+      BOOL status;
+      int err;
+
+      /* reset buf to its initial state */
+      tt->reads.buf = tt->reads.buf_init;
+
+      len = maxsize ? maxsize : BLEN (&tt->reads.buf);
+      ASSERT (len <= BLEN (&tt->reads.buf));
+
+      /* the overlapped read will signal this event on I/O completion */
+      ASSERT (ResetEvent (tt->reads.overlapped.hEvent));
+
+      status = ReadFile(
+		      tt->hand,
+		      BPTR (&tt->reads.buf),
+		      len,
+		      &tt->reads.size,
+		      &tt->reads.overlapped
+		      );
+
+      if (status) /* operation completed immediately? */
+	{
+	  /* since we got an immediate return, we must signal the event object ourselves */
+	  ASSERT (SetEvent (tt->reads.overlapped.hEvent));
+
+	  tt->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
+	  tt->reads.status = 0;
+	}
+      else
+	{
+	  err = GetLastError (); 
+	  if (err == ERROR_IO_PENDING) /* operation queued? */
+	    {
+	      tt->reads.iostate = IOSTATE_QUEUED;
+	      tt->reads.status = err;
+	    }
+	  else /* error occurred */
+	    {
+	      ASSERT (SetEvent (tt->reads.overlapped.hEvent));
+	      tt->reads.iostate = IOSTATE_IMMEDIATE_RETURN;
+	      tt->reads.status = err;
+	    }
+	}
+    }
+  return tt->reads.iostate;
+}
+
+int
+tun_write_queue (struct tuntap *tt, struct buffer *buf)
+{
+  if (tt->writes.iostate == IOSTATE_INITIAL)
+    {
+      BOOL status;
+      int err;
+ 
+      /* make a private copy of buf */
+      tt->writes.buf = tt->writes.buf_init;
+      tt->writes.buf.len = 0;
+      ASSERT (buf_copy (&tt->writes.buf, buf));
+
+      /* the overlapped write will signal this event on I/O completion */
+      ASSERT (ResetEvent (tt->writes.overlapped.hEvent));
+
+      status = WriteFile(
+			tt->hand,
+			BPTR (&tt->writes.buf),
+			BLEN (&tt->writes.buf),
+			&tt->writes.size,
+			&tt->writes.overlapped
+			);
+
+      if (!status) /* operation completed immediately? */
+	{
+	  tt->writes.iostate = ERROR_IO_PENDING;
+
+	  /* since we got an immediate return, we must signal the event object ourselves */
+	  ASSERT (SetEvent (tt->writes.overlapped.hEvent));
+
+	  tt->writes.status = 0;
+	}
+      else
+	{
+	  err = GetLastError (); 
+	  if (err == WSA_IO_PENDING) /* operation queued? */
+	    {
+	      tt->writes.iostate = IOSTATE_QUEUED;
+	      tt->writes.status = err;
+	    }
+	  else /* error occurred */
+	    {
+	      ASSERT (SetEvent (tt->writes.overlapped.hEvent));
+	      tt->writes.iostate = IOSTATE_IMMEDIATE_RETURN;
+	      tt->writes.status = err;
+	    }
+	}
+    }
+  return tt->writes.iostate;
+}
+
+int
+tun_finalize (
+	      HANDLE h,
+	      struct overlapped_io *io,
+	      struct buffer *buf)
+{
+  int ret = -1;
+  BOOL status;
+
+  switch (io->iostate)
+    {
+    case IOSTATE_QUEUED:
+      status = GetOverlappedResult(
+				   h,
+				   &io->overlapped,
+				   &io->size,
+				   FALSE
+				   );
+      if (status)
+	{
+	  /* successful return for a queued operation */
+	  if (buf)
+	    *buf = io->buf;
+	  ret = io->size;
+	  io->iostate = IOSTATE_INITIAL;
+	  ASSERT (ResetEvent (io->overlapped.hEvent));
+	}
+      else
+	{
+	  /* error during a queued operation */
+	  ret = -1;
+	  if (GetLastError() != ERROR_IO_INCOMPLETE)
+	    {
+	      /* if no error (i.e. just not finished yet), then DON'T execute this code */
+	      io->iostate = IOSTATE_INITIAL;
+	      ASSERT (ResetEvent (io->overlapped.hEvent));
+	    }
+	}
+      break;
+
+    case IOSTATE_IMMEDIATE_RETURN:
+      ASSERT (ResetEvent (io->overlapped.hEvent));
+      if (io->status)
+	{
+	  /* error return for a non-queued operation */
+	  SetLastError (io->status);
+	  ret = -1;
+	}
+      else
+	{
+	  /* successful return for a non-queued operation */
+	  if (buf)
+	    *buf = io->buf;
+	  ret = io->size;
+	  io->iostate = IOSTATE_INITIAL;
+	}
+      break;
+
+    case IOSTATE_INITIAL: /* were we called without proper queueing? */
+      SetLastError (ERROR_INVALID_FUNCTION);
+      ret = -1;
+      break;
+
+    default:
+      ASSERT (0);
+    }
+
+  if (buf)
+    buf->len = ret;
+  return ret;
+}
+
+static bool
+is_tap_win32_dev (const char* guid)
+{
+  HKEY netcard_key;
+  LONG status;
+  DWORD len;
+  int i = 0;
+
+  status = RegOpenKeyEx(
+			HKEY_LOCAL_MACHINE,
+			NETCARD_REG_KEY_2000,
+			0,
+			KEY_READ,
+			&netcard_key);
+
+  if (status != ERROR_SUCCESS)
+    msg (M_FATAL, "Error opening registry key: %s", NETCARD_REG_KEY_2000);
+
+  while (true)
+    {
+      char enum_name[256];
+      char unit_string[256];
+      HKEY unit_key;
+      char component_id_string[] = "ComponentId";
+      char component_id[256];
+      char net_cfg_instance_id_string[] = "NetCfgInstanceId";
+      char net_cfg_instance_id[256];
+      DWORD data_type;
+
+      len = sizeof (enum_name);
+      status = RegEnumKeyEx(
+			    netcard_key,
+			    i,
+			    enum_name,
+			    &len,
+			    NULL,
+			    NULL,
+			    NULL,
+			    NULL);
+      if (status == ERROR_NO_MORE_ITEMS)
+	break;
+      else if (status != ERROR_SUCCESS)
+	msg (M_FATAL, "Error enumerating registry subkeys of key: %s",
+	     NETCARD_REG_KEY_2000);
+
+      snprintf (unit_string, sizeof(unit_string), "%s\\%s",
+		NETCARD_REG_KEY_2000, enum_name);
+
+      status = RegOpenKeyEx(
+			    HKEY_LOCAL_MACHINE,
+			    unit_string,
+			    0,
+			    KEY_READ,
+			    &unit_key);
+
+      if (status != ERROR_SUCCESS)
+	msg (D_REGISTRY, "Error opening registry key: %s", unit_string);
+      else
+	{
+	  len = sizeof (component_id);
+	  status = RegQueryValueEx(
+				   unit_key,
+				   component_id_string,
+				   NULL,
+				   &data_type,
+				   component_id,
+				   &len);
+
+	  if (status != ERROR_SUCCESS || data_type != REG_SZ)
+	    msg (D_REGISTRY, "Error opening registry key: %s\\%s",
+		 unit_string, component_id_string);
+	  else
+	    {	      
+	      len = sizeof (net_cfg_instance_id);
+	      status = RegQueryValueEx(
+				       unit_key,
+				       net_cfg_instance_id_string,
+				       NULL,
+				       &data_type,
+				       net_cfg_instance_id,
+				       &len);
+
+	      if (status == ERROR_SUCCESS && data_type == REG_SZ)
+		{
+		  msg (D_REGISTRY, "cid=%s netcfg=%s guid=%s",
+		       component_id, net_cfg_instance_id, guid);
+		  if (!strcmp (component_id, "tap")
+		      && !strcmp (net_cfg_instance_id, guid))
+		    {
+		      RegCloseKey (unit_key);
+		      RegCloseKey (netcard_key);
+		      return true;
+		    }
+		}
+	    }
+	  RegCloseKey (unit_key);
+	}
+      ++i;
+    }
+
+  RegCloseKey (netcard_key);
+  return false;
+}
+
+
+/* set name to NULL to enumerate all TAP devices */
+static const char *
+get_device_guid (const char *name)
+{
+# define REG_CONTROL_NET "SYSTEM\\CurrentControlSet\\Control\\Network\\{4D36E972-E325-11CE-BFC1-08002BE10318}"
+  struct buffer out = alloc_buf_gc (256);
+  LONG status;
+  HKEY control_net_key;
+  DWORD len;
+  int i = 0;
+  int n = 0;
+
+  if (!name)
+    msg (M_INFO, "Available TAP-WIN32 devices:");
+
+  status = RegOpenKeyEx(
+			HKEY_LOCAL_MACHINE,
+			REG_CONTROL_NET,
+			0,
+			KEY_READ,
+			&control_net_key);
+
+  if (status != ERROR_SUCCESS)
+    msg (M_FATAL, "Error opening registry key: %s", REG_CONTROL_NET);
+
+  while (true)
+    {
+      char enum_name[256];
+      char connection_string[256];
+      HKEY connection_key;
+      char name_data[256];
+      DWORD name_type;
+      const char name_string[] = "Name";
+
+      len = sizeof (enum_name);
+      status = RegEnumKeyEx(
+			    control_net_key,
+			    i,
+			    enum_name,
+			    &len,
+			    NULL,
+			    NULL,
+			    NULL,
+			    NULL);
+      if (status == ERROR_NO_MORE_ITEMS)
+	break;
+      else if (status != ERROR_SUCCESS)
+	msg (M_FATAL, "Error enumerating registry subkeys of key: %s",
+	     REG_CONTROL_NET);
+
+      snprintf (connection_string, sizeof(connection_string),
+		"%s\\%s\\Connection",
+		REG_CONTROL_NET, enum_name);
+
+      status = RegOpenKeyEx(
+			    HKEY_LOCAL_MACHINE,
+			    connection_string,
+			    0,
+			    KEY_READ,
+			    &connection_key);
+
+      if (status != ERROR_SUCCESS)
+	msg (D_REGISTRY, "Error opening registry key: %s", connection_string);
+      else
+	{
+	  len = sizeof (name_data);
+	  status = RegQueryValueEx(
+				   connection_key,
+				   name_string,
+				   NULL,
+				   &name_type,
+				   name_data,
+				   &len);
+
+	  if (status != ERROR_SUCCESS || name_type != REG_SZ)
+	    msg (D_REGISTRY, "Error opening registry key: %s\\%s\\%s",
+		 REG_CONTROL_NET, connection_string, name_string);
+	  else
+	    {
+	      
+	      if (is_tap_win32_dev (enum_name))
+		{
+		  if (name == NULL)
+		    {
+		      ++n;
+		      msg (M_INFO, "[%d] '%s'", n, name_data);
+		    }
+		  else if (!strcmp (name_data, name))
+		    {
+		      buf_printf (&out, "%s", enum_name);
+		      RegCloseKey (connection_key);
+		      RegCloseKey (control_net_key);
+		      return BSTR (&out);
+		    }
+		}
+	    }
+
+	  RegCloseKey (connection_key);
+	}
+      ++i;
+    }
+
+  RegCloseKey (control_net_key);
+  if (name)
+    msg (M_FATAL, "TAP device '%s' not found -- run with --show-adapters to show a list of TAP-WIN32 adapters on this system", name);
+  return NULL;
+}
+
+void
+show_tap_win32_adapters (void)
+{
+  get_device_guid (NULL);
+}
+
 void
 open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
 {
-  open_null (tt); // JYFIXME
+  char device_path[256];
+  const char *device_guid = NULL;
+  DWORD len;
+
+  clear_tuntap (tt);
+
+  ipv6_support (ipv6, false, tt);
+
+  if (!strcmp(dev, "null"))
+    {
+      open_null (tt);
+      return;
+    }
+  else if (is_dev_type (dev, dev_type, "tap"))
+    {
+      ;
+    }
+  else
+    {
+      msg (M_FATAL, "Unknown virtual device type: '%s' -- Currently only TAP virtual network devices are supported under Windows, so you should run with --dev tap --dev-node <your TAP-WIN32 adapter name> -- or run with --show-adapters to show a list of TAP-WIN32 adapters on this system", dev);
+    }
+
+  /*
+   * Lookup the device name in the registry, using the --dev-node high level name.
+   */
+  if (!dev_node)
+    {
+      msg (M_FATAL, "--dev-node must be specified with the name of the TAP device as it appears in the network control panel or ipconfig command -- or run with --show-adapters to show a list of TAP-WIN32 adapters on this system");
+    }
+  else
+    {
+      /* translate high-level device name into a GUID using the registry */
+      device_guid = get_device_guid (dev_node);
+    }
+
+  /*
+   * Open Windows TAP device
+   */
+  snprintf (device_path, sizeof(device_path), "%s%s%s",
+	    USERMODEDEVICEDIR,
+	    device_guid,
+	    TAPSUFFIX);
+
+  tt->hand = CreateFile (
+			 device_path,
+			 GENERIC_READ | GENERIC_WRITE,
+			 0, // was: FILE_SHARE_READ
+			 0,
+			 OPEN_EXISTING,
+			 FILE_ATTRIBUTE_SYSTEM | FILE_FLAG_OVERLAPPED,
+			 0
+			 );
+
+  if (tt->hand == INVALID_HANDLE_VALUE)
+    msg (M_ERR, "CreateFile failed on TAP device: %s", device_path);
+
+  if (!DeviceIoControl (tt->hand, TAP_IOCTL_GET_MAC,
+			tt->mac, sizeof (tt->mac),
+			tt->mac, sizeof (tt->mac), &len, 0))
+    msg (M_ERR, "DeviceIoControl TAP_IOCTL_GET_MAC failed");
+
+  if (!DeviceIoControl (tt->hand, TAP_IOCTL_GET_LASTMAC,
+			tt->next_mac, sizeof (tt->next_mac),
+			tt->next_mac, sizeof (tt->next_mac), &len, 0))
+    msg (M_ERR, "DeviceIoControl TAP_IOCTL_GET_LASTMAC failed");
+
+  msg (M_INFO, "TAP-WIN32 device [%s] opened: %s", dev_node, device_path);
+
+  /* tt->actual is passed to up and down scripts and used as the ifconfig dev name */
+  strncpynt (tt->actual, device_path, sizeof (tt->actual));
 }
 
 void
-close_tun (struct tuntap* tt)
+tun_frame_init (struct frame *frame, struct tuntap *tt)
 {
-  close_tun_generic (tt);
+  overlapped_io_init (&tt->reads, frame, FALSE, true);
+  overlapped_io_init (&tt->writes, frame, TRUE, true);
 }
 
-int
-write_tun (struct tuntap* tt, uint8_t *buf, int len)
+void
+close_tun (struct tuntap *tt)
 {
-  ASSERT (0);
-}
-
-int
-read_tun (struct tuntap* tt, uint8_t *buf, int len)
-{
-  ASSERT (0);
+  overlapped_io_close (&tt->reads);
+  overlapped_io_close (&tt->writes);
+  if (tt->hand != NULL)
+    CloseHandle (tt->hand);
+  clear_tuntap (tt);
 }
 
 #else /* generic */

@@ -291,6 +291,8 @@ const char *
 strerror_win32 (int errnum)
 {
   switch (errnum) {
+  case ERROR_IO_PENDING:
+    return "I/O Operation in progress (ERROR_IO_PENDING)";
   case WSA_IO_INCOMPLETE:
     return "I/O Operation in progress (WSA_IO_INCOMPLETE)";
   case WSAEINTR:

@@ -23,6 +23,11 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#ifdef WIN32
+#include <winioctl.h>
+#include "tap-win32/constants.h"
+#endif
+
 #include "buffer.h"
 #include "error.h"
 #include "mtu.h"
@@ -32,22 +37,27 @@
  * Define a TUN/TAP dev.
  */
 
-
 struct tuntap
 {
 #ifdef WIN32
   /* these macros are called in the context of the openvpn() function */
-# define TUNTAP_SET(tt, set) { if (tt->hand != NULL)   wait_add     (&event_wait, tt->set.overlapped.hEvent); }
-# define TUNTAP_ISSET(tt, set)    (tt->hand != NULL && wait_trigger (&event_wait, tt->set.overlapped.hEvent))
+# define TUNTAP_SET_READ(tt)  { if (tt->hand != NULL) { \
+                                  wait_add (&event_wait, tt->reads.overlapped.hEvent); \
+                                  tun_read_queue (tt, 0); }}
+# define TUNTAP_SET_WRITE(tt) { if (tt->hand != NULL) wait_add (&event_wait, tt->writes.overlapped.hEvent); }
+# define TUNTAP_ISSET(tt, set)     (tt->hand != NULL && wait_trigger (&event_wait, tt->set.overlapped.hEvent))
 # define TUNTAP_SETMAXFD(tt)
 # define TUNTAP_READ_STAT(tt)  (tt->hand != NULL ? overlapped_io_state_ascii (&tt->reads,  "tr") : "trX")
 # define TUNTAP_WRITE_STAT(tt) (tt->hand != NULL ? overlapped_io_state_ascii (&tt->writes, "tw") : "twX")
   HANDLE hand;
   struct overlapped_io reads;
   struct overlapped_io writes;
+
+  MACADDR mac, next_mac;
 #else
   /* these macros are called in the context of the openvpn() function */
-# define TUNTAP_SET(tt, set)   { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.set);    }
+# define TUNTAP_SET_READ(tt)   { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.reads);    }
+# define TUNTAP_SET_WRITE(tt)  { if (tt->fd >= 0)   FD_SET   (tt->fd, &event_wait.writes);    }
 # define TUNTAP_ISSET(tt, set)      (tt->fd >= 0 && FD_ISSET (tt->fd, &event_wait.set))
 # define TUNTAP_SETMAXFD(tt)   { if (tt->fd >= 0)   wait_update_maxfd (&event_wait, tt->fd); }
 # define TUNTAP_READ_STAT(tt)  (TUNTAP_ISSET (tt, reads) ?  "TR" : "tr")
@@ -128,3 +138,53 @@ ifconfig_order(void)
   return IFCONFIG_DEFAULT;
 #endif
 }
+
+#ifdef WIN32
+
+#define TUN_PASS_BUFFER
+
+void show_tap_win32_adapters (void);
+
+void tun_frame_init (struct frame *frame, struct tuntap *tt);
+int tun_read_queue (struct tuntap *tt, int maxsize);
+int tun_write_queue (struct tuntap *tt, struct buffer *buf);
+int tun_finalize (HANDLE h, struct overlapped_io *io, struct buffer *buf);
+
+static inline int
+tun_write_win32 (struct tuntap *tt, struct buffer *buf)
+{
+  int err = 0;
+  int status = 0;
+  if (overlapped_io_active (&tt->writes))
+    {
+      status = tun_finalize (tt->hand, &tt->writes, NULL);
+      if (status < 0)
+	err = GetLastError ();
+    }
+  tun_write_queue (tt, buf);
+  if (status < 0)
+    {
+      SetLastError (err);
+      return status;
+    }
+  else
+    return BLEN (buf);
+}
+
+static inline int
+read_tun_buffered (struct tuntap *tt, struct buffer *buf, int maxsize)
+{
+  return tun_finalize (tt->hand, &tt->reads, buf);
+}
+
+static inline int
+write_tun_buffered (struct tuntap *tt, struct buffer *buf)
+{
+  return tun_write_win32 (tt, buf);
+}
+
+#else
+
+static inline void tun_frame_init (struct frame *frame, struct tuntap *tt) {}
+
+#endif

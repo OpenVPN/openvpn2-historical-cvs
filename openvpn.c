@@ -735,8 +735,9 @@ openvpn (const struct options *options,
     fragment_frame_init (fragment, &frame_fragment, (options->mtu_icmp && ipv4_tun));
 #endif
 
-  /* socket code has buffers to initialize once frame parameters are known */
+  /* socket & tun code have buffers to initialize once frame parameters are known */
   socket_frame_init (&frame, &link_socket);
+  tun_frame_init (&frame, tuntap);
 
   if (!tuntap_defined (tuntap))
     {
@@ -1129,7 +1130,7 @@ openvpn (const struct options *options,
       else
 #endif
 	{
-	  TUNTAP_SET (tuntap, reads);
+	  TUNTAP_SET_READ (tuntap);
 #if defined(USE_CRYPTO) && defined(USE_SSL) && defined(USE_PTHREAD)
 	  TLS_THREAD_SOCKET_SET (thread_parms, reads);
 #endif
@@ -1141,7 +1142,7 @@ openvpn (const struct options *options,
        */
       if (to_tun.len > 0)
 	{
-	  TUNTAP_SET (tuntap, writes);
+	  TUNTAP_SET_WRITE (tuntap);
 	}
       else
 	{
@@ -1407,9 +1408,15 @@ openvpn (const struct options *options,
 	       */
 	      ASSERT (!to_link.len);
 	      buf = read_tun_buf;
+
+#ifdef TUN_PASS_BUFFER
+	      read_tun_buffered (tuntap, &buf, MAX_RW_SIZE_TUN (&frame));
+#else
 	      ASSERT (buf_init (&buf, EXTRA_FRAME (&frame)));
 	      ASSERT (buf_safe (&buf, MAX_RW_SIZE_TUN (&frame)));
 	      buf.len = read_tun (tuntap, BPTR (&buf), MAX_RW_SIZE_TUN (&frame));
+#endif
+
 	      if (buf.len > 0)
 		tun_read_bytes += buf.len;
 
@@ -1520,7 +1527,12 @@ openvpn (const struct options *options,
 		       format_hex (BPTR (&to_tun), BLEN (&to_tun), 80),
 		       MD5SUM (BPTR (&to_tun), BLEN (&to_tun)));
 
+#ifdef TUN_PASS_BUFFER
+		  size = write_tun_buffered (tuntap, &to_tun);
+#else
 		  size = write_tun (tuntap, BPTR (&to_tun), BLEN (&to_tun));
+#endif
+
 		  if (size > 0)
 		    tun_write_bytes += size;
 		  check_status (size, "write to TUN/TAP", NULL);

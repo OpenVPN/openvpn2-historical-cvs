@@ -57,7 +57,8 @@ struct overlapped_io {
 
 void overlapped_io_init (struct overlapped_io *o,
 			 const struct frame *frame,
-			 BOOL event_state);
+			 BOOL event_state,
+			 bool tuntap_buffer);
 
 void overlapped_io_close (struct overlapped_io *o);
 

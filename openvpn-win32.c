@@ -58,7 +58,8 @@ uninit_win32 (void)
 void
 overlapped_io_init (struct overlapped_io *o,
 		    const struct frame *frame,
-		    BOOL event_state)
+		    BOOL event_state,
+		    bool tuntap_buffer) /* if true: tuntap buffer, if false: socket buffer */
 {
   CLEAR (*o);
 
@@ -70,7 +71,7 @@ overlapped_io_init (struct overlapped_io *o,
   /* allocate buffer for overlapped I/O */
   o->buf_init = alloc_buf (BUF_SIZE (frame));
   ASSERT (buf_init (&o->buf_init, EXTRA_FRAME (frame)));
-  o->buf_init.len = MAX_RW_SIZE_LINK (frame);
+  o->buf_init.len = tuntap_buffer ? MAX_RW_SIZE_TUN (frame) : MAX_RW_SIZE_LINK (frame);
   ASSERT (buf_safe (&o->buf_init, 0));
 }
 

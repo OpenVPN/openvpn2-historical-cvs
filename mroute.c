@@ -127,6 +127,20 @@ mroute_list_free (struct mroute_list *list)
   mroute_addr_free (&list->addr);
 }
 
+uint32_t
+mroute_addr_hash_function (const void *key, uint32_t iv)
+{
+  return hash_func (mroute_addr_hash_ptr ((const struct mroute_addr *) key),
+		    mroute_addr_hash_len ((const struct mroute_addr *) key),
+		    iv);
+}
+
+bool mroute_addr_compare_function (const void *key1, const void *key2)
+{
+  return mroute_addr_equal ((const struct mroute_addr *) key1,
+			    (const struct mroute_addr *) key2);
+}
+
 #else
 static void dummy(void) {}
 #endif /* P2MP */

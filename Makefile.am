@@ -66,6 +66,7 @@ openvpn_SOURCES = \
 	push.c push.h \
 	reliable.c reliable.h \
 	route.c route.h \
+	schedule.c schedule.h \
 	session_id.c session_id.h \
 	shaper.c shaper.h \
 	sig.c sig.h \

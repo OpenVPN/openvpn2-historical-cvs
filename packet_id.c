@@ -234,7 +234,7 @@ packet_id_net_print (const struct packet_id_net *pin, bool print_timestamp, stru
   if (print_timestamp && pin->time)
       buf_printf (&out, " / time = (" packet_id_format ") %s", 
 		  (packet_id_print_type)pin->time,
-		  time_string (pin->time, false, gc));
+		  time_string (pin->time, 0, false, gc));
 
   buf_printf (&out, " ]");
   return BSTR (&out);
@@ -375,14 +375,13 @@ packet_id_persist_print (const struct packet_id_persist *p, struct gc_arena *gc)
       if (p->time)
 	buf_printf (&out, " / time = (" packet_id_format ") %s",
 		    (packet_id_print_type)p->time,
-		    time_string (p->time, false, gc));
+		    time_string (p->time, 0, false, gc));
     }
 
   buf_printf (&out, " ]");
   return (char *)out.data;
 }
 
-#define PID_TEST // JYFIXME
 #ifdef PID_TEST
 
 void

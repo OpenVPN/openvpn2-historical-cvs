@@ -61,7 +61,8 @@ new_socks_proxy (const char *server,
 		 bool retry,
 		 struct gc_arena *gc)
 {
-  struct socks_proxy_info *p = (struct socks_proxy_info *) gc_malloc (sizeof (struct socks_proxy_info), true, gc);
+  struct socks_proxy_info *p;
+  ALLOC_OBJ_CLEAR_GC (p, struct socks_proxy_info, gc);
   ASSERT (server);
   ASSERT (legal_ipv4_port (port));
 

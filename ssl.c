@@ -492,7 +492,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
     char common_name[TLS_CN_LEN];
     if (ctx->error_depth == 0)
       extract_common_name (common_name, TLS_CN_LEN, subject);
-    session->common_name = string_alloc (common_name);
+    session->common_name = string_alloc (common_name, NULL);
   }
   
   return 1;			/* Accept connection */
@@ -1071,12 +1071,12 @@ key_state_init (struct tls_session *session, struct key_state *ks,
     session->key_id = 1;
 
   /* allocate key source material object */
-  ALLOC_STRUCT (ks->key_src, struct key_source2, true);
+  ALLOC_OBJ_CLEAR (ks->key_src, struct key_source2);
 
   /* allocate reliability objects */
-  ALLOC_STRUCT (ks->send_reliable, struct reliable, true);
-  ALLOC_STRUCT (ks->rec_reliable, struct reliable, true);
-  ALLOC_STRUCT (ks->rec_ack, struct reliable_ack, true);
+  ALLOC_OBJ_CLEAR (ks->send_reliable, struct reliable);
+  ALLOC_OBJ_CLEAR (ks->rec_reliable, struct reliable);
+  ALLOC_OBJ_CLEAR (ks->rec_ack, struct reliable_ack);
 
   /* allocate buffers */
   ks->plaintext_read_buf = alloc_buf (PLAINTEXT_BUFFER_SIZE);
@@ -1309,9 +1309,7 @@ tls_multi_init (struct tls_options *tls_options)
 {
   struct tls_multi *ret;
 
-  ret = (struct tls_multi *) malloc (sizeof (struct tls_multi));
-  ASSERT (ret);
-  CLEAR (*ret);
+  ALLOC_OBJ_CLEAR (ret, struct tls_multi);
 
   /* get command line derived options */
   ret->opt = *tls_options;

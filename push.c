@@ -77,7 +77,7 @@ push_option (struct options *o, const char *opt)
   bool first = false;
   if (!o->push_list)
     {
-      o->push_list = (struct push_list *) gc_malloc (sizeof (struct push_list), true, &o->gc);
+      ALLOC_OBJ_CLEAR_GC (o->push_list, struct push_list, &o->gc);
       first = true;
     }
 

@@ -84,10 +84,9 @@ fragment_init (struct frame *frame)
 {
   struct fragment_master *ret;
 
-  ret = (struct fragment_master *) malloc (sizeof (struct fragment_master));
-  ASSERT (ret);
-  CLEAR (*ret); /* code that initializes other parts of
-		   fragment_master assume an initial CLEAR */
+  /* code that initializes other parts of
+     fragment_master assume an initial CLEAR */
+  ALLOC_OBJ_CLEAR (ret, struct fragment_master);
 
   /* add in the size of our contribution to the expanded frame size */
   frame_add_to_extra_frame (frame, sizeof(fragment_header_type));

@@ -157,92 +157,95 @@ main (int argc, char *argv[])
 {
   struct context c;
 
+  CLEAR (c);
+
   /* signify first time for components which can
      only be initialized once per program instantiation. */
   c.first_time = true;
 
   /* initialize program-wide statics */
-  init_static ();
-
-  /*
-   * This loop is initially executed on startup and then
-   * once per SIGHUP.
-   */
-  do
+  if (init_static ())
     {
-      /* zero context struct but leave first_time member alone */
-      context_clear_all_except_first_time (&c);
-
-      /* initialize garbage collector scoped to context object */
-      gc_init (&c.gc);
-
-      /* static signal info object */
-      c.sig = &siginfo_static;
-
-      /* initialize options to default state */
-      init_options (&c.options);
-
-      /* parse command line options, and read configuration file */
-      parse_argv (&c.options, argc, argv);
-
-      /* init verbosity and mute levels */
-      init_verb_mute (&c.options);
-
-      /* set dev options */
-      init_options_dev (&c.options);
-
-      /* openssl print info? */
-      if (print_openssl_info (&c.options))
-	break;
-
-      /* --genkey mode? */
-      if (do_genkey (&c.options))
-	break;
-
-      /* tun/tap persist command? */
-      if (do_persist_tuntap (&c.options))
-	break;
-
-      /* sanity check on options */
-      options_postprocess (&c.options, c.first_time);
-
-      /* test crypto? */
-      if (do_test_crypto (&c.options))
-	break;
-
-      /* misc stuff */
-      pre_setup (&c.options);
-
-      /* finish context init */
-      context_init_1 (&c);
-
+      /*
+       * This loop is initially executed on startup and then
+       * once per SIGHUP.
+       */
       do
 	{
-	  /* run tunnel depending on mode */
-	  switch (c.options.mode)
+	  /* zero context struct but leave first_time member alone */
+	  context_clear_all_except_first_time (&c);
+
+	  /* initialize garbage collector scoped to context object */
+	  gc_init (&c.gc);
+
+	  /* static signal info object */
+	  c.sig = &siginfo_static;
+
+	  /* initialize options to default state */
+	  init_options (&c.options);
+
+	  /* parse command line options, and read configuration file */
+	  parse_argv (&c.options, argc, argv);
+
+	  /* init verbosity and mute levels */
+	  init_verb_mute (&c.options);
+
+	  /* set dev options */
+	  init_options_dev (&c.options);
+
+	  /* openssl print info? */
+	  if (print_openssl_info (&c.options))
+	    break;
+
+	  /* --genkey mode? */
+	  if (do_genkey (&c.options))
+	    break;
+
+	  /* tun/tap persist command? */
+	  if (do_persist_tuntap (&c.options))
+	    break;
+
+	  /* sanity check on options */
+	  options_postprocess (&c.options, c.first_time);
+
+	  /* test crypto? */
+	  if (do_test_crypto (&c.options))
+	    break;
+
+	  /* misc stuff */
+	  pre_setup (&c.options);
+
+	  /* finish context init */
+	  context_init_1 (&c);
+
+	  do
 	    {
-	    case MODE_POINT_TO_POINT:
-	      tunnel_point_to_point (&c);
-	      break;
+	      /* run tunnel depending on mode */
+	      switch (c.options.mode)
+		{
+		case MODE_POINT_TO_POINT:
+		  tunnel_point_to_point (&c);
+		  break;
 #if P2MP
-	    case MODE_NONFORKING_UDP_SERVER:
-	      tunnel_nonforking_udp_server (&c);
-	      break;
+		case MODE_NONFORKING_UDP_SERVER:
+		  tunnel_nonforking_udp_server (&c);
+		  break;
 #endif
-	    default:
-	      ASSERT (0);
+		default:
+		  ASSERT (0);
+		}
+
+	      /* any signals received? */
+	      if (IS_SIG (&c))
+		print_signal (c.sig, NULL);
 	    }
+	  while (c.sig->signal_received == SIGUSR1);
 
-	  /* any signals received? */
-	  if (IS_SIG (&c))
-	    print_signal (c.sig, NULL);
+	  uninit_options (&c.options);
+	  gc_reset (&c.gc);
 	}
-      while (c.sig->signal_received == SIGUSR1);
-
-      uninit_options (&c.options);
-      gc_reset (&c.gc);
+      while (c.sig->signal_received == SIGHUP);
     }
-  while (c.sig->signal_received == SIGHUP);
 
   /* uninitialize program-wide statics */
   uninit_static ();

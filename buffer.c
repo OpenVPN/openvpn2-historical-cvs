@@ -45,7 +45,7 @@ alloc_buf (size_t size)
   buf.offset = 0;
   buf.len = 0;
   buf.data = (uint8_t *) malloc (size);
-  ASSERT (buf.data);
+  CHECK_MALLOC_RETURN (buf.data);
   if (size)
     *buf.data = 0;
   return buf;
@@ -72,7 +72,7 @@ clone_buf (const struct buffer* buf)
   ret.offset = buf->offset;
   ret.len = buf->len;
   ret.data = (uint8_t *) malloc (buf->capacity);
-  ASSERT (ret.data);
+  CHECK_MALLOC_RETURN (ret.data);
   memcpy (BPTR (&ret), BPTR (buf), BLEN (buf));
   return ret;
 }
@@ -202,11 +202,11 @@ buf_write_string_file (const struct buffer *buf, const char *filename, int fd)
 void *
 gc_malloc (size_t size, bool clear, struct gc_arena *a)
 {
-  struct gc_entry *e = (struct gc_entry *) malloc (size + sizeof (struct gc_entry));
+  struct gc_entry *e;
   void *ret;
 
-  ASSERT (a);
-  ASSERT (e);
+  e = (struct gc_entry *) malloc (size + sizeof (struct gc_entry));
+  CHECK_MALLOC_RETURN (e);
   ret = (char *) e + sizeof (struct gc_entry);
   if (clear)
     memset (ret, 0, size);
@@ -221,7 +221,6 @@ void
 x_gc_free (struct gc_arena *a)
 {
   struct gc_entry *e;
-  ASSERT (a);
   mutex_lock (L_GC_MALLOC);
   e = a->list;
   a->list = NULL;
@@ -299,26 +298,27 @@ chomp (char *str)
  * Allocate a string
  */
 char *
-string_alloc (const char *str)
+string_alloc (const char *str, struct gc_arena *gc)
 {
   if (str)
     {
       const int n = strlen (str) + 1;
-      char *ret = (char *) malloc (n);
+      char *ret;
+
+      if (gc)
+	{
+	  ret = (char *) gc_malloc (n, false, gc);
+	}
+      else
+	{
+	  ret = (char *) malloc (n);
+	  CHECK_MALLOC_RETURN (ret);
+	}
       memcpy (ret, str, n);
       return ret;
     }
   else
     return NULL;
-}
-
-/*
- * Fail memory allocation
- */
-void
-alloc_struct_out_of_mem (void)
-{
-  ASSERT (0);
 }
 
 /*

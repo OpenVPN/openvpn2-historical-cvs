@@ -28,5 +28,32 @@
 
 #if P2MP
 
+/*#define IFCONFIG_POOL_TEST*/
+
+#include "basic.h"
+
+#define IFCONFIG_POOL_MAX 65536
+
+struct ifconfig_pool
+{
+  in_addr_t base;
+  int size;
+  uint8_t *in_use;
+};
+
+typedef int ifconfig_pool_handle;
+
+struct ifconfig_pool *ifconfig_pool_init (in_addr_t start, in_addr_t end);
+
+void ifconfig_pool_free (struct ifconfig_pool *pool);
+
+ifconfig_pool_handle ifconfig_pool_acquire_30_net (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *remote);
+
+bool ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand);
+
+#ifdef IFCONFIG_POOL_TEST
+void ifconfig_pool_test (in_addr_t start, in_addr_t end);
+#endif
+
 #endif
 #endif

@@ -35,6 +35,8 @@
 #include "init.h"
 #include "sig.h"
 #include "occ.h"
+#include "schedule.h"
+#include "list.h"
 
 #include "memdbg.h"
 
@@ -123,11 +125,6 @@ init_static (void)
   error_reset ();		/* initialize error.c */
   reset_check_status ();	/* initialize status check code in socket.c */
 
-#ifdef PID_TEST
-  packet_id_interactive_test ();	/* test the sequence number code */
-  return true;
-#endif
-
 #ifdef WIN32
   init_win32 ();
 #endif
@@ -146,12 +143,27 @@ init_static (void)
   init_ssl_lib ();
 
   /* init PRNG used for IV generation */
-  /* JYFIXME -- copy this to more places in the code to avoid fork
-     predictability */
+  /* When forking, copy this to more places in the code to avoid fork
+     random-state predictability */
   prng_init ();
 #endif
 
+#ifdef PID_TEST
+  packet_id_interactive_test ();	/* test the sequence number code */
   return false;
+#endif
+
+#ifdef SCHEDULE_TEST
+  schedule_test ();
+  return false;
+#endif
+
+#ifdef LIST_TEST
+  list_test ();
+  return false;
+#endif
+
+  return true;
 }
 
 void
@@ -1314,7 +1326,7 @@ do_close_tuntap (struct context *c)
     {
       if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_tun))
 	{
-	  char *tuntap_actual = string_alloc (c->c1.tuntap.actual_name);
+	  char *tuntap_actual = string_alloc (c->c1.tuntap.actual_name, NULL);
 
 	  /* delete any routes we added */
 	  if (c->c1.route_list)
@@ -1623,7 +1635,7 @@ test_crypto_thread (void *arg)
     if (c->first_time && options->tls_thread)
       {
 	openvpn_thread_init ();
-	child = (struct context *) malloc (sizeof (struct context));
+	ALLOC_OBJ (child, struct context);
 	context_clear (child);
 	child->options = *options;
 	context_gc_detach (child, true);

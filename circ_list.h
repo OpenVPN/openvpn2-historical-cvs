@@ -67,7 +67,7 @@ struct name { \
 { \
   const int so = sizeof (list_type) + sizeof ((dest)->x_list[0]) * (size); \
   (dest) = (list_type *) malloc (so); \
-  ASSERT (dest); \
+  CHECK_MALLOC_RETURN (dest); \
   memset ((dest), 0, so); \
   (dest)->x_cap = size; \
   (dest)->x_sizeof = so; \

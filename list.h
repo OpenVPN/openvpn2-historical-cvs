@@ -28,5 +28,82 @@
 
 #if P2MP
 
+/* define this to enable special list test mode */
+/*#define LIST_TEST*/
+
+#include "basic.h"
+
+#define hashsize(n) ((uint32_t)1<<(n))
+#define hashmask(n) (hashsize(n)-1)
+
+struct hash_element
+{
+  void *value;
+  const void *key;
+  unsigned int hash_value;
+  struct hash_element *next;
+};
+
+struct hash_bucket
+{
+  struct hash_element *list;
+};
+
+struct hash
+{
+  int n_buckets;
+  int n_elements;
+  bool auto_grow; /* not implemented yet */
+  uint32_t iv;
+  uint32_t (*hash_function)(const void *key, uint32_t iv);
+  bool (*compare_function)(const void *key1, const void *key2); /* return true if equal */
+  struct hash_bucket *buckets;
+};
+
+struct hash_iterator
+{
+  struct hash *hash;
+  int bucket_index;
+  struct hash_element *elem;
+};
+
+struct hash *hash_init (int n_buckets,
+			bool auto_grow,
+			uint32_t (*hash_function)(const void *key, uint32_t iv),
+			bool (*compare_function)(const void *key1, const void *key2));
+
+void hash_free (struct hash *hash);
+
+void *hash_lookup_fast (struct hash *hash, const void *key, uint32_t hv);
+bool hash_remove (struct hash *hash, const void *key);
+bool hash_add (struct hash *hash, const void *key, void *value);
+
+void hash_iterator_init (struct hash *hash, struct hash_iterator *iter);
+void *hash_iterator_next (struct hash_iterator *hi);
+
+uint32_t hash_func (const uint8_t *k, uint32_t length, uint32_t initval);
+
+#ifdef LIST_TEST
+void list_test (void);
+#endif
+
+static inline int
+hash_n_elements (const struct hash *hash)
+{
+  return hash->n_elements;
+}
+
+static inline uint32_t
+hash_value (const struct hash *hash, const void *key)
+{
+  return (*hash->hash_function)(key, hash->iv);
+}
+
+static inline void *
+hash_lookup (struct hash *hash, const void *key)
+{
+  return hash_lookup_fast (hash, key, hash_value (hash, key));
+}
+
 #endif /* P2MP */
 #endif /* LIST */

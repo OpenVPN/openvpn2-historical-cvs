@@ -30,15 +30,24 @@
 
 #include "openvpn.h"
 #include "mroute.h"
-
-/* Maximum number of clients */
-#define MULTI_N_INSTANCE 10
+#include "list.h"
+#include "schedule.h"
+#include "pool.h"
 
 struct multi_instance {
+  struct schedule_entry se;    /* this must be the first element of the structure */
   bool defined;
-  struct timeval wakeup; /* absolute time */
+  struct timeval wakeup;       /* absolute time */
   struct mroute_list real;
   struct mroute_list virtual;
+  ifconfig_pool_handle vaddr_handle;
+
+  bool did_routes;
+  bool did_ifconfig;
+  bool did_open_context;
+  bool did_real_hash;
+  bool did_virtual_hash;
+
   struct context context;
 };
 
@@ -46,7 +55,10 @@ struct multi_context {
   struct multi_instance *link_out;
   struct multi_instance *tun_out;
   struct multi_instance *earliest_wakeup;
-  struct multi_instance *array;
+  struct hash *hash;   /* indexed by real address */
+  struct hash *vhash;  /* indexed by virtual address */
+  struct schedule *schedule;
+  struct ifconfig_pool *ifconfig_pool;
 };
 
 void multi_init (struct multi_context *m, struct context *t);

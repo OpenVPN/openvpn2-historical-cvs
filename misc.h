@@ -114,7 +114,7 @@ const char *system_error_message (int, struct gc_arena *gc);
 bool system_check (const char* command, const char* error_message, bool fatal);
 
 /* format a time_t as ascii, or use current time if 0 */
-const char* time_string (time_t t, bool show_usec, struct gc_arena *gc);
+const char* time_string (time_t t, int usec, bool show_usec, struct gc_arena *gc);
 
 #ifdef HAVE_STRERROR
 /* a thread-safe version of strerror */

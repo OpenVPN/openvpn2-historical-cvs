@@ -733,7 +733,7 @@ tuntap_inherit_passive (struct tuntap *dest, const struct tuntap *src)
 static void
 open_null (struct tuntap *tt)
 {
-  tt->actual_name = string_alloc ("null");
+  tt->actual_name = string_alloc ("null", NULL);
 }
 
 #ifndef WIN32
@@ -807,7 +807,7 @@ open_tun_generic (const char *dev, const char *dev_type, const char *dev_node,
       msg (M_INFO, "TUN/TAP device %s opened", tunname);
 
       /* tt->actual_name is passed to up and down scripts and used as the ifconfig dev name */
-      tt->actual_name = string_alloc (dynamic_opened ? dynamic_name : dev);
+      tt->actual_name = string_alloc (dynamic_opened ? dynamic_name : dev, NULL);
     }
 }
 
@@ -915,7 +915,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
       set_nonblock (tt->fd);
       set_cloexec (tt->fd);
       msg (M_INFO, "TUN/TAP device %s opened", ifr.ifr_name);
-      tt->actual_name = string_alloc (ifr.ifr_name);
+      tt->actual_name = string_alloc (ifr.ifr_name, NULL);
     }
   return;
 
@@ -1099,7 +1099,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   close (if_fd);
 
   tt->actual_name = (char *) malloc (32);
-  ASSERT (tt->actual_name);
+  CHECK_MALLOC_RETURN (tt->actual_name);
 
   openvpn_snprintf (tt->actual_name, 32, "%s%d", dev_tuntap_type, ppa);
 
@@ -1951,7 +1951,6 @@ get_adapt_info (DWORD index)
       else
 	{
 	  PIP_ADAPTER_INFO pi = (PIP_ADAPTER_INFO) gc_malloc (size, false, &gc);
-	  ASSERT (pi);
 	  if ((status = GetAdaptersInfo (pi, &size)) != NO_ERROR)
 	    {
 	      msg (M_INFO, "GetAdaptersInfo #2 failed [%u] (status=%u) : %s",
@@ -2167,7 +2166,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
     /* translate high-level device name into a device instance
        GUID using the registry */
     device_guid = get_device_guid (dev_node, guid_buffer, sizeof (guid_buffer), op, &gc);
-    tt->actual_name = string_alloc (guid_buffer);
+    tt->actual_name = string_alloc (guid_buffer, NULL);
   }
 
   /*

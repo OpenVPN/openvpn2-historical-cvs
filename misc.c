@@ -492,7 +492,6 @@ system_check (const char* command, const char* error_message, bool fatal)
 void
 init_random_seed(void)
 {
-#ifndef USE_CRYPTO
 #ifdef HAVE_GETTIMEOFDAY
   struct timeval tv;
 
@@ -505,13 +504,12 @@ init_random_seed(void)
   const time_t current = time (NULL);
   srandom ((unsigned int)current);
 #endif /* HAVE_GETTIMEOFDAY */
-#endif /* USE_CRYPTO */
 }
 
 /* format a time_t as ascii, or use current time if 0 */
 
 const char *
-time_string (time_t t, bool show_usec, struct gc_arena *gc)
+time_string (time_t t, int usec, bool show_usec, struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (64, gc);
   struct timeval tv;
@@ -519,7 +517,7 @@ time_string (time_t t, bool show_usec, struct gc_arena *gc)
   if (t)
     {
       tv.tv_sec = t;
-      tv.tv_usec = 0;
+      tv.tv_usec = usec;
     }
   else
     {
@@ -619,10 +617,10 @@ remove_env (char *str)
 static void
 add_env (char *str)
 {
-  struct env_item *item = (struct env_item *) malloc (sizeof (struct env_item));
-  
-  ASSERT (item);
+  struct env_item *item;
+
   ASSERT (str);
+  ALLOC_OBJ (item, struct env_item);
 
   item->string = str;
   item->next = global_env;

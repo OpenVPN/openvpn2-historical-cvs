@@ -243,13 +243,13 @@ void x_msg (unsigned int flags, const char *format, ...)
 	{
 #ifdef USE_PTHREAD
 	  fprintf (fp, "%s %d[%d]: %s\n",
-		   time_string (0, show_usec, &gc),
+		   time_string (0, 0, show_usec, &gc),
 		   x_msg_line_num,
 		   (int) openvpn_thread_self (),
 		   m1);
 #else
 	  fprintf (fp, "%s %d: %s\n",
-		   time_string (0, show_usec, &gc),
+		   time_string (0, 0, show_usec, &gc),
 		   x_msg_line_num,
 		   m1);
 #endif
@@ -277,6 +277,17 @@ void
 assert_failed (const char *filename, int line)
 {
   msg (M_FATAL, "Assertion failed at %s:%d", filename, line);
+}
+
+/*
+ * Fail memory allocation.  Don't use msg() because it tries
+ * to allocate memory as part of its operation.
+ */
+void
+out_of_memory (void)
+{
+  fprintf (stderr, "OpenVPN: Out of Memory\n");
+  openvpn_exit (OPENVPN_EXIT_STATUS_ERROR);
 }
 
 void

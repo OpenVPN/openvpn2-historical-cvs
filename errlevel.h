@@ -73,6 +73,7 @@
 #define D_DHCP_OPT           LOGLEV(4, 47, 0)        /* show DHCP options binary string */
 #define D_MULTI              LOGLEV(4, 48, 0)        /* show point-to-multipoint info */
 #define D_PUSH               LOGLEV(4, 49, 0)        /* show push/pull info */
+#define D_IFCONFIG_POOL      LOGLEV(4, 50, 0)        /* show ifconfig pool info */
 
 #define D_LOG_RW             LOGLEV(5, 0,  0)        /* Print 'R' or 'W' to stdout for read/write */
 
@@ -91,6 +92,7 @@
 #define D_HANDSHAKE_VERBOSE  LOGLEV(8, 70, M_DEBUG)  /* show detailed description of each handshake */
 #define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* limited info from tls_session routines */
 #define D_INTERVAL           LOGLEV(8, 70, M_DEBUG)  /* show interval.h debugging info */
+#define D_SCHEDULER          LOGLEV(8, 70, M_DEBUG)  /* show scheduler debugging info */
 #define D_GREMLIN_VERBOSE    LOGLEV(8, 70, M_DEBUG)  /* show verbose info from gremlin module */
 #define D_REL_DEBUG          LOGLEV(8, 70, M_DEBUG)  /* show detailed info from reliable routines */
 

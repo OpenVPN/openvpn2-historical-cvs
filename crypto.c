@@ -562,12 +562,12 @@ init_key_ctx (struct key_ctx *ctx, struct key *key,
   CLEAR (*ctx);
   if (kt->cipher && kt->cipher_length > 0)
     {
-      ASSERT (ctx->cipher = (EVP_CIPHER_CTX *) malloc (sizeof (EVP_CIPHER_CTX)));
+      ALLOC_OBJ (ctx->cipher, EVP_CIPHER_CTX);
       init_cipher (ctx->cipher, kt->cipher, key, kt, enc, prefix);
     }
   if (kt->digest && kt->hmac_length > 0)
     {
-      ASSERT (ctx->hmac = (HMAC_CTX *) malloc (sizeof (HMAC_CTX)));
+      ALLOC_OBJ (ctx->hmac, HMAC_CTX);
       init_hmac (ctx->hmac, kt->digest, key, kt, prefix);
     }
 }

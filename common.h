@@ -52,5 +52,6 @@ typedef int interval_t;
 /* these are used to cast the arguments
  * and MUST match the formats above */
 typedef unsigned long time_type;
+typedef size_t pointer_type;
 
 #endif

@@ -65,7 +65,7 @@ struct buffer alloc_buf_gc (size_t size, struct gc_arena *gc); /* allocate buffe
 struct buffer clear_buf (void);
 void free_buf (struct buffer *buf);
 
-char *string_alloc (const char *str);
+char *string_alloc (const char *str, struct gc_arena *gc);
 
 /* inline functions */
 
@@ -510,14 +510,43 @@ gc_reset (struct gc_arena *a)
  * Allocate memory to hold a structure
  */
 
-void alloc_struct_out_of_mem (void);
+void out_of_memory (void);
 
-#define ALLOC_STRUCT(dptr, type, clear) \
+#define CHECK_MALLOC_RETURN(p) \
 { \
-  if (!((dptr) = (type *) malloc (sizeof (type)))) \
-    alloc_struct_out_of_mem (); \
-  if (clear) \
-    memset ((dptr), 0, sizeof(type)); \
+  if ((p) == NULL) out_of_memory (); \
+}
+
+#define ALLOC_OBJ(dptr, type) \
+{ \
+  CHECK_MALLOC_RETURN ((dptr) = (type *) malloc (sizeof (type))); \
+}
+
+#define ALLOC_OBJ_CLEAR(dptr, type) \
+{ \
+  ALLOC_OBJ (dptr, type); \
+  memset ((dptr), 0, sizeof(type)); \
+}
+
+#define ALLOC_ARRAY(dptr, type, n) \
+{ \
+  CHECK_MALLOC_RETURN ((dptr) = (type *) malloc (sizeof (type) * (n))); \
+}
+
+#define ALLOC_ARRAY_CLEAR(dptr, type, n) \
+{ \
+  ALLOC_ARRAY (dptr, type, n); \
+  memset ((dptr), 0, (sizeof(type) * (n))); \
+}
+
+#define ALLOC_OBJ_GC(dptr, type, gc) \
+{ \
+  (dptr) = (type *) gc_malloc (sizeof (type), false, (gc)); \
+}
+
+#define ALLOC_OBJ_CLEAR_GC(dptr, type, gc) \
+{ \
+  (dptr) = (type *) gc_malloc (sizeof (type), true, (gc)); \
 }
 
 #endif /* BUFFER_H */

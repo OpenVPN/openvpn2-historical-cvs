@@ -245,7 +245,9 @@ new_http_proxy (const char *server,
 		const char *auth_file,
 		struct gc_arena *gc)
 {
-  struct http_proxy_info *p = (struct http_proxy_info *) gc_malloc (sizeof (struct http_proxy_info), true, gc);
+  struct http_proxy_info *p;
+  ALLOC_OBJ_CLEAR_GC (p, struct http_proxy_info, gc);
+
   ASSERT (server);
   ASSERT (legal_ipv4_port (port));
 

@@ -42,23 +42,24 @@
 /* struct timeval functions */
 
 const char *tv_string (const struct timeval *tv, struct gc_arena *gc);
+const char *tv_string_abs (const struct timeval *tv, struct gc_arena *gc);
 
 static inline bool
 tv_defined (const struct timeval *tv)
 {
-  return tv->tv_sec > 0;
+  return tv->tv_sec > 0 && tv->tv_usec > 0;
 }
 
 /* return tv1 - tv2 in usec, constrained by max_seconds */
 static inline int
-tv_subtract (const struct timeval *tv1, const struct timeval *tv2, bool max_seconds)
+tv_subtract (const struct timeval *tv1, const struct timeval *tv2, const unsigned int max_seconds)
 {
   const int max_usec = max_seconds * 1000000;
   const int sec_diff = tv1->tv_sec - tv2->tv_sec;
 
-  if (sec_diff > (max_seconds + 10))
+  if (sec_diff > ((int)max_seconds + 10))
     return max_usec;
-  else if (sec_diff < -(max_seconds + 10))
+  else if (sec_diff < -((int)max_seconds + 10))
     return -max_usec;
   return constrain_int (sec_diff * 1000000 + (tv1->tv_usec - tv2->tv_usec), -max_usec, max_usec);
 }
@@ -97,6 +98,45 @@ tv_lt (const struct timeval *t1, const struct timeval *t2)
     return t1->tv_usec < t2->tv_usec;
 }
 
+static inline bool
+tv_le (const struct timeval *t1, const struct timeval *t2)
+{
+  if (t1->tv_sec < t2->tv_sec)
+    return true;
+  else if (t1->tv_sec > t2->tv_sec)
+    return false;
+  else
+    return t1->tv_usec <= t2->tv_usec;
+}
+
+static inline bool
+tv_ge (const struct timeval *t1, const struct timeval *t2)
+{
+  if (t1->tv_sec > t2->tv_sec)
+    return true;
+  else if (t1->tv_sec < t2->tv_sec)
+    return false;
+  else
+    return t1->tv_usec >= t2->tv_usec;
+}
+
+static inline bool
+tv_gt (const struct timeval *t1, const struct timeval *t2)
+{
+  if (t1->tv_sec > t2->tv_sec)
+    return true;
+  else if (t1->tv_sec < t2->tv_sec)
+    return false;
+  else
+    return t1->tv_usec > t2->tv_usec;
+}
+
+static inline bool
+tv_eq (const struct timeval *t1, const struct timeval *t2)
+{
+  return t1->tv_sec == t2->tv_sec && t1->tv_usec == t2->tv_usec;
+}
+
 static inline void
 tv_delta (struct timeval *dest, const struct timeval *t1, const struct timeval *t2)
 {
@@ -114,6 +154,19 @@ tv_delta (struct timeval *dest, const struct timeval *t1, const struct timeval *
 
   dest->tv_sec = sec;
   dest->tv_usec = usec;
+}
+
+#define TV_WITHIN_SIGMA_MAX_SEC 600
+#define TV_WITHIN_SIGMA_MAX_USEC (TV_WITHIN_SIGMA_MAX_SEC * 1000000)
+
+/*
+ * Is t1 and t2 within sigma microseconds of each other?
+ */
+static inline bool
+tv_within_sigma (const struct timeval *t1, const struct timeval *t2, unsigned int sigma)
+{
+  const int delta = tv_subtract (t1, t2, TV_WITHIN_SIGMA_MAX_SEC); /* sigma should be less than 10 minutes */
+  return -(int)sigma <= delta && delta <= (int)sigma;
 }
 
 /*

@@ -1,7 +1,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.85 2003/07/06 21:20:23 jimyonan Exp $
+$Id: ChangeLog,v 1.86 2003/07/06 22:38:00 jimyonan Exp $
 
 Upcoming Version 1.4.2
 
@@ -32,7 +32,7 @@ Upcoming Version 1.4.2
   of OpenVPN when built by compilers that
   lack ISO C99 vararg macros (1.4.1.6).
 * Created an init script for Gentoo Linux
-  in sample-scripts directory (1.4.1.6).
+  in ./gentoo directory (1.4.1.6).
 
 2003.05.15 -- Version 1.4.1
 

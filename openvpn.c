@@ -37,6 +37,8 @@
 
 #include "memdbg.h"
 
+#include "forward-inline.h"
+
 static void
 tunnel_point_to_point (struct context *c)
 {
@@ -58,15 +60,17 @@ tunnel_point_to_point (struct context *c)
       if (IS_SIG (c))
 	break;
 
-      /* set up and do the select() */
-      single_select (c);
+      /* set up and do the I/O wait */
+      io_wait (c, p2p_iow_flags (c));
 
       /* process signals */
       if (IS_SIG (c))
 	{
 	  if (c->sig->signal_received == SIGUSR2)
 	    {
-	      print_status (c);
+	      struct status_output *so = status_open (NULL, 0, M_INFO);
+	      print_status (c, so);
+	      status_close (so);
 	      c->sig->signal_received = 0;
 	      continue;
 	    }
@@ -74,7 +78,7 @@ tunnel_point_to_point (struct context *c)
 	}
 
       /* timeout? */
-      if (!c->c2.select_status)
+      if (c->c2.event_set_status == ES_TIMEOUT)
 	continue;
 
       /* process the I/O which triggered select */

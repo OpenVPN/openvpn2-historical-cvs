@@ -46,6 +46,7 @@
 extern const char title_string[];
 
 #if P2MP
+
 /* parameters to be pushed to peer */
 
 #define MAX_PUSH_LIST_LEN 1024 /* This parm is related to PLAINTEXT_BUFFER_SIZE in ssl.h */
@@ -53,6 +54,16 @@ extern const char title_string[];
 struct push_list {
   /* newline delimited options, like config file */
   char options[MAX_PUSH_LIST_LEN];
+};
+
+/* certain options are saved before --pull modifications are applied */
+struct options_pre_pull
+{
+  bool tuntap_options_defined;
+  struct tuntap_options tuntap_options;
+
+  bool routes_defined;
+  struct route_option_list routes;
 };
 
 #endif
@@ -169,6 +180,9 @@ struct options
   int mute;
   bool gremlin;
 
+  const char *status_file;
+  int status_file_update_freq;
+
 #ifdef USE_LZO
   bool comp_lzo;
   bool comp_lzo_adaptive;
@@ -209,6 +223,7 @@ struct options
 #if P2MP
   struct push_list *push_list;
   bool pull; /* client pull of config options from server */
+  struct options_pre_pull *pre_pull;
   bool ifconfig_pool_defined;
   in_addr_t ifconfig_pool_start;
   in_addr_t ifconfig_pool_end;
@@ -316,6 +331,12 @@ struct options
 #define PULL_DEFINED(opt) (false)
 #endif
 
+#ifdef HAVE_GETTIMEOFDAY
+#define SHAPER_DEFINED(opt) ((opt)->shaper)
+#else
+#define SHAPER_DEFINED(opt) (false)
+#endif
+
 void parse_argv (struct options* options,
 		 int argc,
 		 char *argv[],
@@ -349,6 +370,9 @@ void options_warning (char *actual, const char *expected, size_t actual_n);
 
 void options_postprocess (struct options *options, bool first_time);
 
+void pre_pull_save (struct options *o);
+void pre_pull_restore (struct options *o);
+
 bool apply_push_options (struct options *options,
 			 struct buffer *buf,
 			 unsigned int permission_mask,
@@ -364,4 +388,5 @@ void options_server_import (struct options *o,
 			    unsigned int permission_mask,
 			    unsigned int *option_types_found);
 
+void pre_pull_default (struct options *o);
 #endif

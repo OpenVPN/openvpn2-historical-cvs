@@ -239,12 +239,12 @@ lzo_decompress (struct buffer *buf, struct buffer work,
 /*
  * Print statistics
  */
-void lzo_print_stats (const struct lzo_compress_workspace *lzo_compwork)
+void lzo_print_stats (const struct lzo_compress_workspace *lzo_compwork, struct status_output *so)
 {
-  msg (M_INFO, " pre-compress bytes:   " counter_format, lzo_compwork->pre_compress);
-  msg (M_INFO, " post-compress bytes:  " counter_format, lzo_compwork->post_compress);
-  msg (M_INFO, " pre-decompress bytes: " counter_format, lzo_compwork->pre_decompress);
-  msg (M_INFO, " post-decompress bytes:" counter_format, lzo_compwork->post_decompress);
+  status_printf (so, "pre-compress bytes," counter_format, lzo_compwork->pre_compress);
+  status_printf (so, "post-compress bytes," counter_format, lzo_compwork->post_compress);
+  status_printf (so, "pre-decompress bytes," counter_format, lzo_compwork->pre_decompress);
+  status_printf (so, "post-decompress bytes," counter_format, lzo_compwork->post_decompress);
 }
 
 #else

@@ -49,7 +49,8 @@ HEADERS = basic.h buffer.h circ_list.h common.h \
 	  ping-inline.h ping.h pool.h \
           proto.h proxy.h push.h reliable.h \
 	  route.h schedule.h session_id.h \
-          shaper.h sig.h socket.h socks.h ssl.h syshead.h \
+          shaper.h sig.h socket.h socks.h ssl.h \
+          status.h syshead.h \
           thread.h tun.h win32.h
 
 OBJS =  buffer.o crypto.o error.o event.o fdmisc.o forward.o \
@@ -59,7 +60,8 @@ OBJS =  buffer.o crypto.o error.o event.o fdmisc.o forward.o \
         openvpn.o options.o otime.o packet_id.o ping.o \
         pool.o proxy.o push.o reliable.o \
         route.o schedule.o session_id.o shaper.o sig.o socket.o \
-        socks.o ssl.o thread.o tun.o win32.o
+        socks.o ssl.o status.o \
+	thread.o tun.o win32.o
 
 dynamic : ${OBJS}
 	${CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl32 -leay32 ${LIBS}

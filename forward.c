@@ -43,26 +43,26 @@
 #include "occ-inline.h"
 #include "ping-inline.h"
 
-/* show pre-select debugging info */
+/* show event wait debugging info */
 
 const char *
-select_status_string (struct context *c, struct gc_arena *gc)
+wait_status_string (struct context *c, struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (64, gc);
-  buf_printf (&out, "SELECT %s|%s|%s|%s %d/%d",
-	      TUNTAP_READ_STAT (&c->c2.event_wait, c->c1.tuntap, gc),
-	      TUNTAP_WRITE_STAT (&c->c2.event_wait, c->c1.tuntap, gc),
-	      SOCKET_READ_STAT (&c->c2.event_wait, c->c2.link_socket, gc),
-	      SOCKET_WRITE_STAT (&c->c2.event_wait, c->c2.link_socket, gc),
-	      (int) c->c2.timeval.tv_sec, (int) c->c2.timeval.tv_usec);
+  buf_printf (&out, "I/O WAIT %s|%s|%s|%s %s",
+	      tun_stat (c->c1.tuntap, EVENT_READ, gc),
+	      tun_stat (c->c1.tuntap, EVENT_WRITE, gc),
+	      socket_stat (c->c2.link_socket, EVENT_READ, gc),
+	      socket_stat (c->c2.link_socket, EVENT_WRITE, gc),
+	      tv_string (&c->c2.timeval, gc));
   return BSTR (&out);
 }
 
 void
-show_select_status (struct context *c)
+show_wait_status (struct context *c)
 {
   struct gc_arena gc = gc_new ();
-  msg (D_SELECT, "%s", select_status_string (c, &gc));
+  msg (D_EVENT_WAIT, "%s", wait_status_string (c, &gc));
   gc_free (&gc);
 }
 
@@ -175,7 +175,7 @@ check_push_request_dowork (struct context *c)
 void
 check_connection_established_dowork (struct context *c)
 {
-  if (event_timeout_trigger (&c->c2.wait_for_connect, &c->c2.timeval))
+  if (event_timeout_trigger (&c->c2.wait_for_connect, &c->c2.timeval, ETT_DEFAULT))
     {
       if (CONNECTION_ESTABLISHED (c))
 	{
@@ -185,8 +185,8 @@ check_connection_established_dowork (struct context *c)
 	    {
 	      send_push_request (c);
 
-	      /* if no reply, try again in 3 sec */
-	      event_timeout_init (&c->c2.push_request_interval, 3, now);
+	      /* if no reply, try again in 5 sec */
+	      event_timeout_init (&c->c2.push_request_interval, 5, now);
 	      reset_coarse_timers (c);
 	    }
 	  else
@@ -246,6 +246,16 @@ check_inactivity_timeout_dowork (struct context *c)
   c->sig->signal_received = SIGTERM;
   c->sig->signal_text = "inactive";
   gc_free (&gc);
+}
+
+/*
+ * Should we write timer-triggered status file.
+ */
+void
+check_status_file_dowork (struct context *c)
+{
+  if (c->c1.status_output)
+    print_status (c, c->c1.status_output);
 }
 
 /*
@@ -345,6 +355,9 @@ process_coarse_timers (struct context *c)
      seconds if --replay-persist was specified */
   check_packet_id_persist_flush (c);
 #endif
+
+  /* should we update status file? */
+  check_status_file (c);
 
   /* process connection establishment items */
   check_connection_established (c);
@@ -971,71 +984,103 @@ pre_select (struct context *c)
   check_timeout_random_component (c);
 }
 
+/*
+ * Wait for I/O events.  Used for both TCP & UDP sockets
+ * in point-to-point mode and for UDP sockets in
+ * point-to-multipoint mode.
+ */
+
 void
-single_select (struct context *c)
+io_wait (struct context *c,
+	 unsigned int flags)
 {
+  unsigned int socket = 0;
+  unsigned int tuntap = 0;
+  struct event_set_return esr[3];
+
+  /* These shifts all depend on EVENT_READ and EVENT_WRITE */
+  static const int socket_shift = 0; /* depends on SOCKET_READ and SOCKET_WRITE */
+  static const int tun_shift = 2;    /* depends on TUN_READ and TUN_WRITE */
+  static const int err_shift = 4;    /* depends on ES_ERROR */
+
   /*
-   * Set up for select call.
-   *
    * Decide what kind of events we want to wait for.
    */
-  wait_reset (&c->c2.event_wait);
+  event_reset (c->c2.event_set);
 
   /*
    * On win32 we use the keyboard or an event object as a source
    * of asynchronous signals.
    */
-  WAIT_SIGNAL (&c->c2.event_wait);
+  wait_signal (c->c2.event_set, (void*)&err_shift);
 
   /*
    * If outgoing data (for TCP/UDP port) pending, wait for ready-to-send
    * status from TCP/UDP port. Otherwise, wait for incoming data on
    * TUN/TAP device.
    */
-  if (c->c2.to_link.len > 0)
+  if (flags & IOW_TO_LINK)
     {
-      /*
-       * If sending this packet would put us over our traffic shaping
-       * quota, don't send -- instead compute the delay we must wait
-       * until it will be OK to send the packet.
-       */
-
-#ifdef HAVE_GETTIMEOFDAY
-      int delay = 0;
-
-      /* set traffic shaping delay in microseconds */
-      if (c->options.shaper)
-	delay = max_int (delay, shaper_delay (&c->c2.shaper));
-
-      if (delay < 1000)
+      if (flags & IOW_SHAPER)
 	{
-	  SOCKET_SET_WRITE (&c->c2.event_wait, c->c2.link_socket);
+	  /*
+	   * If sending this packet would put us over our traffic shaping
+	   * quota, don't send -- instead compute the delay we must wait
+	   * until it will be OK to send the packet.
+	   */
+#ifdef HAVE_GETTIMEOFDAY
+	  int delay = 0;
+
+	  /* set traffic shaping delay in microseconds */
+	  if (c->options.shaper)
+	    delay = max_int (delay, shaper_delay (&c->c2.shaper));
+	  
+	  if (delay < 1000)
+	    {
+	      socket |= EVENT_WRITE;
+	    }
+	  else
+	    {
+	      shaper_soonest_event (&c->c2.timeval, delay);
+	    }
+#else /* HAVE_GETTIMEOFDAY */
+	  socket |= EVENT_WRITE;
+#endif /* HAVE_GETTIMEOFDAY */
 	}
       else
 	{
-	  shaper_soonest_event (&c->c2.timeval, delay);
+	  socket |= EVENT_WRITE;
 	}
-#else /* HAVE_GETTIMEOFDAY */
-      SOCKET_SET_WRITE (&c->c2.event_wait, c->c2.link_socket);
-#endif /* HAVE_GETTIMEOFDAY */
     }
-  else if (!c->c2.fragment || !fragment_outgoing_defined (c->c2.fragment))
+  else if (!(flags & IOW_FRAG) || !c->c2.fragment || !fragment_outgoing_defined (c->c2.fragment))
     {
-      TUNTAP_SET_READ (&c->c2.event_wait, c->c1.tuntap);
+      tuntap |= EVENT_READ;
     }
+
+  /*
+   * outgoing bcast buffer waiting to be sent?
+   */
+  if (flags & IOW_MBUF)
+    socket |= EVENT_WRITE;
 
   /*
    * If outgoing data (for TUN/TAP device) pending, wait for ready-to-send status
    * from device.  Otherwise, wait for incoming data on TCP/UDP port.
    */
-  if (c->c2.to_tun.len > 0)
+  if (flags & IOW_TO_TUN)
     {
-      TUNTAP_SET_WRITE (&c->c2.event_wait, c->c1.tuntap);
+      tuntap |= EVENT_WRITE;
     }
   else
     {
-      SOCKET_SET_READ (&c->c2.event_wait, c->c2.link_socket);
+      socket |= EVENT_READ;
     }
+
+  /*
+   * Configure event wait based on socket, tuntap flags.
+   */
+  socket_set (c->c2.link_socket, c->c2.event_set, socket, (void*)&socket_shift);
+  tun_set (c->c1.tuntap, c->c2.event_set, tuntap, (void*)&tun_shift);
 
   /*
    * Possible scenarios:
@@ -1043,61 +1088,86 @@ single_select (struct context *c)
    *  (2) tcp/udp port is ready to accept more data to write
    *  (3) tun dev has data available to read
    *  (4) tun dev is ready to accept more data to write
-   *  (5) tls background thread has data available to forward to
-   *      tcp/udp port
-   *  (6) we received a signal (handler sets signal_received)
-   *  (7) timeout (tv) expired (from TLS, shaper, inactivity
-   *      timeout, or ping timeout)
+   *  (5) we received a signal (handler sets signal_received)
+   *  (6) timeout (tv) expired
    */
 
-  /*
-   * Wait for something to happen.
-   */
-  c->c2.select_status = 1;	/* this will be our return "status" if select doesn't get called */
-  if (!c->sig->signal_received && !SOCKET_READ_RESIDUAL (c->c2.link_socket))
+  c->c2.event_set_status = ES_ERROR;
+
+  if (!c->sig->signal_received)
     {
-      if (check_debug_level (D_SELECT))
-	show_select_status (c);
+      if (!(flags & IOW_CHECK_RESIDUAL) || !socket_read_residual (c->c2.link_socket))
+	{
+	  int status;
 
-      c->c2.select_status = SELECT (&c->c2.event_wait, &c->c2.timeval);
-      check_status (c->c2.select_status, "select", NULL, NULL);
+	  if (check_debug_level (D_EVENT_WAIT))
+	    show_wait_status (c);
+
+	  /*
+	   * Wait for something to happen.
+	   */
+	  status = event_wait (c->c2.event_set, &c->c2.timeval, esr, SIZE(esr));
+
+	  check_status (status, "event_wait", NULL, NULL);
+
+	  if (status > 0)
+	    {
+	      int i;
+	      c->c2.event_set_status = 0;
+	      for (i = 0; i < status; ++i)
+		{
+		  const struct event_set_return *e = &esr[i];
+		  c->c2.event_set_status |= ((e->rwflags & 3) << *((int*)e->arg));
+		}
+	    }
+	  else if (status == 0)
+	    {
+	      c->c2.event_set_status = ES_TIMEOUT;
+	    }
+	}
+      else
+	{
+	  c->c2.event_set_status = SOCKET_READ;
+	}
     }
 
   /* 'now' should always be a reasonably up-to-date timestamp */
   update_time ();
 
   /* set signal_received if a signal was received */
-  SELECT_SIGNAL_RECEIVED (&c->c2.event_wait, c->sig->signal_received);
+  if (c->c2.event_set_status & ES_ERROR)
+    get_signal (&c->sig->signal_received);
+
+  msg (D_EVENT_WAIT, "I/O WAIT status=0x%04x", c->c2.event_set_status);
 }
 
 void
 process_io (struct context *c)
 {
-  if (c->c2.select_status > 0)
+  const unsigned int status = c->c2.event_set_status;
+
+  /* TCP/UDP port ready to accept write */
+  if (status & SOCKET_WRITE)
     {
-      /* TCP/UDP port ready to accept write */
-      if (SOCKET_ISSET (&c->c2.event_wait, c->c2.link_socket, writes))
-	{
-	  process_outgoing_link (c);
-	}
-      /* TUN device ready to accept write */
-      else if (TUNTAP_ISSET (&c->c2.event_wait, c->c1.tuntap, writes))
-	{
-	  process_outgoing_tun (c);
-	}
-      /* Incoming data on TCP/UDP port */
-      else if (SOCKET_READ_RESIDUAL (c->c2.link_socket) || SOCKET_ISSET (&c->c2.event_wait, c->c2.link_socket, reads))
-	{
-	  read_incoming_link (c);
-	  if (!IS_SIG (c))
-	    process_incoming_link (c);
-	}
-      /* Incoming data on TUN device */
-      else if (TUNTAP_ISSET (&c->c2.event_wait, c->c1.tuntap, reads))
-	{
-	  read_incoming_tun (c);
-	  if (!IS_SIG (c))
-	    process_incoming_tun (c);
-	}
+      process_outgoing_link (c);
+    }
+  /* TUN device ready to accept write */
+  else if (status & TUN_WRITE)
+    {
+      process_outgoing_tun (c);
+    }
+  /* Incoming data on TCP/UDP port */
+  else if (status & SOCKET_READ)
+    {
+      read_incoming_link (c);
+      if (!IS_SIG (c))
+	process_incoming_link (c);
+    }
+  /* Incoming data on TUN device */
+  else if (status & TUN_READ)
+    {
+      read_incoming_tun (c);
+      if (!IS_SIG (c))
+	process_incoming_tun (c);
     }
 }

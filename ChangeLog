@@ -1,7 +1,46 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.30 2004/05/15 04:56:36 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.31 2004/06/06 01:19:52 jimyonan Exp $
+
+2004.06.05 -- Version 2.0-beta3
+
+* More changes to TAP-Win32 driver's INF file which
+  affects the placement of the driver in the Windows
+  device namespace.  This is done to work around an
+  apparent bug in Windows when short HWIDs are used,
+  and will also ease the upgrade from 1.x to 2.0 by
+  reducing the chances that a reboot will be needed
+  on upgrade.  Like beta2, this upgrade will
+  delete existing TAP-Win32 interfaces, and reinstall
+  a single new interface with default properties.
+* Major rewrite of I/O event wait layer in the style
+  of libevent.  This is a precursor to TCP support
+  in --mode server.
+* New feature: --status.  Outputs a SIGUSR2-like
+  status summary to a given file, updated once
+  per n seconds.  The status file is comma delimited
+  for easy machine parsing.
+* --ifconfig-pool now remembers common names and
+  will try to assign a consistent IP to a given
+  common name.  Still to do: persist --ifconfig-pool
+  memory across restarts by saving state in file.
+* Fixed bug in event timer queue which could cause
+  recurring timer events such as --ping to not
+  correctly schedule again after firing.  This in
+  turn would cause spurrious ping restarts and possible
+  connection outages.  Thanks to Denis Vlasenko for
+  tracking this down.
+* Possible fix to reported bug where --daemon argument
+  was not printing to syslog correctly after restart.
+* Fixed bug where pulling --route or --dhcp-option
+  directives from a server would problematically
+  interact with --persist-tun on the client.
+* Updated contrib/multilevel-init.patch (Farkas Levente).
+* Added RPM build option to .spec and .spec.in files
+  to optionally disable LZO inclusion (Ian Pilcher).
+* The latest MingW runtime and headers define
+  'ssize_t', so a patch is needed (Gisle Vanem).
 
 2004.05.14 -- Version 2.0-beta2
 

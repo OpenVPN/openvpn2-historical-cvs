@@ -52,7 +52,7 @@ struct multi_reap
  */
 struct multi_instance {
   struct schedule_entry se;    /* this must be the first element of the structure */
-  MUTEX_DEFINE (mutex);
+  //MUTEX_DEFINE (mutex);
   bool defined;
   bool halt;
   int refcount;
@@ -99,6 +99,7 @@ struct multi_thread {
   struct multi_instance *tun_out;
   struct multi_instance *earliest_wakeup;  
   struct context_buffers *context_buffers;
+  time_t per_second_trigger;
   struct context top;
 };
 

@@ -222,9 +222,10 @@ static const char usage_message[] =
   "                       and received from TCP/UDP (caps) or tun/tap (lc)\n"
   "                : 6 to 11 -- debug messages of increasing verbosity\n"
   "--mute n        : Log at most n consecutive messages in the same category.\n"
+  "--status file n : Write operational status to file every n seconds.\n"
+  "--disable-occ   : Disable options consistency check between peers.\n"
   "--gremlin       : Simulate dropped & corrupted packets + network outages\n"
   "                  to test robustness of protocol (for debugging only).\n"
-  "--disable-occ   : Disable options consistency check between peers.\n"
 #ifdef USE_LZO
   "--comp-lzo      : Use fast LZO compression -- may add up to 1 byte per\n"
   "                  packet for uncompressible data.\n"
@@ -409,6 +410,7 @@ init_options (struct options *o)
 #endif
   o->local_port = o->remote_port = 5000;
   o->verbosity = 1;
+  o->status_file_update_freq = 60;
   o->bind_local = true;
   o->tun_mtu = TUN_MTU_DEFAULT;
   o->link_mtu = LINK_MTU_DEFAULT;
@@ -769,6 +771,8 @@ show_settings (const struct options *o)
   SHOW_INT (verbosity);
   SHOW_INT (mute);
   SHOW_BOOL (gremlin);
+  SHOW_STR (status_file);
+  SHOW_INT (status_file_update_freq);
 
   SHOW_BOOL (occ);
 
@@ -865,8 +869,8 @@ options_postprocess (struct options *options, bool first_time)
 {
   struct options defaults;
   int dev = DEV_TYPE_UNDEF;
-  bool pull = false;
   int i;
+  bool pull = false;
 
   init_options (&defaults);
 
@@ -1175,7 +1179,56 @@ options_postprocess (struct options *options, bool first_time)
 #undef MUST_BE_UNDEF
 #endif /* USE_CRYPTO */
 #endif /* USE_SSL */
+
+#if P2MP
+  /*
+   * Save certain parms before modifying options via --pull
+   */
+  pre_pull_save (options);
+#endif
 }
+
+#if P2MP
+
+/*
+ * Save/Restore certain option defaults before --pull is applied.
+ */
+
+void
+pre_pull_save (struct options *o)
+{
+  if (o->pull)
+    {
+      ALLOC_OBJ_CLEAR_GC (o->pre_pull, struct options_pre_pull, &o->gc);
+      o->pre_pull->tuntap_options = o->tuntap_options;
+      o->pre_pull->tuntap_options_defined = true;
+      if (o->routes)
+	{
+	  o->pre_pull->routes = *o->routes;
+	  o->pre_pull->routes_defined = true;
+	}
+    }
+}
+
+void
+pre_pull_restore (struct options *o)
+{
+  const struct options_pre_pull *pp = o->pre_pull;
+  if (pp)
+    {
+      
+      if (pp->tuntap_options_defined)
+	{
+	  o->tuntap_options = pp->tuntap_options;
+	}
+      if (pp->routes_defined && o->routes)
+	{
+	  *o->routes = pp->routes;
+	}
+    }
+}
+
+#endif
 
 /*
  * Build an options string to represent data channel encryption options.
@@ -2059,6 +2112,17 @@ add_option (struct options *options,
       ++i;
       VERIFY_PERMISSION (OPT_P_MESSAGES);
       options->mute = positive (atoi (p[1]));
+    }
+  else if (streq (p[0], "status") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->status_file = p[1];
+      if (p[2])
+	{
+	  ++i;
+	  options->status_file_update_freq = positive (atoi (p[2]));
+	}
     }
   else if ((streq (p[0], "link-mtu") || streq (p[0], "udp-mtu")) && p[1])
     {

@@ -300,6 +300,41 @@ ifconfig_options_string (const struct tuntap* tt, bool remote, bool disable, str
 }
 
 /*
+ * Return a status string describing wait state.
+ */
+const char *
+tun_stat (const struct tuntap *tt, unsigned int rwflags, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (64, gc);
+  if (tt)
+    {
+      if (rwflags & EVENT_READ)
+	{
+	  buf_printf (&out, "T%s",
+		      (tt->rwflags & EVENT_READ) ? "R" : "r");
+#ifdef WIN32
+	  buf_printf (&out, "%s",
+		      overlapped_io_state_ascii (&tt->reads));
+#endif
+	}
+      if (rwflags & EVENT_WRITE)
+	{
+	  buf_printf (&out, "T%s",
+		      (tt->rwflags & EVENT_WRITE) ? "W" : "w");
+#ifdef WIN32
+	  buf_printf (&out, "%s",
+		      overlapped_io_state_ascii (&tt->writes));
+#endif
+	}
+    }
+  else
+    {
+      buf_printf (&out, "T?");
+    }
+  return BSTR (&out);
+}
+
+/*
  * Init tun/tap object.
  *
  * Set up tuntap structure for ifconfig,
@@ -324,6 +359,8 @@ init_tun (const char *dev,       /* --dev option */
 #ifdef WIN32
   overlapped_io_init (&tt->reads, frame, FALSE, true);
   overlapped_io_init (&tt->writes, frame, TRUE, true);
+  tt->rw_handle.read = tt->reads.overlapped.hEvent;
+  tt->rw_handle.write = tt->writes.overlapped.hEvent;
 #endif
 
   tt->type = dev_type_enum (dev, dev_type);
@@ -1723,7 +1760,7 @@ get_tap_reg (struct gc_arena *gc)
 
 	      if (status == ERROR_SUCCESS && data_type == REG_SZ)
 		{
-		  if (!strcmp (component_id, "tapdev"))
+		  if (!strcmp (component_id, TAP_COMPONENT_ID))
 		    {
 		      struct tap_reg *reg;
 		      ALLOC_OBJ_CLEAR_GC (reg, struct tap_reg, gc);
@@ -2290,10 +2327,10 @@ build_dhcp_options_string (struct buffer *buf, const struct tuntap_options *o)
   if (o->netbios_node_type)
     write_dhcp_u8 (buf, 46, o->netbios_node_type);
 
-  write_dhcp_u32_array (buf, 6, o->dns, o->dns_len);
-  write_dhcp_u32_array (buf, 44, o->wins, o->wins_len);
-  write_dhcp_u32_array (buf, 42, o->ntp, o->ntp_len);
-  write_dhcp_u32_array (buf, 45, o->nbdd, o->nbdd_len);
+  write_dhcp_u32_array (buf, 6, (uint32_t*)o->dns, o->dns_len);
+  write_dhcp_u32_array (buf, 44, (uint32_t*)o->wins, o->wins_len);
+  write_dhcp_u32_array (buf, 42, (uint32_t*)o->ntp, o->ntp_len);
+  write_dhcp_u32_array (buf, 45, (uint32_t*)o->nbdd, o->nbdd_len);
 }
 
 void

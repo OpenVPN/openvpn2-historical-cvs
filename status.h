@@ -23,38 +23,33 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef PING_INLINE_H
-#define PING_INLINE_H
+#ifndef STATUS_H
+#define STATUS_H
+
+#include "interval.h"
 
 /*
- * Should we exit or restart due to ping (or other authenticated packet)
- * not received in n seconds?
+ * printf-style interface for outputting status info
  */
-static inline void
-check_ping_restart (struct context *c)
-{
-  void check_ping_restart_dowork (struct context *c);
-  if (c->options.ping_rec_timeout
-      && event_timeout_trigger (&c->c2.ping_rec_interval,
-				&c->c2.timeval,
-				(!c->options.ping_timer_remote
-				 || addr_defined (&c->c1.link_socket_addr.actual))
-				? ETT_DEFAULT : 15))
-    check_ping_restart_dowork (c);
-}
 
-/*
- * Should we ping the remote?
- */
-static inline void
-check_ping_send (struct context *c)
+struct status_output
 {
-  void check_ping_send_dowork (struct context *c);
-  if (c->options.ping_send_timeout
-      && event_timeout_trigger (&c->c2.ping_send_interval,
-				&c->c2.timeval,
-				(!c->c2.to_link.len) ? ETT_DEFAULT : 1))
-    check_ping_send_dowork (c);
-}
+  char *filename;
+  int fd;
+  int msglevel;
+  struct event_timeout et;
+};
+
+struct status_output *status_open (const char *filename, int refresh_freq, int msglevel);
+bool status_trigger_tv (struct status_output *so, struct timeval *tv);
+bool status_trigger (struct status_output *so);
+void status_reset (struct status_output *so);
+void status_flush (struct status_output *so);
+void status_close (struct status_output *so);
+void status_printf (struct status_output *so, const char *format, ...)
+#ifdef __GNUC__
+    __attribute__ ((format (printf, 2, 3)))
+#endif
+    ;
 
 #endif

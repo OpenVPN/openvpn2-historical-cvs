@@ -114,7 +114,6 @@ frequency_limit_init (int max, int per)
   ASSERT (max >= 0 && per >= 0);
 
   ALLOC_OBJ (f, struct frequency_limit);
-  mutex_init (&f->mutex);
   f->max = max;
   f->per = per;
   f->n = 0;
@@ -125,7 +124,6 @@ frequency_limit_init (int max, int per)
 void
 frequency_limit_free (struct frequency_limit *f)
 {
-  mutex_destroy (&f->mutex);
   free (f);
 }
 
@@ -135,14 +133,12 @@ frequency_limit_event_allowed (struct frequency_limit *f)
   if (f->per)
     {
       bool ret;
-      mutex_lock (&f->mutex);
       if (now >= f->reset + f->per)
 	{
 	  f->reset = now;
 	  f->n = 0;
 	}
       ret = (++f->n <= f->max);
-      mutex_unlock (&f->mutex);
       return ret;
     }
   else

@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [2.0_beta2], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [2.0_beta3], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -212,7 +212,7 @@ AC_CHECK_HEADERS(sys/time.h sys/socket.h sys/ioctl.h sys/stat.h dnl
 		 netinet/if_ether.h netinet/tcp.h resolv.h arpa/inet.h dnl
 		 netdb.h sys/uio.h linux/if_tun.h linux/sockios.h dnl
 		 linux/types.h linux/errqueue.h dnl
-                 sys/epoll.h
+                 sys/poll.h sys/epoll.h
 )
 AC_CACHE_SAVE
 
@@ -298,7 +298,7 @@ AC_CHECK_FUNCS(daemon chroot getpwnam setuid nice system getpid dup dup2 dnl
 	       getpass strerror syslog openlog mlockall getgrnam setgid dnl
 	       setgroups stat flock readv writev setsockopt getsockopt dnl
 	       setsid chdir gettimeofday putenv getpeername unlink dnl
-               epoll_create)
+               poll epoll_create chsize ftruncate)
 AC_REPLACE_FUNCS(inet_aton)
 AC_CACHE_SAVE
 
@@ -449,7 +449,7 @@ fi
 
 dnl enable strict compiler warnings
 if test "$STRICT" = "yes"; then
-   CFLAGS="$CFLAGS -Wall -W -Wpointer-arith -Wsign-compare -Winline -Wno-unused-parameter -Wno-unused-function"
+   CFLAGS="$CFLAGS -Wall -W -Wpointer-arith -Wsign-compare -Wno-unused-parameter -Wno-unused-function"
 fi
 
 dnl enable profiling

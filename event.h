@@ -26,4 +26,99 @@
 #ifndef EVENT_H
 #define EVENT_H
 
+#define EVENT_READ     (1<<0)
+#define EVENT_WRITE    (1<<1)
+
+#define EVENT_METHOD_SCALABLE     (1<<0)
+#define EVENT_METHOD_US_TIMEOUT   (1<<1)
+#define EVENT_METHOD_FAST         (1<<2)
+
+#ifdef WIN32
+
+struct rw_handle {
+  HANDLE read;
+  HANDLE write;
+};
+
+typedef const struct rw_handle *event_t;
+
+#define UNDEFINED_EVENT (NULL)
+
+#else
+
+typedef int event_t;
+
+#define UNDEFINED_EVENT (-1)
+
+#endif
+
+struct event_set;
+struct event_set_return;
+
+struct event_set_functions
+{
+  void (*free)(struct event_set *es);
+  void (*reset)(struct event_set *es);
+  void (*del)(struct event_set *es, event_t event);
+  void (*ctl)(struct event_set *es, event_t event, unsigned int rwflags, void *arg);
+
+  /*
+   * Return status for wait:
+   * -1 on signal or error
+   * 0 on timeout
+   * length of event_set_return if at least 1 event is returned
+   */
+  int  (*wait)(struct event_set *es, const struct timeval *tv, struct event_set_return *out, int outlen);
+};
+
+struct event_set_return
+{
+  unsigned int rwflags;
+  void *arg;
+};
+
+struct event_set
+{
+  struct event_set_functions func;
+};
+
+struct event_set *event_set_init (int *maxevents, unsigned int flags);
+
+static inline void
+event_free (struct event_set *es)
+{
+  (*es->func.free)(es);
+}
+
+static inline void
+event_reset (struct event_set *es)
+{
+  (*es->func.reset)(es);
+}
+
+static inline void
+event_del (struct event_set *es, event_t event)
+{
+  (*es->func.del)(es, event);
+}
+
+static inline void
+event_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
+{
+  (*es->func.ctl)(es, event, rwflags, arg);
+}
+
+static inline int
+event_wait (struct event_set *es, const struct timeval *tv, struct event_set_return *out, int outlen)
+{
+  return (*es->func.wait)(es, tv, out, outlen);
+}
+
+static inline void
+event_set_return_init (struct event_set_return *esr)
+{
+  esr->rwflags = 0;
+  esr->arg = NULL;
+}
+
 #endif

@@ -45,7 +45,7 @@ mbuf_init (unsigned int size)
 {
   struct mbuf_set *ret;
   ALLOC_OBJ_CLEAR (ret, struct mbuf_set);
-  mutex_init (&ret->mutex);
+  //mutex_init (&ret->mutex);
   ret->capacity = adjust_power_of_2 (size);
   ALLOC_ARRAY (ret->array, struct mbuf_item, ret->capacity);
   return ret;
@@ -61,7 +61,7 @@ mbuf_free (struct mbuf_set *ms)
       mbuf_free_buf (item->buffer);
     }
   free (ms->array);
-  mutex_destroy (&ms->mutex);
+  //mutex_destroy (&ms->mutex);
   free (ms);
 }
 
@@ -88,7 +88,7 @@ mbuf_free_buf (struct mbuf_buffer *mb)
 void
 mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item)
 {
-  mutex_lock (&ms->mutex);
+  //mutex_lock (&ms->mutex);
 
   if (ms->len == ms->capacity)
     {
@@ -105,7 +105,7 @@ mbuf_add_item (struct mbuf_set *ms, const struct mbuf_item *item)
     ms->max_queued = ms->len;
   ++item->buffer->refcount;
 
-  mutex_unlock (&ms->mutex);
+  //mutex_unlock (&ms->mutex);
 }
 
 #else

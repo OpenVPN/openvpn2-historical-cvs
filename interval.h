@@ -137,7 +137,7 @@ interval_action (struct interval* top)
 }
 
 /*
- * Measure when n seconds past an event have elapsed
+ * Measure when n seconds beyond an event have elapsed
  */
 
 struct event_timeout
@@ -184,8 +184,23 @@ event_timeout_reset (struct event_timeout* et)
     et->last = now;
 }
 
+/*
+ * This is the principal function for testing and triggering recurring
+ * timers and will return true on a timer signal event.
+ * If et_const_retry == ETT_DEFAULT and a signal occurs,
+ * the function will return true and *et will be armed for the
+ * next event.  If et_const_retry >= 0 and a signal occurs,
+ * *et will not be touched, but *tv will be set to
+ * minimum (*tv, et_const_retry) for a future re-test,
+ * and the function will return true.
+ */
+
+#define ETT_DEFAULT (-1)
+
 static inline bool
-event_timeout_trigger (struct event_timeout* et, struct timeval* tv)
+event_timeout_trigger (struct event_timeout *et,
+		       struct timeval *tv,
+		       const int et_const_retry)
 {
   bool ret = false;
   const time_t local_now = now;
@@ -196,17 +211,24 @@ event_timeout_trigger (struct event_timeout* et, struct timeval* tv)
       if (wakeup <= 0)
 	{
 #if INTERVAL_DEBUG
-	  msg (D_INTERVAL, "EVENT event_timeout_trigger (%d)", et->n);
+	  msg (D_INTERVAL, "EVENT event_timeout_trigger (%d) etcr=%d", et->n, et_const_retry);
 #endif
-	  et->last = local_now;
-	  wakeup = et->n;
-	  ret = true;
+	  if (et_const_retry < 0)
+	    {
+	      et->last = local_now;
+	      wakeup = et->n;
+	      ret = true;
+	    }
+	  else
+	    {
+	      wakeup = et_const_retry;
+	    }
 	}
 
       if (wakeup < tv->tv_sec)
 	{
 #if INTERVAL_DEBUG
-	  msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d)", wakeup, et->n);
+	  msg (D_INTERVAL, "EVENT event_timeout_wakeup (%d/%d) etcr=%d", wakeup, et->n, et_const_retry);
 #endif
 	  tv->tv_sec = wakeup;
 	  tv->tv_usec = 0;

@@ -104,7 +104,7 @@ socks_handshake (socket_descriptor_t sd, volatile int *signal_received)
 
       status = select (sd + 1, &reads, NULL, NULL, &tv);
 
-      GET_SIGNAL (*signal_received);
+      get_signal (signal_received);
       if (*signal_received)
 	return false;
 
@@ -178,7 +178,7 @@ recv_socks_reply (socket_descriptor_t sd, struct sockaddr_in *addr,
 
       status = select (sd + 1, &reads, NULL, NULL, &tv);
 
-      GET_SIGNAL (*signal_received);
+      get_signal (signal_received);
       if (*signal_received)
 	return false;
 

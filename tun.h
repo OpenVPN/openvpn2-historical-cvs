@@ -132,6 +132,7 @@ struct tuntap
   HANDLE hand;
   struct overlapped_io reads;
   struct overlapped_io writes;
+  struct rw_handle rw_handle;
 
   /* used for setting interface address via IP Helper API
      or DHCP masquerade */
@@ -147,6 +148,9 @@ struct tuntap
   int ip_fd;
 #endif
 
+  /* used for printing status info only */
+  unsigned int rwflags;
+
   /* Some TUN/TAP drivers like to be ioctled for mtu
    after open */
   int post_open_mtu;
@@ -161,44 +165,6 @@ tuntap_defined (const struct tuntap *tt)
   return tt && tt->fd >= 0;
 #endif
 }
-
-/*
- * These macros are called in the context of the openvpn() function,
- * and help to abstract away the differences between Win32 and Posix.
- */
-
-#ifdef WIN32
-
-#define TUNTAP_SET_READ(w, tt)  \
-  { if (tuntap_defined(tt)) { \
-      wait_add ((w), (tt)->reads.overlapped.hEvent); \
-      tun_read_queue ((tt), 0); }}
-
-#define TUNTAP_SET_WRITE(w, tt) \
-  { if (tuntap_defined(tt)) \
-      wait_add ((w), (tt)->writes.overlapped.hEvent); }
-
-#define TUNTAP_ISSET(w, tt, set) \
-  (tuntap_defined(tt) \
-  && wait_trigger ((w), (tt)->set.overlapped.hEvent))
-
-#define TUNTAP_READ_STAT(w, tt, gc) \
-   (tuntap_defined(tt) \
-   ? overlapped_io_state_ascii (&((tt)->reads),  "tr", (gc)) : "trX")
-
-#define TUNTAP_WRITE_STAT(w, tt, gc) \
-   (tuntap_defined(tt) \
-   ? overlapped_io_state_ascii (&((tt)->writes), "tw", (gc)) : "twX")
-
-#else
-
-#define TUNTAP_SET_READ(w, tt)      { if (tuntap_defined(tt)) wait_add_reads  ((w), (tt)->fd); }
-#define TUNTAP_SET_WRITE(w, tt)     { if (tuntap_defined(tt)) wait_add_writes ((w), (tt)->fd); }
-#define TUNTAP_ISSET(w, tt, set)    ( tuntap_defined(tt) &&  wait_test_##set ((w), (tt)->fd))
-#define TUNTAP_READ_STAT(w, tt, gc)     (TUNTAP_ISSET ((w), (tt), reads)  ? "TR" : "tr")
-#define TUNTAP_WRITE_STAT(w, tt, gc)    (TUNTAP_ISSET ((w), (tt), writes) ? "TW" : "tw")
-
-#endif
 
 /*
  * Function prototypes
@@ -376,5 +342,35 @@ tuntap_stop (int status)
 }
 
 #endif
+
+/*
+ * TUN/TAP I/O wait functions
+ */
+
+static inline event_t
+tun_event_handle (const struct tuntap *tt)
+{
+#ifdef WIN32
+  return &tt->rw_handle;
+#else
+  return tt->fd;
+#endif
+}
+
+static inline void
+tun_set (struct tuntap *tt, struct event_set *es, unsigned int rwflags, void *arg)
+{
+  if (tuntap_defined (tt))
+    {
+      event_ctl (es, tun_event_handle (tt), rwflags, arg);
+#ifdef WIN32
+      if (rwflags & EVENT_READ)
+	tun_read_queue (tt, 0);
+#endif
+      tt->rwflags = rwflags;
+    }
+}
+
+const char *tun_stat (const struct tuntap *tt, unsigned int rwflags, struct gc_arena *gc);
 
 #endif /* TUN_H */

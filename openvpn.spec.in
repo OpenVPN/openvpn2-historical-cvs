@@ -1,6 +1,6 @@
 Summary:	A Secure UDP Tunneling Daemon
-Name:		@PACKAGE@
-Version:	@VERSION@
+Name:           @PACKAGE@
+Version:        @VERSION@
 Release:	1
 URL:		http://sourceforge.net/projects/openvpn/
 Source0:	http://prdownloads.sourceforge.net/openvpn/%{name}-%{version}.tar.gz
@@ -10,6 +10,9 @@ Group:		Networking/Tunnels
 Vendor:		James Yonan <jim@yonan.net>
 Packager:	bishop clark (LC957) <bishop@platypus.bc.ca>
 BuildRoot:	%{_tmppath}/%{name}-%(id -un)
+
+%{!?_without_lzo:BuildRequires: lzo-devel}
+%{!?_without_lzo:Requires:   	lzo}
 
 %description
 OpenVPN is a robust and highly flexible tunneling application that
@@ -24,7 +27,7 @@ library for compression.
 %setup -q
 
 %build
-%configure
+%configure %{?_without_lzo:--disable-lzo}
 %__make
 
 %install

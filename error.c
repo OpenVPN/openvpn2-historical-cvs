@@ -71,6 +71,9 @@ static bool std_redir;      /* GLOBAL */
 /* Should messages be written to the syslog? */
 static bool use_syslog;     /* GLOBAL */
 
+/* The program name passed to syslog */
+static char *pgmname_syslog;  /* GLOBAL */
+
 /* If non-null, messages should be written here (used for debugging only) */
 static FILE *msgfp;         /* GLOBAL */
 
@@ -316,7 +319,8 @@ open_syslog (const char *pgmname)
     {
       if (!use_syslog)
 	{
-	  openlog ((pgmname ? pgmname : PACKAGE), LOG_PID, LOG_DAEMON);
+	  pgmname_syslog = string_alloc (pgmname ? pgmname : PACKAGE, NULL);
+	  openlog (pgmname_syslog, LOG_PID, LOG_DAEMON);
 	  use_syslog = true;
 
 	  /* Better idea: somehow pipe stdout/stderr output to msg() */
@@ -336,6 +340,11 @@ close_syslog ()
     {
       closelog();
       use_syslog = false;
+      if (pgmname_syslog)
+	{
+	  free (pgmname_syslog);
+	  pgmname_syslog = NULL;
+	}
     }
 #endif
 }
@@ -483,6 +492,10 @@ msg_thread_uninit (void)
   pthread_key_delete (x_msg_prefix_key);
 #endif
 }
+
+/*
+ * Exiting.
+ */
 
 void
 openvpn_exit (int status)

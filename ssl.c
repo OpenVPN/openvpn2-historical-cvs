@@ -909,9 +909,9 @@ bio_write (struct tls_multi* multi, BIO *bio, struct buffer *buf, const char *de
 #ifdef BIO_DEBUG
       bio_debug_data ("write", bio, BPTR (buf), BLEN (buf), desc);
 #endif
-      mutex_unlock (multi->mutex);
+      //mutex_unlock (multi->mutex);
       i = BIO_write (bio, BPTR (buf), BLEN (buf));
-      mutex_lock (multi->mutex);
+      //mutex_lock (multi->mutex);
       if (i < 0)
 	{
 	  if (BIO_should_retry (bio))
@@ -969,9 +969,9 @@ bio_read (struct tls_multi* multi, BIO *bio, struct buffer *buf, int maxlen, con
        * BIO_read brackets most of the serious RSA
        * key negotiation number crunching.
        */
-      mutex_unlock (multi->mutex);
+      //mutex_unlock (multi->mutex);
       i = BIO_read (bio, BPTR (buf), len);
-      mutex_lock (multi->mutex);
+      //mutex_lock (multi->mutex);
 #ifdef BIO_DEBUG
       bio_debug_data ("read", bio, BPTR (buf), i, desc);
 #endif
@@ -1937,7 +1937,7 @@ tls_process (struct tls_multi *multi,
 	msg (D_TLS_DEBUG_LOW, "TLS: tls_process: killed expiring key");
   }
 
-  mutex_cycle (multi->mutex);
+  //mutex_cycle (multi->mutex);
 
   do
     {
@@ -2348,7 +2348,7 @@ tls_process (struct tls_multi *multi,
 		}
 	    }
 	}
-      mutex_cycle (multi->mutex);
+      //mutex_cycle (multi->mutex);
     }
   while (state_change);
 
@@ -2477,7 +2477,7 @@ tls_multi_process (struct tls_multi *multi,
 		reset_session (multi, session);
 	    }
 	}
-      mutex_cycle (multi->mutex);
+      //mutex_cycle (multi->mutex);
     }
 
   update_time ();

@@ -52,21 +52,7 @@ alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tuntap_b
   ASSERT (buf_safe (buf, 0));
 }
 
-#ifdef ENABLE_PROFILING
-int
-profile_select(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout)
-{
-  return select (n, readfds, writefds, exceptfds, timeout);
-}
-#endif
-
 #ifdef WIN32
-
-void
-wait_init (struct event_wait *ew, unsigned int rwflags)
-{
-  CLEAR (*ew);
-}
 
 void
 overlapped_io_init (struct overlapped_io *o,
@@ -96,26 +82,19 @@ overlapped_io_close (struct overlapped_io *o)
   free_buf (&o->buf_init);
 }
 
-const char *
-overlapped_io_state_ascii (const struct overlapped_io *o,
-			   const char* prefix,
-			   struct gc_arena *gc)
+char *
+overlapped_io_state_ascii (const struct overlapped_io *o)
 {
-  struct buffer out = alloc_buf_gc (16, gc);
-  buf_printf (&out, "%s", prefix);
   switch (o->iostate)
     {
     case IOSTATE_INITIAL:
-      buf_printf (&out, "0");
-      break;
+      return "0";
     case IOSTATE_QUEUED:
-      buf_printf (&out, "Q");
-      break;
+      return "Q";
     case IOSTATE_IMMEDIATE_RETURN:
-      buf_printf (&out, "R");
-      break;
+      return "1";
     }
-  return BSTR (&out);
+  return "?";
 }
 
 /*
@@ -129,16 +108,18 @@ struct win32_signal win32_signal; /* GLOBAL */
 static void
 win32_signal_open (struct win32_signal *ws)
 {
+  CLEAR (*ws);
+
   ws->service = false;
 
   /*
    * Try to open console.
    */
-  ws->in = GetStdHandle (STD_INPUT_HANDLE);
-  if (ws->in != INVALID_HANDLE_VALUE)
+  ws->in.read = GetStdHandle (STD_INPUT_HANDLE);
+  if (ws->in.read != INVALID_HANDLE_VALUE)
     {
       DWORD console_mode;
-      if (GetConsoleMode (ws->in, &console_mode))
+      if (GetConsoleMode (ws->in.read, &console_mode))
 	{
 	  /* running on a console */
 	  console_mode &= ~(ENABLE_WINDOW_INPUT
@@ -147,24 +128,24 @@ win32_signal_open (struct win32_signal *ws)
 			    | ENABLE_ECHO_INPUT 
 			    | ENABLE_MOUSE_INPUT);
 
-	  if (!SetConsoleMode(ws->in, console_mode))
+	  if (!SetConsoleMode(ws->in.read, console_mode))
 	    msg (M_ERR, "SetConsoleMode failed");
 	}
       else
-	ws->in = INVALID_HANDLE_VALUE; /* probably running as a service */
+	ws->in.read = INVALID_HANDLE_VALUE; /* probably running as a service */
     }
 
   /*
    * If console open failed, assume we are running
    * as a service.
    */
-  if (ws->in == INVALID_HANDLE_VALUE)
+  if (ws->in.read == INVALID_HANDLE_VALUE)
     {
       ws->service = true;
-      ws->in = CreateEvent (NULL, TRUE, TRUE, EXIT_EVENT_NAME);
-      if (ws->in == NULL)
+      ws->in.read = CreateEvent (NULL, TRUE, TRUE, EXIT_EVENT_NAME);
+      if (ws->in.read == NULL)
 	msg (M_ERR, "I seem to be running as a service, but CreateEvent '%s' failed on my exit event object", EXIT_EVENT_NAME);
-      if (WaitForSingleObject (ws->in, 0) != WAIT_TIMEOUT)
+      if (WaitForSingleObject (ws->in.read, 0) != WAIT_TIMEOUT)
 	msg (M_FATAL, "I seem to be running as a service, but my exit event object is telling me to exit immediately");
     }
 }
@@ -173,10 +154,10 @@ static bool
 keyboard_input_available (struct win32_signal *ws)
 {
   ASSERT (!ws->service);
-  if (ws->in != INVALID_HANDLE_VALUE)
+  if (ws->in.read != INVALID_HANDLE_VALUE)
     {
       DWORD n;
-      if (GetNumberOfConsoleInputEvents (ws->in, &n))
+      if (GetNumberOfConsoleInputEvents (ws->in.read, &n))
 	return n > 0;
     }
   return false;
@@ -200,14 +181,14 @@ unsigned int
 keyboard_get (struct win32_signal *ws)
 {
   ASSERT (!ws->service);
-  if (ws->in != INVALID_HANDLE_VALUE)
+  if (ws->in.read != INVALID_HANDLE_VALUE)
     {
       INPUT_RECORD ir;
       do {
 	DWORD n;
 	if (!keyboard_input_available (ws))
 	  return 0;
-	if (!ReadConsoleInput (ws->in, &ir, 1, &n))
+	if (!ReadConsoleInput (ws->in.read, &ir, 1, &n))
 	  return 0;
       } while (ir.EventType != KEY_EVENT || ir.Event.KeyEvent.bKeyDown != TRUE);
 
@@ -227,10 +208,10 @@ void
 win32_signal_close (void)
 {
   if (win32_signal.service
-      && win32_signal.in
-      && win32_signal.in != INVALID_HANDLE_VALUE)
+      && win32_signal.in.read
+      && win32_signal.in.read != INVALID_HANDLE_VALUE)
     {
-      CloseHandle (win32_signal.in);
+      CloseHandle (win32_signal.in.read);
     }
   CLEAR (win32_signal);
 }
@@ -240,7 +221,7 @@ win32_signal_get (struct win32_signal *ws)
 {
   if (ws->service)
     {
-      if (WaitForSingleObject (ws->in, 0) == WAIT_OBJECT_0)
+      if (WaitForSingleObject (ws->in.read, 0) == WAIT_OBJECT_0)
 	return SIGTERM;
       else
 	return 0;
@@ -266,13 +247,13 @@ void
 win32_pause (void)
 {
   if (!win32_signal.service
-      && win32_signal.in
-      && win32_signal.in != INVALID_HANDLE_VALUE)
+      && win32_signal.in.read
+      && win32_signal.in.read != INVALID_HANDLE_VALUE)
     {
       int status;
       msg (M_INFO|M_NOPREFIX, "Press any key to continue...");
       do {
-	status = WaitForSingleObject (win32_signal.in, INFINITE);
+	status = WaitForSingleObject (win32_signal.in.read, INFINITE);
       } while (!keyboard_get (&win32_signal));
     }
 }
@@ -329,36 +310,39 @@ semaphore_open (struct semaphore *s, const char *name)
   s->name = name;
   s->hand = CreateSemaphore(NULL, 1, 1, name);
   if (s->hand == NULL)
-    msg (M_ERR, "Cannot create Win32 semaphore '%s'", name);
-  msg (D_SEMAPHORE, "Created Win32 semaphore '%s'", s->name);
+    msg (M_WARN|M_ERRNO, "WARNING: Cannot create Win32 semaphore '%s'", name);
+  else
+    msg (D_SEMAPHORE, "Created Win32 semaphore '%s'", s->name);
 }
 
 bool
 semaphore_lock (struct semaphore *s, int timeout_milliseconds)
 {
-  DWORD status;
-  bool ret;
+  bool ret = true;
 
-  ASSERT (s->hand);
-  ASSERT (!s->locked);
+  if (s->hand)
+    {
+      DWORD status;
+      ASSERT (!s->locked);
 
-  msg (D_SEMAPHORE_LOW, "Attempting to lock Win32 semaphore '%s' prior to net shell command (timeout = %d sec)",
-       s->name,
-       timeout_milliseconds / 1000);
-  status = WaitForSingleObject (s->hand, timeout_milliseconds);
-  if (status == WAIT_FAILED)
-    msg (M_ERR, "Wait failed on Win32 semaphore '%s'", s->name);
-  ret = (status == WAIT_TIMEOUT) ? false : true;
-  if (ret)
-    {
-      msg (D_SEMAPHORE, "Locked Win32 semaphore '%s'", s->name);
-      s->locked = true;
-    }
-  else
-    {
-      msg (D_SEMAPHORE, "Wait on Win32 semaphore '%s' timed out after %d milliseconds",
+      msg (D_SEMAPHORE_LOW, "Attempting to lock Win32 semaphore '%s' prior to net shell command (timeout = %d sec)",
 	   s->name,
-	   timeout_milliseconds);
+	   timeout_milliseconds / 1000);
+      status = WaitForSingleObject (s->hand, timeout_milliseconds);
+      if (status == WAIT_FAILED)
+	msg (M_ERR, "Wait failed on Win32 semaphore '%s'", s->name);
+      ret = (status == WAIT_TIMEOUT) ? false : true;
+      if (ret)
+	{
+	  msg (D_SEMAPHORE, "Locked Win32 semaphore '%s'", s->name);
+	  s->locked = true;
+	}
+      else
+	{
+	  msg (D_SEMAPHORE, "Wait on Win32 semaphore '%s' timed out after %d milliseconds",
+	       s->name,
+	       timeout_milliseconds);
+	}
     }
   return ret;
 }
@@ -366,13 +350,15 @@ semaphore_lock (struct semaphore *s, int timeout_milliseconds)
 void
 semaphore_release (struct semaphore *s)
 {
-  ASSERT (s->hand);
-  ASSERT (s->locked);
-  msg (D_SEMAPHORE, "Releasing Win32 semaphore '%s'", s->name);
-  if (!ReleaseSemaphore(s->hand, 1, NULL))
-    msg (M_WARN | M_ERRNO, "ReleaseSemaphore failed on Win32 semaphore '%s'",
-	 s->name);
-  s->locked = false;
+  if (s->hand)
+    {
+      ASSERT (s->locked);
+      msg (D_SEMAPHORE, "Releasing Win32 semaphore '%s'", s->name);
+      if (!ReleaseSemaphore(s->hand, 1, NULL))
+	msg (M_WARN | M_ERRNO, "ReleaseSemaphore failed on Win32 semaphore '%s'",
+	     s->name);
+      s->locked = false;
+    }
 }
 
 void
@@ -471,39 +457,6 @@ getpass (const char *prompt)
     }
 
   return NULL;
-}
-
-#else
-
-void
-wait_init (struct event_wait *ew, unsigned int rwflags)
-{
-  CLEAR (*ew);
-  if (rwflags & WAIT_READ)
-    {
-      ALLOC_OBJ (ew->reads, fd_set);
-      FD_ZERO (ew->reads);
-    }
-  if (rwflags & WAIT_WRITE)
-    {
-      ALLOC_OBJ (ew->writes, fd_set);
-      FD_ZERO (ew->writes);
-    }
-}
-
-void
-wait_free (struct event_wait *ew)
-{
-  if (ew->reads)
-    {
-      free (ew->reads);
-      ew->reads = NULL;
-    }
-  if (ew->writes)
-    {
-      free (ew->writes);
-      ew->writes = NULL;
-    }
 }
 
 #endif

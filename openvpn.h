@@ -35,6 +35,7 @@
 #include "lzo.h"
 #include "tun.h"
 #include "interval.h"
+#include "status.h"
 #include "fragment.h"
 #include "route.h"
 #include "proxy.h"
@@ -125,6 +126,8 @@ struct context_1
   struct tuntap *tuntap;
   bool tuntap_owned;
   struct route_list *route_list;
+  struct status_output *status_output;
+  bool status_output_owned;
   struct http_proxy_info *http_proxy;
   struct socks_proxy_info *socks_proxy;
 };
@@ -139,7 +142,18 @@ struct context_2
   struct gc_arena gc;
 
   /* our global wait events */
-  struct event_wait event_wait;
+  struct event_set *event_set;
+  int event_set_max;
+  bool event_set_owned;
+
+# define SOCKET_READ   (1<<0)
+# define SOCKET_WRITE  (1<<1)
+# define TUN_READ      (1<<2)
+# define TUN_WRITE     (1<<3)
+# define ES_ERROR      (1<<4)
+# define ES_TIMEOUT    (1<<6)
+
+  unsigned int event_set_status;
 
 #if PASSTOS_CAPABILITY
   /* used to get/set TOS. */
@@ -299,9 +313,6 @@ struct context_2
   time_t update_timeout_random_component;
   struct timeval timeout_random_component;
 
-  /* return from main event loop select (or windows equivalent) */
-  int select_status;
-
   /* indicates that the do_up_delay function has run */
   bool do_up_ran;
 
@@ -329,7 +340,7 @@ struct context
   bool first_time;
 
   /* used by multi-client code to lock the context */
-  MUTEX_DEFINE (mutex); // JYFIXME -- init/uninit me
+  //MUTEX_DEFINE (mutex); // JYFIXME -- init/uninit me
 
   /* context modes */
 # define CM_P2P         0 /* standalone point-to-point session */

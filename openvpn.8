@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "14 May 2004"
+.TH openvpn 8 "2 June 2004"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -210,6 +210,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-sndbuf\fR\ \fIsize\fR\ ]
 [\ \fB\-\-socks\-proxy\-retry\fR\ ]
 [\ \fB\-\-socks\-proxy\fR\ \fIserver\ [port]\fR\ ]
+[\ \fB\-\-status\fR\ \fIfile\ [n]\fR\ ]
 [\ \fB\-\-tap\-sleep\fR\ \fIn\fR\ ]
 [\ \fB\-\-test\-crypto\fR\ ]
 [\ \fB\-\-tls\-auth\fR\ \fIfile\ [direction]\fR\ ]
@@ -1678,6 +1679,17 @@ used for TCP/UDP packets and lowercase is used for TUN/TAP packets.
 Show debug info of increasing verbosity (see errlevel.h for additional
 information on debug levels).
 .TP
+.B --status file [n]
+Write operational status to
+.B file
+every
+.B n
+seconds.
+
+Status can also be written to the syslog by sending a
+.B SIGUSR2
+signal.
+.TP
 .B --mute n
 Log at most
 .B n
@@ -1741,7 +1753,10 @@ be used in this mode.
 .TP
 .B --push "option"
 Push a config file option back to the client for remote
-execution.  The client must specify
+execution.  Note that
+.B
+option
+must be enclosed in double quotes ("").  The client must specify
 .B --pull
 in its config file.  The set of options which can be
 pushed is limited by both feasibility and security.

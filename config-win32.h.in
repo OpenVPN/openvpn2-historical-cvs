@@ -42,8 +42,12 @@
 #define random rand
 #define srandom srand
 
-typedef unsigned int in_addr_t;
-typedef unsigned int ssize_t;
+typedef unsigned long in_addr_t;
+
+#ifndef _SSIZE_T_
+#define _SSIZE_T_
+ typedef unsigned int ssize_t;
+#endif
 
 /* Append a label to program startup title */
 //#define DEBUG_LABEL "DEBUG1"
@@ -51,8 +55,12 @@ typedef unsigned int ssize_t;
 /* Should we print debug info from driver? */
 //#define TAP_WIN32_DEBUG
 
-/* Minimum TAP-Win32 version number expected by userspace */
-#define TAP_WIN32_MIN_MAJOR 7
+/*
+ * Minimum TAP-Win32 version number expected by userspace
+ *
+ * The TAP-Win32 version number is defined in tap-win32/SOURCES
+ */
+#define TAP_WIN32_MIN_MAJOR 8
 #define TAP_WIN32_MIN_MINOR 1
 
 /* Enable multiclient server capability */
@@ -60,6 +68,9 @@ typedef unsigned int ssize_t;
 
 /* gettimeofday() is implemented in otime.c for Windows */
 #define HAVE_GETTIMEOFDAY 1
+
+/* Define to 1 if you have the 'chsize' function. */
+#define HAVE_CHSIZE 1
 
 /* Define to 1 if you have the `chdir' function. */
 #define HAVE_CHDIR 1

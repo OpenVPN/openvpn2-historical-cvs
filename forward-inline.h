@@ -90,8 +90,7 @@ static inline void
 check_add_routes (struct context *c)
 {
   void check_add_routes_dowork (struct context *c);
-  if (event_timeout_trigger
-      (&c->c2.route_wakeup, &c->c2.timeval))
+  if (event_timeout_trigger (&c->c2.route_wakeup, &c->c2.timeval, ETT_DEFAULT))
     check_add_routes_dowork (c);
 }
 
@@ -104,8 +103,23 @@ check_inactivity_timeout (struct context *c)
   void check_inactivity_timeout_dowork (struct context *c);
 
   if (c->options.inactivity_timeout
-      && event_timeout_trigger (&c->c2.inactivity_interval, &c->c2.timeval))
+      && event_timeout_trigger (&c->c2.inactivity_interval, &c->c2.timeval, ETT_DEFAULT))
     check_inactivity_timeout_dowork (c);
+}
+
+/*
+ * Should we write timer-triggered status file.
+ */
+static inline void
+check_status_file (struct context *c)
+{
+  void check_status_file_dowork (struct context *c);
+
+  if (c->c1.status_output)
+    {
+      if (status_trigger_tv (c->c1.status_output, &c->c2.timeval))
+	check_status_file_dowork (c);
+    }
 }
 
 /*
@@ -128,7 +142,7 @@ static inline void
 check_push_request (struct context *c)
 {
   void check_push_request_dowork (struct context *c);
-  if (event_timeout_trigger (&c->c2.push_request_interval, &c->c2.timeval))
+  if (event_timeout_trigger (&c->c2.push_request_interval, &c->c2.timeval, ETT_DEFAULT))
     check_push_request_dowork (c);
 }
 
@@ -142,7 +156,7 @@ static inline void
 check_packet_id_persist_flush (struct context *c)
 {
   if (packet_id_persist_enabled (&c->c1.pid_persist)
-      && event_timeout_trigger (&c->c2.packet_id_persist_interval, &c->c2.timeval))
+      && event_timeout_trigger (&c->c2.packet_id_persist_interval, &c->c2.timeval, ETT_DEFAULT))
     packet_id_persist_save (&c->c1.pid_persist);
 }
 #endif
@@ -184,6 +198,21 @@ register_activity (struct context *c)
 {
   if (c->options.inactivity_timeout)
     event_timeout_reset (&c->c2.inactivity_interval);
+}
+
+/*
+ * Return the io_wait() flags appropriate for
+ * a point-to-point tunnel.
+ */
+static inline unsigned int
+p2p_iow_flags (const struct context *c)
+{
+  unsigned int flags = (IOW_SHAPER|IOW_CHECK_RESIDUAL|IOW_FRAG);
+  if (c->c2.to_link.len > 0)
+    flags |= IOW_TO_LINK;
+  if (c->c2.to_tun.len > 0)
+    flags |= IOW_TO_TUN;
+  return flags;
 }
 
 #define CONNECTION_ESTABLISHED(c) (get_link_socket_info(c)->connection_established)

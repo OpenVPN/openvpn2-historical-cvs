@@ -48,6 +48,6 @@ void post_init_signal_catch (void);
 
 const char *signal_description (int signum, const char *sigtext);
 void print_signal (const struct signal_info *si, const char *title);
-void print_status (const struct context *c);
+void print_status (const struct context *c, struct status_output *so);
 
 #endif

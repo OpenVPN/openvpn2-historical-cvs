@@ -32,7 +32,7 @@
 
 #include "buffer.h"
 
-#define MAX_ROUTES 50
+#define MAX_ROUTES 100
 
 struct route_special_addr
 {

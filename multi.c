@@ -544,17 +544,23 @@ multi_get_create_instance (struct multi_thread *mt)
 
 /*
  * Dump tables -- triggered by SIGUSR2.
+ * If status file is defined, write to file.
+ * If status file is NULL, write to syslog.
  */
 static void
-multi_print_status (struct multi_context *m)
+multi_print_status (struct multi_context *m, struct status_output *so)
 {
   if (m->hash)
     {
+      struct gc_arena gc_top = gc_new ();
       struct hash_iterator hi;
       const struct hash_element *he;
 
-      msg (M_INFO, "CLIENT LIST");
-      msg (M_INFO, "Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since");
+      status_reset (so);
+
+      status_printf (so, PACKAGE_NAME " CLIENT LIST");
+      status_printf (so, "Updated,%s", time_string (0, 0, false, &gc_top));
+      status_printf (so, "Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since");
       hash_iterator_init (m->hash, &hi, true);
       while ((he = hash_iterator_next (&hi)))
 	{
@@ -563,19 +569,19 @@ multi_print_status (struct multi_context *m)
 
 	  if (!mi->halt)
 	    {
-	      msg (M_INFO, "%s,%s," counter_format_simple "," counter_format_simple ",%s",
-		   tls_common_name (mi->context.c2.tls_multi, false),
-		   mroute_addr_print (&mi->real, &gc),
-		   mi->context.c2.link_read_bytes,
-		   mi->context.c2.link_write_bytes,
-		   time_string (mi->created, 0, false, &gc));
+	      status_printf (so, "%s,%s," counter_format "," counter_format ",%s",
+			     tls_common_name (mi->context.c2.tls_multi, false),
+			     mroute_addr_print (&mi->real, &gc),
+			     mi->context.c2.link_read_bytes,
+			     mi->context.c2.link_write_bytes,
+			     time_string (mi->created, 0, false, &gc));
 	    }
 	  gc_free (&gc);
 	}
       hash_iterator_free (&hi);
 
-      msg (M_INFO, "ROUTING TABLE");
-      msg (M_INFO, "Virtual Address,Common Name,Real Address,Last Ref");
+      status_printf (so, "ROUTING TABLE");
+      status_printf (so, "Virtual Address,Common Name,Real Address,Last Ref");
       hash_iterator_init (m->vhash, &hi, true);
       while ((he = hash_iterator_next (&hi)))
 	{
@@ -590,20 +596,24 @@ multi_print_status (struct multi_context *m)
 
 	      if (route->flags & MULTI_ROUTE_CACHE)
 		flags[0] = 'C';
-	      msg (M_INFO, "%s%s,%s,%s,%s",
-		   mroute_addr_print (ma, &gc),
-		   flags,
-		   tls_common_name (mi->context.c2.tls_multi, false),
-		   mroute_addr_print (&mi->real, &gc),
-		   time_string (route->last_reference, 0, false, &gc));
+	      status_printf (so, "%s%s,%s,%s,%s",
+			     mroute_addr_print (ma, &gc),
+			     flags,
+			     tls_common_name (mi->context.c2.tls_multi, false),
+			     mroute_addr_print (&mi->real, &gc),
+			     time_string (route->last_reference, 0, false, &gc));
 	    }
 	  gc_free (&gc);
 	}
       hash_iterator_free (&hi);
 
-      msg (M_INFO, "GLOBAL STATS");
-      msg (M_INFO, "Max bcast/mcast queue length: %d",
+      status_printf (so, "GLOBAL STATS");
+      status_printf (so, "Max bcast/mcast queue length,%d",
 	   mbuf_maximum_queued (m->mbuf));
+
+      status_printf (so, "END");
+      status_flush (so);
+      gc_free (&gc_top);
     }
 }
 
@@ -831,7 +841,7 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
    */
   if (m->ifconfig_pool)
     {
-      mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote);
+      mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote, tls_common_name (mi->context.c2.tls_multi, false));
       if (mi->vaddr_handle >= 0)
 	{
 	  if (local)
@@ -1032,79 +1042,6 @@ multi_get_timeout (struct multi_thread *mt, struct timeval *dest)
 }
 
 /*
- * Wait for an event.
- */
-static void
-multi_select (struct multi_thread *mt)
-{
-  /*
-   * Set up for select call.
-   *
-   * Decide what kind of events we want to wait for.
-   */
-  wait_reset (&mt->top.c2.event_wait);
-
-  /*
-   * On win32 we use the keyboard or an event object as a source
-   * of asynchronous signals.
-   */
-  WAIT_SIGNAL (&mt->top.c2.event_wait);
-
-  /*
-   * If outgoing data (for TCP/UDP port) pending, wait for ready-to-send
-   * status from TCP/UDP port. Otherwise, wait for incoming data on
-   * TUN/TAP device.
-   */
-  if (mt->link_out)
-    {
-      SOCKET_SET_WRITE (&mt->top.c2.event_wait, mt->top.c2.link_socket);
-    }
-  else
-    {
-      TUNTAP_SET_READ (&mt->top.c2.event_wait, mt->top.c1.tuntap);
-    }
-
-  /*
-   * outgoing bcast buffer is waiting to be sent
-   */
-  if (mbuf_defined (mt->multi->mbuf))
-    {
-      SOCKET_SET_WRITE (&mt->top.c2.event_wait, mt->top.c2.link_socket);
-    }
-
-  /*
-   * If outgoing data (for TUN/TAP device) pending, wait for ready-to-send status
-   * from device.  Otherwise, wait for incoming data on TCP/UDP port.
-   */
-  if (mt->tun_out)
-    {
-      TUNTAP_SET_WRITE (&mt->top.c2.event_wait, mt->top.c1.tuntap);
-    }
-  else
-    {
-      SOCKET_SET_READ (&mt->top.c2.event_wait, mt->top.c2.link_socket);
-    }
-
-  /*
-   * Wait for something to happen.
-   */
-  mt->top.c2.select_status = 1;	/* this will be our return "status" if select doesn't get called */
-  if (!mt->top.sig->signal_received)
-    {
-      multi_get_timeout (mt, &mt->top.c2.timeval);
-      if (check_debug_level (D_SELECT))
-	show_select_status (&mt->top);
-      mt->top.c2.select_status = SELECT (&mt->top.c2.event_wait, &mt->top.c2.timeval);
-      check_status (mt->top.c2.select_status, "multi-select", NULL, NULL);
-    }
-
-  update_time ();
-
-  /* set signal_received if a signal was received */
-  SELECT_SIGNAL_RECEIVED (&mt->top.c2.event_wait, mt->top.sig->signal_received);
-}
-
-/*
  * Add a packet to a client instance output queue.
  */
 static inline void
@@ -1262,6 +1199,7 @@ multi_process_post (struct multi_thread *mt, struct multi_instance *mi)
 static void
 multi_process_incoming_link (struct multi_thread *mt)
 {
+  struct gc_arena gc = gc_new ();
   if (BLEN (&mt->top.c2.buf) > 0)
     {
       struct context *c;
@@ -1301,13 +1239,13 @@ multi_process_incoming_link (struct multi_thread *mt)
 	  /* drop packet if extract failed */
 	  if (!(mroute_flags & MROUTE_EXTRACT_SUCCEEDED))
 	    {
-	      msg (D_MULTI_DEBUG, "MULTI: badly formed packet from client, packet dropped");
 	      c->c2.to_tun.len = 0;
 	    }
 	  /* make sure that source address is associated with this client */
 	  else if (multi_get_instance_by_virtual_addr (m, &src, true) != mt->tun_out)
 	    {
-	      msg (D_MULTI_DEBUG, "MULTI: bad source address from client, packet dropped");
+	      msg (D_MULTI_DEBUG, "MULTI: bad source address from client [%s], packet dropped",
+		   mroute_addr_print (&src, &gc));
 	      c->c2.to_tun.len = 0;
 	    }
 	  /* client-to-client communication enabled? */
@@ -1368,6 +1306,10 @@ multi_process_incoming_link (struct multi_thread *mt)
 	      /* learn source address */
 	      multi_learn_addr (m, mt->tun_out, &src, 0);
 	    }
+	  else
+	    {
+	      c->c2.to_tun.len = 0;
+	    }
 	}
       
       /* postprocess and set wakeup */
@@ -1375,6 +1317,7 @@ multi_process_incoming_link (struct multi_thread *mt)
 
       clear_prefix ();
     }
+  gc_free (&gc);
 }
 
 /*
@@ -1384,6 +1327,7 @@ multi_process_incoming_link (struct multi_thread *mt)
 static void
 multi_process_incoming_tun (struct multi_thread *mt)
 {
+  struct gc_arena gc = gc_new ();
   struct multi_context *m = mt->multi;
   if (BLEN (&mt->top.c2.buf) > 0)
     {
@@ -1437,6 +1381,7 @@ multi_process_incoming_tun (struct multi_thread *mt)
 	    }
 	}
     }
+  gc_free (&gc);
 }
 
 /*
@@ -1514,33 +1459,32 @@ multi_process_outgoing_tun (struct multi_thread *mt)
 void
 multi_process_io (struct multi_thread *mt)
 {
-  if (mt->top.c2.select_status > 0)
+  const unsigned int status = mt->top.c2.event_set_status;
+
+  /* Incoming data on TCP/UDP port */
+  if (status & SOCKET_READ)
     {
-      /* Incoming data on TCP/UDP port */
-      if (SOCKET_ISSET (&mt->top.c2.event_wait, mt->top.c2.link_socket, reads))
-	{
-	  read_incoming_link (&mt->top);
-	  if (!IS_SIG (&mt->top))
-	    multi_process_incoming_link (mt);
-	}
-      /* Incoming data on TUN device */
-      else if (TUNTAP_ISSET (&mt->top.c2.event_wait, mt->top.c1.tuntap, reads))
-	{
-	  read_incoming_tun (&mt->top);
-	  if (!IS_SIG (&mt->top))
-	    multi_process_incoming_tun (mt);
-	}
-      /* TUN device ready to accept write */
-      else if (TUNTAP_ISSET (&mt->top.c2.event_wait, mt->top.c1.tuntap, writes))
-	{
-	  multi_process_outgoing_tun (mt);
-	}
-      /* TCP/UDP port ready to accept write -- we put this last in the list so
-         that broadcast/multicast forwards don't cause client receive starvation */
-      else if (SOCKET_ISSET (&mt->top.c2.event_wait, mt->top.c2.link_socket, writes))
-	{
-	  multi_process_outgoing_link (mt);
-	}
+      read_incoming_link (&mt->top);
+      if (!IS_SIG (&mt->top))
+	multi_process_incoming_link (mt);
+    }
+  /* Incoming data on TUN device */
+  else if (status & TUN_READ)
+    {
+      read_incoming_tun (&mt->top);
+      if (!IS_SIG (&mt->top))
+	multi_process_incoming_tun (mt);
+    }
+  /* TUN device ready to accept write */
+  else if (status & TUN_WRITE)
+    {
+      multi_process_outgoing_tun (mt);
+    }
+  /* TCP/UDP port ready to accept write -- we put this last in the list so
+     that broadcast/multicast forwards don't cause client receive starvation */
+  else if (status & SOCKET_WRITE)
+    {
+      multi_process_outgoing_link (mt);
     }
 }
 
@@ -1569,7 +1513,9 @@ multi_process_timeout (struct multi_thread *mt)
   { \
     if (thread->top.sig->signal_received == SIGUSR2) \
       { \
-        multi_print_status (thread->multi); \
+        struct status_output *so = status_open (NULL, 0, M_INFO); \
+        multi_print_status (thread->multi, so); \
+        status_close (so); \
         thread->top.sig->signal_received = 0; \
         continue; \
       } \
@@ -1598,6 +1544,41 @@ multi_thread_free (struct multi_thread *thread)
   close_context (&thread->top, -1);
   free_context_buffers (thread->context_buffers);
   free (thread);
+}
+
+/*
+ * Return the io_wait() flags appropriate for
+ * a point-to-multipoint tunnel.
+ */
+static inline unsigned int
+p2mp_iow_flags (const struct multi_thread *mt)
+{
+  unsigned int flags = 0;
+  if (mt->link_out)
+    flags |= IOW_TO_LINK;
+  if (mt->tun_out)
+    flags |= IOW_TO_TUN;
+  if (mbuf_defined (mt->multi->mbuf))
+    flags |= IOW_MBUF;
+  return flags;
+}
+
+static inline void
+process_per_second_timers (struct multi_thread *thread)
+{
+  if (thread->per_second_trigger != now)
+    {
+      /* possibly reap instances/routes in vhash */
+      multi_reap_process (thread->multi);
+
+      /* possibly print to status log */
+      if (thread->top.c1.status_output) {
+	if (status_trigger (thread->top.c1.status_output))
+	  multi_print_status (thread->multi, thread->top.c1.status_output);
+      }
+
+      thread->per_second_trigger = now;
+    }
 }
 
 /*
@@ -1630,15 +1611,16 @@ tunnel_server_single_threaded (struct context *top)
   /* per-packet event loop */
   while (true)
     {
-      /* set up and do the select() */
-      multi_select (thread);
+      /* set up and do the io_wait() */
+      multi_get_timeout (thread, &thread->top.c2.timeval);
+      io_wait (&thread->top, p2mp_iow_flags (thread));
       TNUS_SIG ();
 
-      /* possibly reap instances/routes in vhash */
-      multi_reap_process (&multi);
+      /* check on status of coarse timers */
+      process_per_second_timers (thread);
 
       /* timeout? */
-      if (!thread->top.c2.select_status)
+      if (thread->top.c2.event_set_status == ES_TIMEOUT)
 	{
 	  multi_process_timeout (thread);
 	}

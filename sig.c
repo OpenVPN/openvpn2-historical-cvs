@@ -31,6 +31,7 @@
 
 #include "syshead.h"
 
+#include "buffer.h"
 #include "error.h"
 #include "io.h"
 #include "openvpn.h"
@@ -151,28 +152,30 @@ post_init_signal_catch (void)
  * Triggered by SIGUSR2 or F2 on Windows.
  */
 void
-print_status (const struct context *c)
+print_status (const struct context *c, struct status_output *so)
 {
   struct gc_arena gc = gc_new ();
-  msg (M_INFO, "Current " PACKAGE_NAME " Statistics:");
-  msg (M_INFO, " TUN/TAP read bytes:   " counter_format,
-       c->c2.tun_read_bytes);
-  msg (M_INFO, " TUN/TAP write bytes:  " counter_format,
-       c->c2.tun_write_bytes);
-  msg (M_INFO, " TCP/UDP read bytes:   " counter_format,
-       c->c2.link_read_bytes);
-  msg (M_INFO, " TCP/UDP write bytes:  " counter_format,
-       c->c2.link_write_bytes);
-  msg (M_INFO, " Auth read bytes:      " counter_format,
-       c->c2.link_read_bytes_auth);
+
+  status_reset (so);
+
+  status_printf (so, PACKAGE_NAME " STATISTICS");
+  status_printf (so, "Updated,%s", time_string (0, 0, false, &gc));
+  status_printf (so, "TUN/TAP read bytes," counter_format, c->c2.tun_read_bytes);
+  status_printf (so, "TUN/TAP write bytes," counter_format, c->c2.tun_write_bytes);
+  status_printf (so, "TCP/UDP read bytes," counter_format, c->c2.link_read_bytes);
+  status_printf (so, "TCP/UDP write bytes," counter_format, c->c2.link_write_bytes);
+  status_printf (so, "Auth read bytes," counter_format, c->c2.link_read_bytes_auth);
 #ifdef USE_LZO
   if (c->options.comp_lzo)
-    lzo_print_stats (&c->c2.lzo_compwork);
+    lzo_print_stats (&c->c2.lzo_compwork, so);
 #endif
 #ifdef WIN32
   if (tuntap_defined (c->c1.tuntap))
-    msg (M_INFO, " TAP-WIN32 driver status: %s",
+    status_printf (so, "TAP-WIN32 driver status,\"%s\"",
 	 tap_win32_getinfo (c->c1.tuntap, &gc));
 #endif
+
+  status_printf (so, "END");
+  status_flush (so);
   gc_free (&gc);
 }

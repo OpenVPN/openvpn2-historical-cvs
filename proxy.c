@@ -76,7 +76,7 @@ recv_line (socket_descriptor_t sd,
 
       status = select (sd + 1, &reads, NULL, NULL, &tv);
 
-      GET_SIGNAL (*signal_received);
+      get_signal (signal_received);
       if (*signal_received)
 	goto error;
 

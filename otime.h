@@ -39,7 +39,6 @@
 
 struct frequency_limit
 {
-  MUTEX_DEFINE (mutex);
   int max;
   int per;
   int n;

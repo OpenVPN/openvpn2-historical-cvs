@@ -56,7 +56,7 @@ struct mbuf_item
 
 struct mbuf_set
 {
-  MUTEX_DEFINE (mutex);
+  //MUTEX_DEFINE (mutex);
   unsigned int head;
   unsigned int len;
   unsigned int capacity;
@@ -85,7 +85,7 @@ mbuf_extract_item_lock (struct mbuf_set *ms, struct mbuf_item *item, bool lock)
 {
   if (lock)
     {
-      mutex_lock (&ms->mutex);
+      //mutex_lock (&ms->mutex);
     }
   if (ms->len)
     {
@@ -98,7 +98,7 @@ mbuf_extract_item_lock (struct mbuf_set *ms, struct mbuf_item *item, bool lock)
     {
       if (lock)
 	{
-	  mutex_unlock (&ms->mutex);
+	  //mutex_unlock (&ms->mutex);
 	}
       return false;
     }
@@ -107,7 +107,7 @@ mbuf_extract_item_lock (struct mbuf_set *ms, struct mbuf_item *item, bool lock)
 static inline void
 mbuf_extract_item_unlock (struct mbuf_set *ms)
 {
-  mutex_unlock (&ms->mutex);
+  //mutex_unlock (&ms->mutex);
 }
 
 static inline int

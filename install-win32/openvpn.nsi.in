@@ -19,6 +19,9 @@
 !define MUI_PRODUCT "OpenVPN"
 !define MUI_VERSION "@VERSION@" # AUTO_VERSION
 
+!define TAP "tap0801"
+!define TAPDRV "${TAP}.sys"
+
 ; something like "-DBG2"
 !define OUTFILE_LABEL ""
 
@@ -235,20 +238,20 @@ Section "TAP-Win32 Virtual Ethernet Adapter" SecTAP
 
   FileOpen $R0 "$INSTDIR\bin\addtap.bat" w
   FileWrite $R0 "rem Add a new TAP-Win32 virtual ethernet adapter$\r$\n"
-  FileWrite $R0 '"$INSTDIR\bin\tapinstall.exe" install "$INSTDIR\driver\OemWin2k.inf" TAPDEV$\r$\n'
+  FileWrite $R0 '"$INSTDIR\bin\tapinstall.exe" install "$INSTDIR\driver\OemWin2k.inf" ${TAP}$\r$\n'
   FileWrite $R0 "pause$\r$\n"
   FileClose $R0
 
   FileOpen $R0 "$INSTDIR\bin\deltapall.bat" w
   FileWrite $R0 "echo WARNING: this script will delete ALL TAP-Win32 virtual adapters (use the device manager to delete adapters one at a time)$\r$\n"
   FileWrite $R0 "pause$\r$\n"
-  FileWrite $R0 '"$INSTDIR\bin\tapinstall.exe" remove TAPDEV$\r$\n'
+  FileWrite $R0 '"$INSTDIR\bin\tapinstall.exe" remove ${TAP}$\r$\n'
   FileWrite $R0 "pause$\r$\n"
   FileClose $R0
 
   SetOutPath "$INSTDIR\driver"
   File "${HOME}\tap-win32\i386\OemWin2k.inf"
-  File "${HOME}\tap-win32\i386\tapdrvr.sys"
+  File "${HOME}\tap-win32\i386\${TAPDRV}"
 
 SectionEnd
 
@@ -302,15 +305,15 @@ Section -post
     ; If tapinstall error occurred, $5 will
     ; be nonzero.
     IntOp $5 0 & 0
-    nsExec::ExecToStack '"$INSTDIR\bin\tapinstall.exe" hwids TAPDEV'
+    nsExec::ExecToStack '"$INSTDIR\bin\tapinstall.exe" hwids ${TAP}'
     Pop $R0 # return value/error/timeout
     IntOp $5 $5 | $R0
     DetailPrint "tapinstall hwids returned: $R0"
 
-    ; If tapinstall output string contains "TAPDEV" we assume
+    ; If tapinstall output string contains "${TAP}" we assume
     ; that TAP device has been previously installed,
     ; therefore we will update, not install.
-    Push "TAPDEV"
+    Push "${TAP}"
     Call StrStr
     Pop $R0
 
@@ -319,18 +322,21 @@ Section -post
 
  ;tapupdate:
     DetailPrint "TAP-Win32 UPDATE"
-    nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" update "$INSTDIR\driver\OemWin2k.inf" TAPDEV'
+    nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" update "$INSTDIR\driver\OemWin2k.inf" ${TAP}'
     Pop $R0 # return value/error/timeout
     IntOp $5 $5 | $R0
     DetailPrint "tapinstall update returned: $R0"
     Goto tapinstall_check_error
 
  tapinstall:
-    DetailPrint "TAP-Win32 REMOVE (TAP)"
+    DetailPrint "TAP-Win32 REMOVE OLD TAP"
     nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" remove TAP'
     Pop $R0 # return value/error/timeout
-    DetailPrint "TAP-Win32 INSTALL (TAPDEV)"
-    nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" install "$INSTDIR\driver\OemWin2k.inf" TAPDEV'
+    nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" remove TAPDEV'
+    Pop $R0 # return value/error/timeout
+
+    DetailPrint "TAP-Win32 INSTALL (${TAP})"
+    nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" install "$INSTDIR\driver\OemWin2k.inf" ${TAP}'
     Pop $R0 # return value/error/timeout
     IntOp $5 $5 | $R0
     DetailPrint "tapinstall install returned: $R0"
@@ -468,7 +474,7 @@ Section "Uninstall"
   Sleep 2000
 
   DetailPrint "TAP-Win32 REMOVE"
-  nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" remove TAPDEV'
+  nsExec::ExecToLog '"$INSTDIR\bin\tapinstall.exe" remove ${TAP}'
   Pop $R0 # return value/error/timeout
   DetailPrint "tapinstall remove returned: $R0"
 
@@ -491,7 +497,7 @@ Section "Uninstall"
   Delete "$INSTDIR\log\README.txt"
 
   Delete "$INSTDIR\driver\OemWin2k.inf"
-  Delete "$INSTDIR\driver\tapdrvr.sys"
+  Delete "$INSTDIR\driver\${TAPDRV}"
 
   Delete "$INSTDIR\bin\openssl.exe"
 

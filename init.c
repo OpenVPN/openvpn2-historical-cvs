@@ -37,6 +37,7 @@
 #include "occ.h"
 #include "list.h"
 #include "otime.h"
+#include "pool.h"
 
 #include "memdbg.h"
 
@@ -101,6 +102,11 @@ context_init_1 (struct context *c)
   c->c1.socks_proxy = NULL;
 
   init_remote_list (c);
+  
+  c->c1.status_output = status_open (c->options.status_file,
+				     c->options.status_file_update_freq,
+				     -1);
+  c->c1.status_output_owned = true;
 
   if (c->options.http_proxy_server)
     {
@@ -174,6 +180,11 @@ init_static (void)
 
 #ifdef LIST_TEST
   list_test ();
+  return false;
+#endif
+
+#ifdef IFCONFIG_POOL_TEST
+  ifconfig_pool_test (0x0A010004, 0x0A0100FF);
   return false;
 #endif
 
@@ -1456,6 +1467,16 @@ do_close_packet_id (struct context *c)
 #endif
 }
 
+static void
+do_close_status_output (struct context *c)
+{
+  if (!(c->sig->signal_received == SIGUSR1))
+    {
+      if (c->c1.status_output_owned && c->c1.status_output)
+	status_close (c->c1.status_output);
+    }
+}
+
 /*
  * Close fragmentation handler.
  */
@@ -1473,10 +1494,41 @@ do_close_syslog (struct context *c)
     close_syslog ();
 }
 
+/*
+ * Open and close our event objects.
+ */
+
 static void
-do_close_event_wait (struct context *c)
+do_event_set_init (struct context *c,
+		   bool need_scalable,
+		   bool need_us_timeout)
 {
-  wait_free (&c->c2.event_wait);
+  unsigned int flags = 0;
+
+  c->c2.event_set_max = 3;
+
+  if (need_scalable)
+    {
+      flags |= EVENT_METHOD_SCALABLE;
+      c->c2.event_set_max = 1000;
+    }
+  else
+    flags |= EVENT_METHOD_FAST;
+
+  if (need_us_timeout)
+    flags |= EVENT_METHOD_US_TIMEOUT;
+
+  c->c2.event_set = event_set_init (&c->c2.event_set_max, flags);
+  c->c2.event_set_owned = true;
+}
+
+static void
+do_close_event_set (struct context *c)
+{
+  if (c->c2.event_set_owned)
+    {
+      event_free (c->c2.event_set);
+    }
 }
 
 /*
@@ -1529,8 +1581,8 @@ init_instance (struct context *c)
     c->c2.occ_op = occ_reset_op ();
 
   /* our wait-for-i/o objects, different for posix vs. win32 */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
-    wait_init (&c->c2.event_wait, WAIT_READ|WAIT_WRITE);
+  if (c->mode == CM_P2P)
+    do_event_set_init (c, false, SHAPER_DEFINED (&c->options));
 
   /* allocate our socket object */
   if (c->mode == CM_P2P || c->mode == CM_TOP || c->mode == CM_CHILD_TCP)
@@ -1623,8 +1675,8 @@ init_instance (struct context *c)
 void
 close_instance (struct context *c)
 {
-  /* close event objects used for select() */
-  do_close_event_wait (c);
+  /* close event objects */
+  do_close_event_set (c);
 
     if (c->mode == CM_P2P
 	|| c->mode == CM_CHILD_TCP
@@ -1660,6 +1712,9 @@ close_instance (struct context *c)
 
 	/* close packet-id persistance file */
 	do_close_packet_id (c);
+
+	/* close --status file */
+	do_close_status_output (c);
 
 	/* close fragmentation handler */
 	do_close_fragment (c);
@@ -1760,10 +1815,14 @@ inherit_context_thread (struct context *dest,
   gc_detach (&dest->c2.gc);
 
   dest->c1.tuntap_owned = false;
+  dest->c1.status_output_owned = false;
   dest->c2.link_socket_owned = false;
   dest->c2.buffers_owned = false;
+  dest->c2.event_set_owned = false;
 
-  wait_init (&dest->c2.event_wait, WAIT_READ|WAIT_WRITE);
+  do_event_set_init (dest,
+		     src->options.proto == PROTO_TCPv4_SERVER,
+		     false);
 }
 
 void

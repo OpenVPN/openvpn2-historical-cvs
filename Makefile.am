@@ -76,6 +76,7 @@ openvpn_SOURCES = \
 	socket.c socket.h \
 	socks.c socks.h \
 	ssl.c ssl.h \
+	status.c status.h \
 	syshead.h \
 	thread.c thread.h \
 	tun.c tun.h

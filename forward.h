@@ -30,16 +30,23 @@
 #include "occ.h"
 #include "ping.h"
 
-void pre_select (struct context *c);
+#define IOW_TO_LINK         (1<<0)
+#define IOW_TO_TUN          (1<<1)
+#define IOW_SHAPER          (1<<2)
+#define IOW_CHECK_RESIDUAL  (1<<3)
+#define IOW_FRAG            (1<<4)
+#define IOW_MBUF            (1<<5)
 
-void single_select (struct context *c);
+void io_wait (struct context *c, unsigned int flags);
+
+void pre_select (struct context *c);
 
 void process_io (struct context *c);
 
 void encrypt_sign (struct context *c, bool comp_frag);
 
-const char *select_status_string (struct context *c, struct gc_arena *gc);
-void show_select_status (struct context *c);
+const char *wait_status_string (struct context *c, struct gc_arena *gc);
+void show_wait_status (struct context *c);
 
 void read_incoming_link (struct context *c);
 void process_incoming_link (struct context *c);

@@ -57,6 +57,7 @@
 #define D_MULTI_ERRORS       LOGLEV(1, 9, M_NONFATAL)   /* show multi-client server errors */
 #define D_PUSH_ERRORS        LOGLEV(1, 10, M_NONFATAL)  /* show push/pull errors */
 #define D_IMPORT_ERRORS      LOGLEV(1, 11, M_NONFATAL)  /* show server import option errors */
+#define D_EVENT_ERRORS       LOGLEV(1, 12, M_NONFATAL)  /* show event.[ch] errors */
 
 #define D_HANDSHAKE          LOGLEV(2, 20, 0)        /* show data & control channel handshakes */
 #define D_MTU_INFO           LOGLEV(2, 21, 0)        /* show terse MTU info */
@@ -106,7 +107,7 @@
 #define D_SCHEDULER          LOGLEV(8, 70, M_DEBUG)  /* show scheduler debugging info */
 #define D_GREMLIN_VERBOSE    LOGLEV(8, 70, M_DEBUG)  /* show verbose info from gremlin module */
 #define D_REL_DEBUG          LOGLEV(8, 70, M_DEBUG)  /* show detailed info from reliable routines */
-#define D_SELECT             LOGLEV(8, 70, M_DEBUG)  /* show detailed info from main select() call */
+#define D_EVENT_WAIT         LOGLEV(8, 70, M_DEBUG)  /* show detailed info from event waits */
 #define D_TUN_RW             LOGLEV(8, 70, M_DEBUG)  /* show TUN/TAP reads/writes */
 
 #define D_TLS_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show detailed info from TLS routines */

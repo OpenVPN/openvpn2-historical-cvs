@@ -119,7 +119,7 @@ getaddr (unsigned int flags,
 
 	  if (signal_received)
 	    {
-	      GET_SIGNAL (*signal_received);
+	      get_signal (signal_received);
 	      if (*signal_received)
 	        goto done;
 	    }
@@ -524,7 +524,7 @@ socket_listen_accept (socket_descriptor_t sd,
 
       status = select (sd + 1, &reads, NULL, NULL, &tv);
 
-      GET_SIGNAL (*signal_received);
+      get_signal (signal_received);
       if (*signal_received)
 	{
 	  gc_free (&gc);
@@ -584,7 +584,7 @@ socket_connect (socket_descriptor_t *sd,
       const int status = connect (*sd, (struct sockaddr *) remote,
 				  sizeof (*remote));
 
-      GET_SIGNAL (*signal_received);
+      get_signal (signal_received);
       if (*signal_received)
 	goto done;
 
@@ -627,6 +627,8 @@ socket_frame_init (const struct frame *frame, struct link_socket *sock)
 #ifdef WIN32
   overlapped_io_init (&sock->reads, frame, FALSE, false);
   overlapped_io_init (&sock->writes, frame, TRUE, false);
+  sock->rw_handle.read = sock->reads.overlapped.hEvent;
+  sock->rw_handle.write = sock->writes.overlapped.hEvent;
 #endif
 
   if (link_socket_connection_oriented (sock))
@@ -1204,6 +1206,41 @@ link_socket_current_remote (const struct link_socket_info *info)
     return ntohl (lsa->remote.sin_addr.s_addr);
   else
     return 0;
+}
+
+/*
+ * Return a status string describing socket state.
+ */
+const char *
+socket_stat (const struct link_socket *s, unsigned int rwflags, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (64, gc);
+  if (s)
+    {
+      if (rwflags & EVENT_READ)
+	{
+	  buf_printf (&out, "S%s",
+		      (s->rwflags & EVENT_READ) ? "R" : "r");
+#ifdef WIN32
+	  buf_printf (&out, "%s",
+		      overlapped_io_state_ascii (&s->reads));
+#endif
+	}
+      if (rwflags & EVENT_WRITE)
+	{
+	  buf_printf (&out, "S%s",
+		      (s->rwflags & EVENT_WRITE) ? "W" : "w");
+#ifdef WIN32
+	  buf_printf (&out, "%s",
+		      overlapped_io_state_ascii (&s->writes));
+#endif
+	}
+    }
+  else
+    {
+      buf_printf (&out, "S?");
+    }
+  return BSTR (&out);
 }
 
 /*

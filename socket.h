@@ -116,34 +116,19 @@ struct socket_buffer_size
  */
 struct link_socket
 {
-  /* if true, indicates a stream protocol returned more than one encapsulated packet */
-# define SOCKET_READ_RESIDUAL(s) ((s) && (s)->stream_buf.residual_fully_formed)
-
-#ifdef WIN32
-  /* these macros are called in the context of the openvpn() function */
-# define SOCKET_SET_READ(w, s) { if ((s) && stream_buf_read_setup (s)) { \
-                                   wait_add ((w), (s)->reads.overlapped.hEvent); \
-                                   socket_recv_queue ((s), 0); }}
-# define SOCKET_SET_WRITE(w, s)  { if (s)     wait_add ((w), (s)->writes.overlapped.hEvent); }
-# define SOCKET_ISSET(w, s, set) ( (s) && wait_trigger ((w), (s)->set.overlapped.hEvent))
-# define SOCKET_READ_STAT(w, s, gc)  ((s) ? overlapped_io_state_ascii (&((s)->reads),  "sr", (gc)) : "srU")
-# define SOCKET_WRITE_STAT(w, s, gc) ((s) ? overlapped_io_state_ascii (&((s)->writes), "sw", (gc)) : "swU")
-  struct overlapped_io reads;
-  struct overlapped_io writes;
-#else
-  /* these macros are called in the context of the openvpn() function */
-# define SOCKET_SET_READ(w, s)  { if ((s) && stream_buf_read_setup (s)) wait_add_reads  ((w), (s)->sd); }
-# define SOCKET_SET_WRITE(w, s) { if  (s)                               wait_add_writes ((w), (s)->sd); }
-
-# define SOCKET_ISSET(w, s, set)      ((s) && wait_test_##set ((w), (s)->sd))
-# define SOCKET_READ_STAT(w, s, gc)   (          SOCKET_ISSET ((w), (s), reads)  ? "SR" : "sr")
-# define SOCKET_WRITE_STAT(w, s, gc)  (          SOCKET_ISSET ((w), (s), writes) ? "SW" : "sw")
-#endif
-
   struct link_socket_info info;
 
   socket_descriptor_t sd;
   socket_descriptor_t ctrl_sd;  /* only used for UDP over Socks */
+
+#ifdef WIN32
+  struct overlapped_io reads;
+  struct overlapped_io writes;
+  struct rw_handle rw_handle;
+#endif
+
+  /* used for printing status info only */
+  unsigned int rwflags;
 
   /* set on initial call to init phase 1 */
   struct remote_list *remote_list;
@@ -695,5 +680,46 @@ link_socket_write (struct link_socket *sock,
       return -1; /* NOTREACHED */
     }
 }
+
+/*
+ * Socket I/O wait functions
+ */
+
+static inline bool
+socket_read_residual (const struct link_socket *s)
+{
+  return s && s->stream_buf.residual_fully_formed;
+}
+
+static inline event_t
+socket_event_handle (const struct link_socket *s)
+{
+#ifdef WIN32
+  return &s->rw_handle;
+#else
+  return s->sd;
+#endif
+}
+
+static inline void
+socket_set (struct link_socket *s, struct event_set *es, unsigned int rwflags, void *arg)
+{
+  if (s)
+    {
+      if (rwflags & EVENT_READ)
+	{
+	  if (!stream_buf_read_setup (s))
+	    rwflags &= ~EVENT_READ;
+	}
+      event_ctl (es, socket_event_handle (s), rwflags, arg);
+#ifdef WIN32
+      if (rwflags & EVENT_READ)
+	socket_recv_queue (s, 0);
+#endif
+      s->rwflags = rwflags;
+    }
+}
+
+const char *socket_stat (const struct link_socket *s, unsigned int rwflags, struct gc_arena *gc);
 
 #endif /* SOCKET_H */

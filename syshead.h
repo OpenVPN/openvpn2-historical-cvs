@@ -126,6 +126,10 @@
 #include <netinet/in.h>
 #endif
 
+#ifdef HAVE_SYS_POLL_H
+#include <sys/poll.h>
+#endif
+
 #ifdef HAVE_SYS_EPOLL_H
 #include <sys/epoll.h>
 #endif
@@ -331,15 +335,6 @@ typedef int socket_descriptor_t;
 #endif
 
 /*
- * Our event type
- */
-#ifdef WIN32
-typedef HANDLE event_t;
-#else
-typedef int event_t;
-#endif
-
-/*
  * Do we have point-to-multipoint capability?
  */
 
@@ -347,6 +342,15 @@ typedef int event_t;
 #define P2MP 1
 #else
 #define P2MP 0
+#endif
+
+/*
+ * Is poll available on this platform?
+ */
+#if defined(HAVE_POLL) && defined(HAVE_SYS_POLL_H)
+#define POLL 1
+#else
+#define POLL 0
 #endif
 
 /*

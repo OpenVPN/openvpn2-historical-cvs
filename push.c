@@ -115,6 +115,7 @@ process_incoming_push_msg (struct context *c,
       const uint8_t ch = buf_read_u8 (&buf);
       if (ch == ',')
 	{
+	  pre_pull_restore (&c->options);
 	  if (apply_push_options (&c->options,
 				  &buf,
 				  permission_mask,

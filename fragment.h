@@ -173,7 +173,7 @@ void fragment_wakeup (struct fragment_master *f, struct frame *frame);
 static inline void
 fragment_housekeeping (struct fragment_master *f, struct frame *frame, struct timeval *tv)
 {
-  if (event_timeout_trigger (&f->wakeup, tv))
+  if (event_timeout_trigger (&f->wakeup, tv, ETT_DEFAULT))
     fragment_wakeup (f, frame);
 }
 

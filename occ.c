@@ -40,7 +40,7 @@
 
 /*
  * This random string identifies an OpenVPN
- * options consistency check packet.
+ * Configuration Control packet.
  * It should be of sufficient length and randomness
  * so as not to collide with other tunnel data.
  *
@@ -202,7 +202,7 @@ check_send_occ_load_test_dowork (struct context *c)
       else
 	{
 	  msg (M_INFO,
-	       "NOTE: failed to empirically measure MTU (requires 1.5-beta8 or higher at other end of connection).");
+	       "NOTE: failed to empirically measure MTU (requires OpenVPN 1.5 or higher at other end of connection).");
 	  event_timeout_clear (&c->c2.occ_mtu_load_test_interval);
 	  c->c2.occ_mtu_load_n_tries = 0;
 	}
@@ -292,6 +292,13 @@ check_send_occ_msg_dowork (struct context *c)
 	doit = true;
       }
       break;
+
+    case OCC_EXIT:
+      if (!buf_write_u8 (&c->c2.buf, OCC_EXIT))
+	break;
+      msg (D_PACKET_CONTENT, "SENT OCC_EXIT");
+      doit = true;
+      break;
     }
 
   if (doit)
@@ -367,6 +374,12 @@ process_received_occ_msg (struct context *c)
 		 c->c2.max_send_size_local);
 	}
       event_timeout_clear (&c->c2.occ_mtu_load_test_interval);
+      break;
+
+    case OCC_EXIT:
+      msg (D_PACKET_CONTENT, "RECEIVED OCC_EXIT");
+      c->sig->signal_received = SIGTERM;
+      c->sig->signal_text = "remote-exit";
       break;
     }
   c->c2.buf.len = 0; /* don't pass packet on */

@@ -71,8 +71,13 @@ static inline void
 check_send_occ_msg (struct context *c)
 {
   void check_send_occ_msg_dowork (struct context *c);
-  if (c->c2.occ_op >= 0 && !TO_LINK_DEF(c))
-    check_send_occ_msg_dowork (c);
+  if (c->c2.occ_op >= 0)
+    {
+      if (!TO_LINK_DEF(c))
+	check_send_occ_msg_dowork (c);
+      else
+	tv_clear (&c->c2.timeval);
+    }
 }
 
 #endif

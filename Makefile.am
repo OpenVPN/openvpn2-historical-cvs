@@ -44,6 +44,7 @@ openvpn_SOURCES = \
         forward.c forward.h forward-inline.h \
 	fragment.c fragment.h \
 	gremlin.c gremlin.h \
+	helper.c helper.h \
 	init.c init.h \
 	integer.h \
         interval.c interval.h \

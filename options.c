@@ -48,6 +48,8 @@
 #include "packet_id.h"
 #include "win32.h"
 #include "push.h"
+#include "pool.h"
+#include "helper.h"
 
 #include "memdbg.h"
 
@@ -132,9 +134,10 @@ static const char usage_message[] =
   "                  gateway default: taken from --route-gateway or --ifconfig\n"
   "                  Specify default by leaving blank or setting to \"nil\".\n"
   "--route-gateway gw : Specify a default gateway for use with --route.\n"
-  "--route-delay n : Delay n seconds after connection initiation before\n"
+  "--route-delay n [w] : Delay n seconds after connection initiation before\n"
   "                  adding routes (may be 0).  If not specified, routes will\n"
-  "                  be added immediately after tun/tap open.\n"
+  "                  be added immediately after tun/tap open.  On Windows, wait\n"
+  "                  up to w seconds for TUN/TAP adapter to come up.\n"
   "--route-up cmd  : Execute shell cmd after routes are added.\n"
   "--route-noexec  : Don't add routes automatically.  Instead pass routes to\n"
   "                  --route-up script using environmental variables.\n"
@@ -146,12 +149,16 @@ static const char usage_message[] =
   "                  and 128.0.0.0/1 rather than 0.0.0.0/0.\n"
   "--setenv name value : Set a custom environmental variable to pass to script.\n"
   "--shaper n      : Restrict output to peer to n bytes per second.\n"
+  "--keepalive n m : Helper option for setting timeouts in server mode.  Send\n"
+  "                  ping once every n seconds, restart if ping not received\n"
+  "                  for m seconds.\n"
   "--inactive n    : Exit after n seconds of inactivity on tun/tap device.\n"
   "--ping-exit n   : Exit if n seconds pass without reception of remote ping.\n"
   "--ping-restart n: Restart if n seconds pass without reception of remote ping.\n"
   "--ping-timer-rem: Run the --ping-exit/--ping-restart timer only if we have a\n"
   "                  remote address.\n"
   "--ping n        : Ping remote once every n seconds over TCP/UDP port.\n"
+  "--explicit-exit-notify n : (experimental) on exit, send exit signal to remote.\n"
   "--persist-tun   : Keep tun/tap device open across SIGUSR1 or --ping-restart.\n"
   "--persist-remote-ip : Keep remote IP address across SIGUSR1 or --ping-restart.\n"
   "--persist-local-ip  : Keep local IP address across SIGUSR1 or --ping-restart.\n"
@@ -237,6 +244,10 @@ static const char usage_message[] =
 #if P2MP
   "\n"
   "Multi-Client Server options (when --mode server is used):\n"
+  "--server network netmask : Helper option to easily configure server mode.\n"
+  "--server-bridge IP netmask pool-start-IP pool-end-IP : Helper option to\n"
+"                      easily configure ethernet bridging server mode.\n"
+  "--client          : Helper option to easily configure client mode.\n"
   "--push \"option\" : Push a config file option back to the peer for remote\n"
   "                  execution.  Peer must specify --pull in its config file.\n"
   "--push-reset    : Don't inherit global push list for specific\n"
@@ -259,6 +270,7 @@ static const char usage_message[] =
   "--hash-size r v : Set the size of the real address hash table to r and the\n"
   "                  virtual address table to v.\n"
   "--bcast-buffers n : Allocate n broadcast buffers.\n"
+  "--tcp-queue-limit n : Maximum number of queued TCP output packets.\n"
   "--learn-address cmd : Run script cmd to validate client virtual addresses.\n"
   "--connect-freq n s : Allow a maximum of n new connections per s seconds.\n"
   "--max-clients n : Allow a maximum of n simultaneously connected clients.\n"
@@ -368,6 +380,9 @@ static const char usage_message[] =
   "                            Default is 0.\n"
   "                    lease-time: Lease time in seconds.\n"
   "                                Default is one year.\n"
+  "--route-method    : Which method to use for adding routes on Windows?\n"
+  "                    ipapi (default) -- Use IP helper API.\n"
+  "                    exe -- Call the route.exe shell command.\n"
   "--dhcp-option type [parm] : Set extended TAP-Win32 properties, must\n"
   "                    be used with --ip-win32 dynamic.  For options\n"
   "                    which allow multiple addresses,\n"
@@ -439,6 +454,7 @@ init_options (struct options *o)
   o->mtu_discover_type = -1;
   o->occ = true;
   o->mssfix = MSSFIX_DEFAULT;
+  o->route_delay_window = 30;
 #ifndef WIN32
   o->rcvbuf = 65536;
   o->sndbuf = 65536;
@@ -453,6 +469,7 @@ init_options (struct options *o)
   o->tuntap_options.ip_win32_type = IPW32_SET_DHCP_MASQ;
   o->tuntap_options.dhcp_lease_time = 31536000; /* one year */
   o->tuntap_options.dhcp_masq_offset = 0;       /* use network address as internal DHCP server address */
+  o->route_method = ROUTE_METHOD_IPAPI;
 #endif
 #ifdef USE_PTHREAD
   o->n_threads = 1;
@@ -461,6 +478,7 @@ init_options (struct options *o)
   o->real_hash_size = 256;
   o->virtual_hash_size = 256;
   o->n_bcast_buf = 256;
+  o->tcp_queue_limit = 64;
   o->max_clients = 1024;
 #endif
 #ifdef USE_CRYPTO
@@ -562,8 +580,13 @@ is_persist_option (const struct options *o)
   return o->persist_tun
       || o->persist_key
       || o->persist_local_ip
-      || o->persist_remote_ip
-      || (o->remote_list && o->remote_list->len > 1);
+      || o->persist_remote_ip;
+}
+
+bool
+is_stateful_restart (const struct options *o)
+{
+  return is_persist_option (o) || (o->remote_list && o->remote_list->len > 1);
 }
 
 #ifdef WIN32
@@ -630,6 +653,13 @@ static void
 show_p2mp_parms (const struct options *o)
 {
   struct gc_arena gc = gc_new ();
+  msg (D_SHOW_PARMS, "  server_network = %s", print_in_addr_t (o->server_network, 0, &gc));
+  msg (D_SHOW_PARMS, "  server_netmask = %s", print_in_addr_t (o->server_netmask, 0, &gc));
+  msg (D_SHOW_PARMS, "  server_bridge_ip = %s", print_in_addr_t (o->server_bridge_ip, 0, &gc));
+  msg (D_SHOW_PARMS, "  server_bridge_netmask = %s", print_in_addr_t (o->server_bridge_netmask, 0, &gc));
+  msg (D_SHOW_PARMS, "  server_bridge_pool_start = %s", print_in_addr_t (o->server_bridge_pool_start, 0, &gc));
+  msg (D_SHOW_PARMS, "  server_bridge_pool_end = %s", print_in_addr_t (o->server_bridge_pool_end, 0, &gc));
+  SHOW_BOOL (client);
   if (o->push_list)
     {
       const struct push_list *l = o->push_list;
@@ -640,7 +670,9 @@ show_p2mp_parms (const struct options *o)
   SHOW_BOOL (ifconfig_pool_defined);
   msg (D_SHOW_PARMS, "  ifconfig_pool_start = %s", print_in_addr_t (o->ifconfig_pool_start, 0, &gc));
   msg (D_SHOW_PARMS, "  ifconfig_pool_end = %s", print_in_addr_t (o->ifconfig_pool_end, 0, &gc));
+  msg (D_SHOW_PARMS, "  ifconfig_pool_netmask = %s", print_in_addr_t (o->ifconfig_pool_netmask, 0, &gc));
   SHOW_INT (n_bcast_buf);
+  SHOW_INT (tcp_queue_limit);
   SHOW_INT (real_hash_size);
   SHOW_INT (virtual_hash_size);
   SHOW_STR (client_connect_script);
@@ -722,7 +754,7 @@ options_detach (struct options *o)
 #endif
 }
 
-static void
+void
 rol_check_alloc (struct options *options)
 {
   if (!options->routes)
@@ -786,11 +818,15 @@ show_settings (const struct options *o)
   SHOW_INT (mtu_test);
 
   SHOW_BOOL (mlock);
+
+  SHOW_INT (keepalive_ping);
+  SHOW_INT (keepalive_timeout);
   SHOW_INT (inactivity_timeout);
   SHOW_INT (ping_send_timeout);
   SHOW_INT (ping_rec_timeout);
   SHOW_INT (ping_rec_timeout_action);
   SHOW_BOOL (ping_timer_remote);
+  SHOW_INT (explicit_exit_notification);
 
   SHOW_BOOL (persist_tun);
   SHOW_BOOL (persist_local_ip);
@@ -849,6 +885,7 @@ show_settings (const struct options *o)
   SHOW_STR (route_default_gateway);
   SHOW_BOOL (route_noexec);
   SHOW_INT (route_delay);
+  SHOW_INT (route_delay_window);
   SHOW_BOOL (route_delay_defined);
   if (o->routes)
     print_route_options (o->routes, D_SHOW_PARMS);
@@ -905,6 +942,7 @@ show_settings (const struct options *o)
 
 #ifdef WIN32
   SHOW_BOOL (show_net_up);
+  SHOW_INT (route_method);
   show_tuntap_options (&o->tuntap_options);
 #endif
 }
@@ -955,11 +993,6 @@ options_postprocess (struct options *options, bool first_time)
 	    e->port = options->remote_port;
 	}
     }
-
-  /* will we be pulling options from server? */
-#if P2MP
-  pull = options->pull;
-#endif
 
   /*
    * Sanity check on daemon/inetd modes
@@ -1026,6 +1059,18 @@ options_postprocess (struct options *options, bool first_time)
   }
 
   /*
+   * Process helper-type options which map to other, more complex
+   * sequences of options.
+   */
+  helper_client_server (options);
+  helper_keepalive (options);
+
+  /* will we be pulling options from server? */
+#if P2MP
+  pull = options->pull;
+#endif
+
+  /*
    * Sanity check on --local, --remote, and ifconfig
    */
 
@@ -1068,7 +1113,7 @@ options_postprocess (struct options *options, bool first_time)
 	  options->tuntap_options.ip_win32_type != IPW32_SET_DHCP_MASQ)
 	msg (M_USAGE, "Options error: --dhcp-options requires --ip-win32 dynamic");
 
-      if (!options->route_delay_defined)
+      if ((dev == DEV_TYPE_TUN || dev == DEV_TYPE_TAP) && !options->route_delay_defined)
 	{
 	  options->route_delay_defined = true;
 	  options->route_delay = 0;
@@ -1088,6 +1133,9 @@ options_postprocess (struct options *options, bool first_time)
   if (options->proto != PROTO_UDPv4 && options->fragment)
     msg (M_USAGE, "Options error: --fragment can only be used with --proto udp");
 
+  if (options->proto != PROTO_UDPv4 && options->explicit_exit_notification)
+    msg (M_USAGE, "Options error: --explicit-exit-notify can only be used with --proto udp");
+
   if (!options->remote_list && options->proto == PROTO_TCPv4_CLIENT)
     msg (M_USAGE, "Options error: --remote MUST be used in TCP Client mode");
 
@@ -1104,6 +1152,7 @@ options_postprocess (struct options *options, bool first_time)
     msg (M_USAGE, "Options error: TCP server mode allows at most one --remote address");
 
 #if P2MP
+
   /*
    * Check consistency of --mode server options.
    */
@@ -1131,14 +1180,18 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --connect-freq only works with --mode server --proto udp.  Try --max-clients instead.");
       if (dev != DEV_TYPE_TAP && options->ifconfig_pool_netmask)
 	msg (M_USAGE, "Options error: The third parameter to --ifconfig-pool (netmask) is only valid in --dev tap mode");
+      if (options->explicit_exit_notification)
+	msg (M_USAGE, "Options error: --explicit-exit-notify cannot be used with --mode server");
 
 #ifdef WIN32
       /*
        * We need to explicitly set --tap-sleep because
        * we do not schedule event timers in the top-level context.
        */
-      options->route_delay_defined = false;
       options->tuntap_options.tap_sleep = 10;
+      if (options->route_delay_defined && options->route_delay)
+	options->tuntap_options.tap_sleep = options->route_delay;	
+      options->route_delay_defined = false;
 #endif
 
     }
@@ -1384,7 +1437,8 @@ options_string (const struct options *o,
 		     o->ifconfig_local,
 		     o->ifconfig_remote_netmask,
 		     (in_addr_t)0,
-		     (in_addr_t)0);
+		     (in_addr_t)0,
+		     false);
       if (tt)
 	tt_local = true;
     }
@@ -1913,6 +1967,7 @@ options_server_import (struct options *o,
 		       unsigned int permission_mask,
 		       unsigned int *option_types_found)
 {
+  msg (D_PUSH, "OPTIONS IMPORT: reading client specific options from %s", filename);
   read_config_file (o,
 		    filename,
 		    0,
@@ -2493,6 +2548,13 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->socks_proxy_retry = true;
     }
+  else if (streq (p[0], "keepalive") && p[1] && p[2])
+    {
+      i += 2;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->keepalive_ping = atoi (p[1]);
+      options->keepalive_timeout = atoi (p[2]);
+    }
   else if (streq (p[0], "ping") && p[1])
     {
       ++i;
@@ -2517,6 +2579,12 @@ add_option (struct options *options,
     {
       VERIFY_PERMISSION (OPT_P_TIMER);
       options->ping_timer_remote = true;
+    }
+  else if (streq (p[0], "explicit-exit-notify") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_EXPLICIT_NOTIFY);
+      options->explicit_exit_notification = positive (atoi (p[1]));
     }
   else if (streq (p[0], "persist-tun"))
     {
@@ -2565,6 +2633,11 @@ add_option (struct options *options,
 	{
 	  ++i;
 	  options->route_delay = positive (atoi (p[1]));
+	  if (p[2])
+	    {
+	      ++i;
+	      options->route_delay_window = positive (atoi (p[2]));
+	    }
 	}
       else
 	{
@@ -2617,6 +2690,47 @@ add_option (struct options *options,
       options->occ = false;
     }
 #if P2MP
+  else if (streq (p[0], "server") && p[1] && p[2])
+    {
+      const int lev = M_WARN;
+      bool error = false;
+      i += 2;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->server_network = get_ip_addr (p[1], lev, &error);
+      options->server_netmask = get_ip_addr (p[2], lev, &error);
+      if (error || !options->server_network || !options->server_netmask)
+	{
+	  msg (msglevel, "Options error: error parsing --server parameters");
+	  goto err;
+	}
+      options->server_defined = true;
+    }
+  else if (streq (p[0], "server-bridge") && p[1] && p[2] && p[3] && p[4])
+    {
+      const int lev = M_WARN;
+      bool error = false;
+      i += 4;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->server_bridge_ip = get_ip_addr (p[1], lev, &error);
+      options->server_bridge_netmask = get_ip_addr (p[2], lev, &error);
+      options->server_bridge_pool_start = get_ip_addr (p[3], lev, &error);
+      options->server_bridge_pool_end = get_ip_addr (p[4], lev, &error);
+      if (error
+	  || !options->server_bridge_ip
+	  || !options->server_bridge_netmask
+	  || !options->server_bridge_pool_start
+	  || !options->server_bridge_pool_end)
+	{
+	  msg (msglevel, "Options error: error parsing --server-bridge parameters");
+	  goto err;
+	}
+      options->server_bridge_defined = true;
+    }
+  else if (streq (p[0], "client"))
+    {
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->client = true;
+    }
   else if (streq (p[0], "push") && p[1])
     {
       ++i;
@@ -2650,6 +2764,17 @@ add_option (struct options *options,
       if (error)
 	{
 	  msg (msglevel, "Options error: error parsing --ifconfig-pool parameters");
+	  goto err;
+	}
+      if (options->ifconfig_pool_start > options->ifconfig_pool_end)
+	{
+	  msg (msglevel, "Options error: --ifconfig-pool start IP is greater than end IP");
+	  goto err;
+	}
+      if (options->ifconfig_pool_end - options->ifconfig_pool_start >= IFCONFIG_POOL_MAX)
+	{
+	  msg (msglevel, "Options error: --ifconfig-pool address range is too large.  Current maximum is %d addresses.",
+	       IFCONFIG_POOL_MAX);
 	  goto err;
 	}
     }
@@ -2726,6 +2851,14 @@ add_option (struct options *options,
       if (options->n_bcast_buf < 1)
 	msg (msglevel, "Options error: --bcast-buffers parameter must be > 0");
     }
+  else if (streq (p[0], "tcp-queue-limit") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->tcp_queue_limit = atoi (p[1]);
+      if (options->tcp_queue_limit < 1)
+	msg (msglevel, "Options error: --tcp-queue-limit parameter must be > 0");
+    }
   else if (streq (p[0], "client-to-client"))
     {
       VERIFY_PERMISSION (OPT_P_GENERAL);
@@ -2765,6 +2898,20 @@ add_option (struct options *options,
     }
 #endif
 #ifdef WIN32
+  else if (streq (p[0], "route-method") && p[1])
+    {
+      ++i;
+      VERIFY_PERMISSION (OPT_P_ROUTE);
+      if (streq (p[1], "ipapi"))
+	options->route_method = ROUTE_METHOD_IPAPI;
+      else if (streq (p[1], "exe"))
+	options->route_method = ROUTE_METHOD_EXE;
+      else
+	{
+	  msg (msglevel, "Options error: --route method must be 'ipapi' or 'exe'");
+	  goto err;
+	}
+    }
   else if (streq (p[0], "ip-win32") && p[1])
     {
       const int index = ascii2ipset (p[1]);

@@ -27,6 +27,7 @@
 #define SIG_H
 
 #include "status.h"
+#include "win32.h"
 
 /*
  * Signal information, including signal code
@@ -49,7 +50,42 @@ void pre_init_signal_catch (void);
 void post_init_signal_catch (void);
 
 const char *signal_description (int signum, const char *sigtext);
-void print_signal (const struct signal_info *si, const char *title);
+void print_signal (const struct signal_info *si, const char *title, int msglevel);
 void print_status (const struct context *c, struct status_output *so);
+
+bool process_signal (struct context *c);
+
+void process_explicit_exit_notification_timer_wakeup (struct context *c);
+
+#ifdef WIN32
+
+static inline void
+get_signal (volatile int *sig)
+{
+  *sig = win32_signal_get (&win32_signal);
+}
+
+static inline void
+halt_non_edge_triggered_signals (void)
+{
+  win32_signal_close (&win32_signal);
+}
+
+#else
+
+static inline void
+get_signal (volatile int *sig)
+{
+  const int i = siginfo_static.signal_received;
+  if (i)
+    *sig = i;
+}
+
+static inline void
+halt_non_edge_triggered_signals (void)
+{
+}
+
+#endif
 
 #endif

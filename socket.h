@@ -319,7 +319,8 @@ in_addr_t getaddr (unsigned int flags,
 #define PROTO_UDPv4        0
 #define PROTO_TCPv4_SERVER 1
 #define PROTO_TCPv4_CLIENT 2
-#define PROTO_N            3
+#define PROTO_TCPv4        3
+#define PROTO_N            4
 
 int ascii2proto (const char* proto_name);
 const char *proto2ascii (int proto, bool display_form);

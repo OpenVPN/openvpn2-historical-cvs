@@ -281,6 +281,7 @@ multi_init (struct multi_context *m, struct context *t, bool tcp_mode)
    */
   if (tcp_mode)
     m->mtcp = multi_tcp_init (t->options.max_clients, &m->max_clients);
+  m->tcp_queue_limit = t->options.tcp_queue_limit;
   
   /*
    * Allow client <-> client communication, without going through
@@ -871,7 +872,11 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
    */
   if (m->ifconfig_pool)
     {
-      mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote, tls_common_name (mi->context.c2.tls_multi, true));
+      const char *cn = NULL;
+      if (!mi->context.options.duplicate_cn)
+	cn = tls_common_name (mi->context.c2.tls_multi, true);
+
+      mi->vaddr_handle = ifconfig_pool_acquire (m->ifconfig_pool, &local, &remote, cn);
       if (mi->vaddr_handle >= 0)
 	{
 	  if (local)
@@ -1051,6 +1056,28 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
 }
 
 /*
+ * Add a mbuf buffer to a particular
+ * instance.
+ */
+void
+multi_add_mbuf (struct multi_context *m,
+		struct multi_instance *mi,
+		struct mbuf_buffer *mb)
+{
+  if (multi_output_queue_ready (m, mi))
+    {
+      struct mbuf_item item;
+      item.buffer = mb;
+      item.instance = mi;
+      mbuf_add_item (m->mbuf, &item);
+    }
+  else
+    {
+      msg (D_ROUTE, "MULTI: packet dropped due to output saturation (multi_add_mbuf)");
+    }
+}
+
+/*
  * Add a packet to a client instance output queue.
  */
 static inline void
@@ -1175,6 +1202,7 @@ multi_process_post (struct multi_context *m, struct multi_instance *mi, const un
     {
       if (flags & MPP_CLOSE_ON_SIGNAL)
 	{
+	  print_signal (mi->context.sig, NULL, D_MULTI_LOW);
 	  multi_close_instance (m, mi, false);
 	  ret = false;
 	}
@@ -1396,12 +1424,21 @@ multi_process_incoming_tun (struct multi_context *m, const unsigned int mpp_flag
 		  
 		  set_prefix (m->pending);
 
-		  /* transfer packet pointer from top-level context buffer to instance */
-		  c->c2.buf = m->top.c2.buf;
-     
+		  if (multi_output_queue_ready (m, m->pending))
+		    {
+		      /* transfer packet pointer from top-level context buffer to instance */
+		      c->c2.buf = m->top.c2.buf;
+		    }
+		  else
+		    {
+		      /* drop packet */
+		      msg (D_ROUTE, "MULTI: packet dropped due to output saturation (multi_process_incoming_tun)");
+		      buf_clear (&c->c2.buf);
+		    }
+	      
 		  /* encrypt in instance context */
 		  process_incoming_tun (c);
-	      
+
 		  /* postprocess and set wakeup */
 		  ret = multi_process_post (m, m->pending, mpp_flags);
 

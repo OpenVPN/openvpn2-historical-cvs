@@ -34,6 +34,9 @@
 #include "buffer.h"
 #include "error.h"
 #include "win32.h"
+#include "status.h"
+#include "sig.h"
+#include "occ.h"
 #include "openvpn.h"
 
 #include "memdbg.h"
@@ -67,31 +70,47 @@ signal_description (int signum, const char *sigtext)
     }
 }
 
-void
-print_signal (const struct signal_info *si, const char *title)
+static void
+signal_reset (struct signal_info *si)
 {
-  const char *hs = (si->hard ? "hard" : "soft");
-  const char *type = (si->signal_text ? si->signal_text : "");
-  const char *t = (title ? title : "process");
-
-  switch (si->signal_received)
+  if (si)
     {
-    case SIGINT:
-      msg (M_INFO, "SIGINT[%s,%s] received, %s exiting", hs, type, t);
-      break;
-    case SIGTERM:
-      msg (M_INFO, "SIGTERM[%s,%s] received, %s exiting", hs, type, t);
-      break;
-    case SIGHUP:
-      msg (M_INFO, "SIGHUP[%s,%s] received, %s restarting", hs, type, t);
-      break;
-    case SIGUSR1:
-      msg (M_INFO, "SIGUSR1[%s,%s] received, %s restarting", hs, type, t);
-      break;
-    default:
-      msg (M_INFO, "Unknown signal %d [%s,%s] received by %s", si->signal_received, hs, type, t);
-      break;
+      si->signal_received = 0;
+      si->signal_text = NULL;
+      si->hard = false;
     }
+}
+
+void
+print_signal (const struct signal_info *si, const char *title, int msglevel)
+{
+  if (si)
+    {
+      const char *hs = (si->hard ? "hard" : "soft");
+      const char *type = (si->signal_text ? si->signal_text : "");
+      const char *t = (title ? title : "process");
+
+      switch (si->signal_received)
+	{
+	case SIGINT:
+	  msg (msglevel, "SIGINT[%s,%s] received, %s exiting", hs, type, t);
+	  break;
+	case SIGTERM:
+	  msg (msglevel, "SIGTERM[%s,%s] received, %s exiting", hs, type, t);
+	  break;
+	case SIGHUP:
+	  msg (msglevel, "SIGHUP[%s,%s] received, %s restarting", hs, type, t);
+	  break;
+	case SIGUSR1:
+	  msg (msglevel, "SIGUSR1[%s,%s] received, %s restarting", hs, type, t);
+	  break;
+	default:
+	  msg (msglevel, "Unknown signal %d [%s,%s] received by %s", si->signal_received, hs, type, t);
+	  break;
+	}
+    }
+  else
+    msg (msglevel, "Unknown signal received");
 }
 
 #ifdef HAVE_SIGNAL_H
@@ -178,4 +197,84 @@ print_status (const struct context *c, struct status_output *so)
   status_printf (so, "END");
   status_flush (so);
   gc_free (&gc);
+}
+
+/*
+ * Handle the triggering and time-wait of explicit
+ * exit notification.
+ */
+
+static void
+process_explicit_exit_notification_init (struct context *c)
+{
+  msg (M_INFO, "SIGTERM received, sending exit notification to peer");
+  event_timeout_init (&c->c2.explicit_exit_notification_interval, 1, 0);
+  reset_coarse_timers (c);
+  signal_reset (c->sig);
+  halt_non_edge_triggered_signals ();
+  c->c2.explicit_exit_notification_time_wait = now;
+}
+
+void
+process_explicit_exit_notification_timer_wakeup (struct context *c)
+{
+  if (event_timeout_trigger (&c->c2.explicit_exit_notification_interval,
+			     &c->c2.timeval,
+			     ETT_DEFAULT))
+    {
+      ASSERT (c->c2.explicit_exit_notification_time_wait && c->options.explicit_exit_notification);
+      if (now >= c->c2.explicit_exit_notification_time_wait + c->options.explicit_exit_notification)
+	{
+	  event_timeout_clear (&c->c2.explicit_exit_notification_interval);
+	  c->sig->signal_received = SIGTERM;
+	  c->sig->signal_text = "exit-with-notification";
+	}
+      else
+	{
+	  c->c2.occ_op = OCC_EXIT;
+	}
+    }
+}
+
+/*
+ * Process signals
+ */
+
+static void
+process_sigusr2 (const struct context *c)
+{
+  struct status_output *so = status_open (NULL, 0, M_INFO);
+  print_status (c, so);
+  status_close (so);
+  signal_reset (c->sig);
+}
+
+static bool
+process_sigterm (struct context *c)
+{
+  bool ret = true;
+  if (c->options.explicit_exit_notification
+      && !c->c2.explicit_exit_notification_time_wait)
+    {
+      process_explicit_exit_notification_init (c);
+      ret = false;
+    }
+  return ret;
+}
+
+bool
+process_signal (struct context *c)
+{
+  bool ret = true;
+
+  if (c->sig->signal_received == SIGTERM)
+    {
+      ret = process_sigterm (c);
+    }
+  else if (c->sig->signal_received == SIGUSR2)
+    {
+      process_sigusr2 (c);
+      ret = false;
+    }
+  return ret;
 }

@@ -204,6 +204,8 @@ ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand)
 
 #ifdef IFCONFIG_POOL_TEST
 
+#define DUP_CN
+
 void
 ifconfig_pool_test (in_addr_t start, in_addr_t end)
 {
@@ -218,17 +220,23 @@ ifconfig_pool_test (in_addr_t start, in_addr_t end)
   msg (M_INFO | M_NOPREFIX, "************ 1");
   for (i = 0; i < (int) SIZE (array); ++i)
     {
+      char *cn;
       ifconfig_pool_handle h;
       in_addr_t local, remote;
       char buf[256];
-      openvpn_snprintf (buf, sizeof(buf), "common-name-%d", i); 
-      h = ifconfig_pool_acquire (p, &local, &remote, buf);
+      openvpn_snprintf (buf, sizeof(buf), "common-name-%d", i);
+#ifdef DUP_CN
+      cn = NULL;
+#else
+      cn = buf;
+#endif
+      h = ifconfig_pool_acquire (p, &local, &remote, cn);
       if (h < 0)
 	break;
       msg (M_INFO | M_NOPREFIX, "IFCONFIG_POOL TEST pass 1: l=%s r=%s cn=%s",
 	   print_in_addr_t (local, 0, &gc),
 	   print_in_addr_t (remote, 0, &gc),
-	   buf);
+	   cn);
       array[i] = h;
       
     }
@@ -247,17 +255,23 @@ ifconfig_pool_test (in_addr_t start, in_addr_t end)
   msg (M_INFO | M_NOPREFIX, "**************** 3");
   for (i = 0; i < (int) SIZE (array); ++i)
     {
+      char *cn;
       ifconfig_pool_handle h;
       in_addr_t local, remote;
       char buf[256];
       snprintf (buf, sizeof(buf), "common-name-%d", i+24); 
-      h = ifconfig_pool_acquire (p, &local, &remote, buf);
+#ifdef DUP_CN
+      cn = NULL;
+#else
+      cn = buf;
+#endif
+      h = ifconfig_pool_acquire (p, &local, &remote, cn);
       if (h < 0)
 	break;
       msg (M_INFO | M_NOPREFIX, "IFCONFIG_POOL TEST pass 3: l=%s r=%s cn=%s",
 	   print_in_addr_t (local, 0, &gc),
 	   print_in_addr_t (remote, 0, &gc),
-	   buf);
+	   cn);
       array[i] = h;
       
     }

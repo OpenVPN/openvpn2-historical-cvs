@@ -301,7 +301,7 @@ establish_socks_proxy_passthru (struct socks_proxy_info *p,
  error:
   /* on error, should we exit or restart? */
   if (!*signal_received)
-    *signal_received = (p->retry ? SIGUSR1 : SIGTERM);
+    *signal_received = (p->retry ? SIGUSR1 : SIGTERM); /* SOFT-SIGUSR1 -- socks error */
   return;
 }
 
@@ -339,7 +339,7 @@ establish_socks_proxy_udpassoc (struct socks_proxy_info *p,
  error:
   /* on error, should we exit or restart? */
   if (!*signal_received)
-    *signal_received = (p->retry ? SIGUSR1 : SIGTERM);
+    *signal_received = (p->retry ? SIGUSR1 : SIGTERM); /* SOFT-SIGUSR1 -- socks error */
   return;
 }
 

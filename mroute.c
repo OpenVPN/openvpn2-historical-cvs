@@ -40,36 +40,26 @@
 
 #include "memdbg.h"
 
-/*
- * Special MAC addresses
- */
-
-static const uint8_t ethernet_bcast_addr[] =  { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-
-static const uint8_t ethernet_group_prefix[] = { 0x01, 0x80, 0xC2 };
-
 void
 mroute_addr_init (struct mroute_addr *addr)
 {
   CLEAR (*addr);
 }
 
+/*
+ * Ethernet multicast addresses.
+ */
+
 static inline bool
-is_mac_group_addr (const uint8_t *mac)
+is_mac_mcast_addr (const uint8_t *mac)
 {
-  return memcmp (mac, ethernet_group_prefix, 3) == 0; 
+  return (bool) mac[0] & 1;
 }
 
 static inline bool
-is_mac_bcast_addr (const uint8_t *mac)
+is_mac_mcast_maddr (const struct mroute_addr *addr)
 {
-  return memcmp (mac, ethernet_bcast_addr, 6) == 0;
-}
-
-static inline bool
-is_mac_group_maddr (const struct mroute_addr *addr)
-{
-  return (addr->type & MR_ADDR_MASK) == MR_ADDR_ETHER && is_mac_group_addr (addr->addr); 
+  return (addr->type & MR_ADDR_MASK) == MR_ADDR_ETHER && is_mac_mcast_addr (addr->addr); 
 }
 
 /*
@@ -90,7 +80,7 @@ mroute_learnable_address (const struct mroute_addr *addr)
       if (b != 0xFF)
 	not_all_ones = true;
     }
-  return not_all_zeros && not_all_ones && !is_mac_group_maddr (addr);
+  return not_all_zeros && not_all_ones && !is_mac_mcast_maddr (addr);
 }
 
 /*
@@ -166,8 +156,8 @@ mroute_extract_addr_from_packet (struct mroute_addr *src,
 	      dest->len = 6;
 	      memcpy (dest->addr, eth->dest, 6);
 
-	      /* broadcast packet? */
-	      if (is_mac_bcast_addr (eth->dest) || is_mac_group_addr (eth->dest))
+	      /* ethernet broadcast/multicast packet? */
+	      if (is_mac_mcast_addr (eth->dest))
 		ret |= MROUTE_EXTRACT_BCAST;
 	    }
 	  

@@ -39,6 +39,17 @@
 
 #include "forward-inline.h"
 
+#define PROCESS_SIGNAL_P2P(c)                   \
+      if (IS_SIG (c))                           \
+	{                                       \
+	  const int brk = process_signal (c);   \
+	  perf_pop ();                          \
+	  if (brk)                              \
+	    break;                              \
+	  else                                  \
+	    continue;                           \
+	}
+
 static void
 tunnel_point_to_point (struct context *c)
 {
@@ -48,7 +59,7 @@ tunnel_point_to_point (struct context *c)
   c->mode = CM_P2P;
 
   /* initialize tunnel instance */
-  init_instance (c);
+  init_instance (c, CC_HARD_USR1_TO_HUP);
   if (IS_SIG (c))
     return;
 
@@ -59,30 +70,11 @@ tunnel_point_to_point (struct context *c)
 
       /* process timers, TLS, etc. */
       pre_select (c);
-      if (IS_SIG (c))
-	{
-	  perf_pop ();
-	  break;
-	}
+      PROCESS_SIGNAL_P2P (c);
 
       /* set up and do the I/O wait */
       io_wait (c, p2p_iow_flags (c));
-
-      /* process signals */
-      if (IS_SIG (c))
-	{
-	  if (c->sig->signal_received == SIGUSR2)
-	    {
-	      struct status_output *so = status_open (NULL, 0, M_INFO);
-	      print_status (c, so);
-	      status_close (so);
-	      c->sig->signal_received = 0;
-	      perf_pop ();
-	      continue;
-	    }
-	  perf_pop ();
-	  break;
-	}
+      PROCESS_SIGNAL_P2P (c);
 
       /* timeout? */
       if (c->c2.event_set_status == ES_TIMEOUT)
@@ -93,11 +85,7 @@ tunnel_point_to_point (struct context *c)
 
       /* process the I/O which triggered select */
       process_io (c);
-      if (IS_SIG (c))
-	{
-	  perf_pop ();
-	  break;
-	}
+      PROCESS_SIGNAL_P2P (c);
 
       perf_pop ();
     }
@@ -106,6 +94,8 @@ tunnel_point_to_point (struct context *c)
   close_instance (c);
   c->first_time = false;
 }
+
+#undef PROCESS_SIGNAL_P2P
 
 int
 main (int argc, char *argv[])
@@ -192,10 +182,11 @@ main (int argc, char *argv[])
 
 	      /* any signals received? */
 	      if (IS_SIG (&c))
-		print_signal (c.sig, NULL);
+		print_signal (c.sig, NULL, M_INFO);
 
-	      /* Convert SIGUSR1 -> SIGHUP if no --persist options specified */
-	      if (!is_persist_option (&c.options) && c.sig->signal_received == SIGUSR1)
+	      /* Convert SIGUSR1 -> SIGHUP if no --persist options (or other options
+		 which hold state across restarts) specified */
+	      if (!is_stateful_restart (&c.options) && c.sig->signal_received == SIGUSR1)
 		c.sig->signal_received = SIGHUP;
 	    }
 	  while (c.sig->signal_received == SIGUSR1);

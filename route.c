@@ -43,8 +43,8 @@
 
 #include "memdbg.h"
 
-static void add_route (struct route *r, const struct tuntap *tt);
-static void delete_route (const struct route *r, const struct tuntap *tt);
+static void add_route (struct route *r, const struct tuntap *tt, unsigned int flags);
+static void delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags);
 static bool get_default_gateway (in_addr_t *ret);
 
 struct route_option_list *
@@ -349,7 +349,8 @@ static void
 add_route3 (in_addr_t network,
 	    in_addr_t netmask,
 	    in_addr_t gateway,
-	    const struct tuntap *tt)
+	    const struct tuntap *tt,
+	    unsigned int flags)
 {
   struct route r;
   CLEAR (r);
@@ -357,14 +358,15 @@ add_route3 (in_addr_t network,
   r.network = network;
   r.netmask = netmask;
   r.gateway = gateway;
-  add_route (&r, tt);
+  add_route (&r, tt, flags);
 }
 
 static void
 del_route3 (in_addr_t network,
 	    in_addr_t netmask,
 	    in_addr_t gateway,
-	    const struct tuntap *tt)
+	    const struct tuntap *tt,
+	    unsigned int flags)
 {
   struct route r;
   CLEAR (r);
@@ -372,11 +374,11 @@ del_route3 (in_addr_t network,
   r.network = network;
   r.netmask = netmask;
   r.gateway = gateway;
-  delete_route (&r, tt);
+  delete_route (&r, tt, flags);
 }
 
 static void
-redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt)
+redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, unsigned int flags)
 {
   const char err[] = "NOTE: unable to redirect default gateway --";
 
@@ -401,7 +403,8 @@ redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt)
 	    add_route3 (rl->spec.remote_host,
 			~0,
 			rl->spec.net_gateway,
-			tt);
+			tt,
+			flags);
 
 	  if (rl->redirect_def1)
 	    {
@@ -409,13 +412,15 @@ redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt)
 	      add_route3 (0x00000000,
 			  0x80000000,
 			  rl->spec.remote_endpoint,
-			  tt);
+			  tt,
+			  flags);
 
 	      /* add new default route (2nd component) */
 	      add_route3 (0x80000000,
 			  0x80000000,
 			  rl->spec.remote_endpoint,
-			  tt);
+			  tt,
+			  flags);
 	    }
 	  else
 	    {
@@ -423,13 +428,15 @@ redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt)
 	      del_route3 (0,
 			  0,
 			  rl->spec.net_gateway,
-			  tt);
+			  tt,
+			  flags);
 
 	      /* add new default route */
 	      add_route3 (0,
 			  0,
 			  rl->spec.remote_endpoint,
-			  tt);
+			  tt,
+			  flags);
 	    }
 
 	  /* set a flag so we can undo later */
@@ -439,7 +446,7 @@ redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt)
 }
 
 static void
-undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt)
+undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *tt, unsigned int flags)
 {
   if (rl->did_redirect_default_gateway)
     {
@@ -448,7 +455,8 @@ undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *
 	del_route3 (rl->spec.remote_host,
 		    ~0,
 		    rl->spec.net_gateway,
-		    tt);
+		    tt,
+		    flags);
 
       if (rl->redirect_def1)
 	{
@@ -456,13 +464,15 @@ undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *
 	  del_route3 (0x00000000,
 		      0x80000000,
 		      rl->spec.remote_endpoint,
-		      tt);
+		      tt,
+		      flags);
 
 	  /* delete default route (2nd component) */
 	  del_route3 (0x80000000,
 		      0x80000000,
 		      rl->spec.remote_endpoint,
-		      tt);
+		      tt,
+		      flags);
 	}
       else
 	{
@@ -470,13 +480,15 @@ undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *
 	  del_route3 (0,
 		      0,
 		      rl->spec.remote_endpoint,
-		      tt);
+		      tt,
+		      flags);
 
 	  /* restore original default route */
 	  add_route3 (0,
 		      0,
 		      rl->spec.net_gateway,
-		      tt);
+		      tt,
+		      flags);
 	}
 
       rl->did_redirect_default_gateway = false;
@@ -484,24 +496,24 @@ undo_redirect_default_route_to_vpn (struct route_list *rl, const struct tuntap *
 }
 
 void
-add_routes (struct route_list *rl, const struct tuntap *tt, bool delete_first)
+add_routes (struct route_list *rl, const struct tuntap *tt, unsigned int flags)
 {
-  redirect_default_route_to_vpn (rl, tt);
+  redirect_default_route_to_vpn (rl, tt, flags);
   if (!rl->routes_added)
     {
       int i;
       for (i = 0; i < rl->n; ++i)
 	{
-	  if (delete_first)
-	    delete_route (&rl->routes[i], tt);
-	  add_route (&rl->routes[i], tt);
+	  if (flags & ROUTE_DELETE_FIRST)
+	    delete_route (&rl->routes[i], tt, flags);
+	  add_route (&rl->routes[i], tt, flags);
 	}
       rl->routes_added = true;
     }
 }
 
 void
-delete_routes (struct route_list *rl, const struct tuntap *tt)
+delete_routes (struct route_list *rl, const struct tuntap *tt, unsigned int flags)
 {
   if (rl->routes_added)
     {
@@ -509,11 +521,11 @@ delete_routes (struct route_list *rl, const struct tuntap *tt)
       for (i = rl->n - 1; i >= 0; --i)
 	{
 	  const struct route *r = &rl->routes[i];
-	  delete_route (r, tt);
+	  delete_route (r, tt, flags);
 	}
       rl->routes_added = false;
     }
-  undo_redirect_default_route_to_vpn (rl, tt);
+  undo_redirect_default_route_to_vpn (rl, tt, flags);
 }
 
 static const char *
@@ -591,7 +603,7 @@ setenv_routes (const struct route_list *rl)
 }
 
 static void
-add_route (struct route *r, const struct tuntap *tt)
+add_route (struct route *r, const struct tuntap *tt, unsigned int flags)
 {
   struct gc_arena gc;
   struct buffer buf;
@@ -639,17 +651,23 @@ add_route (struct route *r, const struct tuntap *tt)
   if (r->metric_defined)
     buf_printf (&buf, " METRIC %d", r->metric);
 
-  //netcmd_semaphore_lock ();
   msg (D_ROUTE, "%s", BSTR (&buf));
 
-#if 1
-  status = add_route_ipapi (r, tt);
-  msg (D_ROUTE, "Route addition via IPAPI %s", status ? "succeeded" : "failed");
-#else
-  status = system_check (BSTR (&buf), "ERROR: Windows route add command failed", false);
-#endif
-
-  //netcmd_semaphore_release ();
+  if ((flags & ROUTE_METHOD_MASK) == ROUTE_METHOD_IPAPI)
+    {
+      status = add_route_ipapi (r, tt);
+      msg (D_ROUTE, "Route addition via IPAPI %s", status ? "succeeded" : "failed");
+    }
+  else if ((flags & ROUTE_METHOD_MASK) == ROUTE_METHOD_EXE)
+    {
+      netcmd_semaphore_lock ();
+      status = system_check (BSTR (&buf), "ERROR: Windows route add command failed", false);
+      netcmd_semaphore_release ();
+    }
+  else
+    {
+      ASSERT (0);
+    }
 
 #elif defined (TARGET_SOLARIS)
 
@@ -730,7 +748,7 @@ add_route (struct route *r, const struct tuntap *tt)
 }
 
 static void
-delete_route (const struct route *r, const struct tuntap *tt)
+delete_route (const struct route *r, const struct tuntap *tt, unsigned int flags)
 {
   struct gc_arena gc;
   struct buffer buf;
@@ -767,19 +785,23 @@ delete_route (const struct route *r, const struct tuntap *tt)
   buf_printf (&buf, ROUTE_PATH " DELETE %s",
 	      network);
 
-  //netcmd_semaphore_lock ();
   msg (D_ROUTE, "%s", BSTR (&buf));
 
-#if 1
-  {
-    const bool status = del_route_ipapi (r, tt);
-    msg (D_ROUTE, "Route deletion via IPAPI %s", status ? "succeeded" : "failed");
-  }
-#else
-  system_check (BSTR (&buf), "ERROR: Windows route delete command failed", false);
-#endif
-
-  //netcmd_semaphore_release ();
+  if ((flags & ROUTE_METHOD_MASK) == ROUTE_METHOD_IPAPI)
+    {
+      const bool status = del_route_ipapi (r, tt);
+      msg (D_ROUTE, "Route deletion via IPAPI %s", status ? "succeeded" : "failed");
+    }
+  else if ((flags & ROUTE_METHOD_MASK) == ROUTE_METHOD_EXE)
+    {
+      netcmd_semaphore_lock ();
+      system_check (BSTR (&buf), "ERROR: Windows route delete command failed", false);
+      netcmd_semaphore_release ();
+    }
+  else
+    {
+      ASSERT (0);
+    }
 
 #elif defined (TARGET_SOLARIS)
 
@@ -921,7 +943,7 @@ test_routes (const struct route_list *rl, const struct tuntap *tt)
 	}
     }
 
-  msg (D_ROUTE, "DEBUG: test_routes: %d/%d succeeded len=%d ret=%d a=%d u/d=%s",  // JYFIXME: change to D_ROUTE_DEBUG
+  msg (D_ROUTE, "TEST ROUTES: %d/%d succeeded len=%d ret=%d a=%d u/d=%s",
        good,
        count,
        rl ? rl->n : -1,
@@ -1509,7 +1531,7 @@ get_default_gateway (in_addr_t *ret)
 #endif
 
 bool
-netmask_to_netbits (in_addr_t network, in_addr_t netmask, int *netbits)
+netmask_to_netbits (const in_addr_t network, const in_addr_t netmask, int *netbits)
 {
   int i;
   const int addrlen = sizeof (in_addr_t) * 8;

@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "27 July 2004"
+.TH openvpn 8 "16 August 2004"
 .\"*********************************************************
 .SH NAME
 openvpn \- secure IP tunnel daemon.
@@ -105,10 +105,10 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-chroot\fR\ \fIdir\fR\ ]
 [\ \fB\-\-cipher\fR\ \fIalg\fR\ ]
 [\ \fB\-\-client\-config\-dir\fR\ \fIdir\fR\ ]
-[\ \fB\-\-client\-connect\fR\ \fIscript\fR\ ]
 [\ \fB\-\-client\-connect\fR\ ]
+[\ \fB\-\-client\-connect\fR\ \fIscript\fR\ ]
 [\ \fB\-\-client\-disconnect\fR\ ]
-[\ \fB\-\-client\-disconnect\fR\ ]
+[\ \fB\-\-client\fR\ ]
 [\ \fB\-\-client\-to\-client\fR\ ]
 [\ \fB\-\-comp\-lzo\fR\ ]
 [\ \fB\-\-comp\-noadapt\fR\ ]
@@ -117,15 +117,18 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-connect\-retry\fR\ \fIn\fR\ ]
 [\ \fB\-\-crl\-verify\fR\ \fIcrl\fR\ ]
 [\ \fB\-\-daemon\fR\ \fI[progname]\fR\ ]
+[\ \fB\-\-dev\fR\ \fItunX\ |\ tapX\fR\ ]
+[\ \fB\-\-dev\fR\ \fItunX\ |\ tapX\ |\ null\fR\ ]
 [\ \fB\-\-dev\-node\fR\ \fInode\fR\ ]
 [\ \fB\-\-dev\-type\fR\ \fIdevice\-type\fR\ ]
-[\ \fB\-\-dev\fR\ \fItunX\ |\ tapX\ |\ null\fR\ ]
-[\ \fB\-\-dev\fR\ \fItunX\ |\ tapX\fR\ ]
-[\ \fB\-\-dh\fR\ \fIfile\fR\ ]
 [\ \fB\-\-dhcp\-option\fR\ \fItype\ [parm]\fR\ ]
+[\ \fB\-\-dhcp\-release\fR\ ]
+[\ \fB\-\-dhcp\-renew\fR\ ]
+[\ \fB\-\-dh\fR\ \fIfile\fR\ ]
 [\ \fB\-\-disable\-occ\fR\ ]
-[\ \fB\-\-down\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-down\fR\ ]
+[\ \fB\-\-down\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-duplicate\-cn\fR\ ]
 [\ \fB\-\-engine\fR\ ]
 [\ \fB\-\-float\fR\ ]
 [\ \fB\-\-fragment\fR\ \fImax\fR\ ]
@@ -135,28 +138,31 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
 [\ \fB\-\-hash\-size\fR\ \fIr\ v\fR\ ]
 [\ \fB\-\-help\fR\ ]
-[\ \fB\-\-http\-proxy\-retry\fR\ ]
 [\ \fB\-\-http\-proxy\fR\ \fIserver\ port\ [authfile]\fR\ ]
+[\ \fB\-\-http\-proxy\-retry\fR\ ]
+[\ \fB\-\-ifconfig\fR\ \fIl\ rn\fR\ ]
 [\ \fB\-\-ifconfig\-noexec\fR\ ]
 [\ \fB\-\-ifconfig\-nowarn\fR\ ]
-[\ \fB\-\-ifconfig\-pool\fR\ \fIstart\-IP\ end\-IP\fR\ ]
+[\ \fB\-\-ifconfig\-pool\fR\ \fIstart\-IP\ end\-IP\ [netmask]\fR\ ]
 [\ \fB\-\-ifconfig\-push\fR\ \fIlocal\ remote\-netmask\fR\ ]
-[\ \fB\-\-ifconfig\fR\ \fIl\ rn\fR\ ]
 [\ \fB\-\-inactive\fR\ \fIn\fR\ ]
 [\ \fB\-\-inetd\fR\ \fI[wait|nowait]\ [progname]\fR\ ]
-[\ \fB\-\-ip\-win32\fR\ \fImethod\fR\ ]
-[\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-ipchange\fR\ ]
+[\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-ip\-win32\fR\ \fImethod\fR\ ]
 [\ \fB\-\-iroute\fR\ \fInetwork\ [netmask]\fR\ ]
-[\ \fB\-\-key\-method\fR\ \fIm\fR\ ]
+[\ \fB\-\-keepalive\fR\ \fIn\ m\fR\ ]
 [\ \fB\-\-key\fR\ \fIfile\fR\ ]
+[\ \fB\-\-key\-method\fR\ \fIm\fR\ ]
 [\ \fB\-\-keysize\fR\ \fIn\fR\ ]
+[\ \fB\-\-learn\-address\fR\ ]
 [\ \fB\-\-learn\-address\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-link\-mtu\fR\ \fIn\fR\ ]
 [\ \fB\-\-local\fR\ \fIhost\fR\ ]
 [\ \fB\-\-log\-append\fR\ \fIfile\fR\ ]
 [\ \fB\-\-log\fR\ \fIfile\fR\ ]
 [\ \fB\-\-lport\fR\ \fIport\fR\ ]
+[\ \fB\-\-max\-clients\fR\ \fIn\fR\ ]
 [\ \fB\-\-mktun\fR\ ]
 [\ \fB\-\-mlock\fR\ ]
 [\ \fB\-\-mode\fR\ \fIm\fR\ ]
@@ -164,11 +170,11 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-mtu\-disc\fR\ \fItype\fR\ ]
 [\ \fB\-\-mtu\-test\fR\ ]
 [\ \fB\-\-mute\fR\ \fIn\fR\ ]
-[\ \fB\-\-nice\-work\fR\ \fIn\fR\ ]
+[\ \fB\-\-mute\-replay\-warnings\fR\ ]
 [\ \fB\-\-nice\fR\ \fIn\fR\ ]
+[\ \fB\-\-nobind\fR\ ]
 [\ \fB\-\-no\-iv\fR\ ]
 [\ \fB\-\-no\-replay\fR\ ]
-[\ \fB\-\-nobind\fR\ ]
 [\ \fB\-\-passtos\fR\ ]
 [\ \fB\-\-pause\-exit\fR\ ]
 [\ \fB\-\-persist\-key\fR\ ]
@@ -176,18 +182,19 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-persist\-remote\-ip\fR\ ]
 [\ \fB\-\-persist\-tun\fR\ ]
 [\ \fB\-\-ping\-exit\fR\ \fIn\fR\ ]
+[\ \fB\-\-ping\fR\ \fIn\fR\ ]
 [\ \fB\-\-ping\-restart\fR\ \fIn\fR\ ]
 [\ \fB\-\-ping\-timer\-rem\fR\ ]
-[\ \fB\-\-ping\fR\ \fIn\fR\ ]
+[\ \fB\-\-pkcs12\fR\ \fIfile\fR\ ]
 [\ \fB\-\-port\fR\ \fIport\fR\ ]
 [\ \fB\-\-proto\fR\ \fIp\fR\ ]
 [\ \fB\-\-pull\fR\ ]
-[\ \fB\-\-push\-reset\fR\ ]
 [\ \fB\-\-push\fR\ \fI"option"\fR\ ]
+[\ \fB\-\-push\-reset\fR\ ]
 [\ \fB\-\-rcvbuf\fR\ \fIsize\fR\ ]
-[\ \fB\-\-redirect\-gateway\fR\ \fI['local']\fR\ ]
-[\ \fB\-\-remote\-random\fR\ ]
+[\ \fB\-\-redirect\-gateway\fR\ \fI["local"]\ ["def1"]\fR\ ]
 [\ \fB\-\-remote\fR\ \fIhost\ [port]\fR\ ]
+[\ \fB\-\-remote\-random\fR\ ]
 [\ \fB\-\-reneg\-bytes\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-pkts\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-sec\fR\ \fIn\fR\ ]
@@ -195,29 +202,34 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-replay\-window\fR\ \fIn\ [t]\fR\ ]
 [\ \fB\-\-resolv\-retry\fR\ \fIn\fR\ ]
 [\ \fB\-\-rmtun\fR\ ]
-[\ \fB\-\-route\-delay\fR\ \fI[n]\fR\ ]
+[\ \fB\-\-route\-delay\fR\ \fI[n]\ [w]\fR\ ]
+[\ \fB\-\-route\fR\ \fInetwork\ [netmask]\ [gateway]\ [metric]\fR\ ]
 [\ \fB\-\-route\-gateway\fR\ \fIgw\fR\ ]
 [\ \fB\-\-route\-noexec\fR\ ]
-[\ \fB\-\-route\-up\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-route\-up\fR\ ]
-[\ \fB\-\-route\fR\ \fInetwork\ [netmask]\ [gateway]\ [metric]\fR\ ]
+[\ \fB\-\-route\-up\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-rport\fR\ \fIport\fR\ ]
-[\ \fB\-\-service\fR\ \fIexit\-event\ [0|1]\fR\ ]
 [\ \fB\-\-secret\fR\ \fIfile\ [direction]\fR\ ]
 [\ \fB\-\-secret\fR\ \fIfile\fR\ ]
+[\ \fB\-\-server\fR\ \fInetwork\ netmask\fR\ ]
+[\ \fB\-\-server\-bridge\fR\ \fIgateway\ netmask\ pool\-start\-IP\ pool\-end\-IP\fR\ ]
+[\ \fB\-\-service\fR\ \fIexit\-event\ [0|1]\fR\ ]
 [\ \fB\-\-setenv\fR\ \fIname\ value\fR\ ]
 [\ \fB\-\-shaper\fR\ \fIn\fR\ ]
 [\ \fB\-\-show\-adapters\fR\ ]
 [\ \fB\-\-show\-ciphers\fR\ ]
 [\ \fB\-\-show\-digests\fR\ ]
+[\ \fB\-\-show\-net\fR\ ]
+[\ \fB\-\-show\-net\-up\fR\ ]
 [\ \fB\-\-show\-tls\fR\ ]
 [\ \fB\-\-show\-valid\-subnets\fR\ ]
 [\ \fB\-\-single\-session\fR\ ]
 [\ \fB\-\-sndbuf\fR\ \fIsize\fR\ ]
-[\ \fB\-\-socks\-proxy\-retry\fR\ ]
 [\ \fB\-\-socks\-proxy\fR\ \fIserver\ [port]\fR\ ]
+[\ \fB\-\-socks\-proxy\-retry\fR\ ]
 [\ \fB\-\-status\fR\ \fIfile\ [n]\fR\ ]
 [\ \fB\-\-tap\-sleep\fR\ \fIn\fR\ ]
+[\ \fB\-\-tcp\-queue\-limit\fR\ \fIn\fR\ ]
 [\ \fB\-\-test\-crypto\fR\ ]
 [\ \fB\-\-tls\-auth\fR\ \fIfile\ [direction]\fR\ ]
 [\ \fB\-\-tls\-cipher\fR\ \fIl\fR\ ]
@@ -225,8 +237,8 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-tls\-remote\fR\ \fIx509name\fR\ ]
 [\ \fB\-\-tls\-server\fR\ ]
 [\ \fB\-\-tls\-timeout\fR\ \fIn\fR\ ]
-[\ \fB\-\-tls\-verify\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-tls\-verify\fR\ ]
+[\ \fB\-\-tls\-verify\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-tmp\-dir\fR\ \fIdir\fR\ ]
 [\ \fB\-\-tran\-window\fR\ \fIn\fR\ ]
 [\ \fB\-\-tun\-ipv6\fR\ ]
@@ -234,9 +246,9 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-tun\-mtu\fR\ \fIn\fR\ ]
 [\ \fB\-\-txqueuelen\fR\ \fIn\fR\ ]
 [\ \fB\-\-up\-delay\fR\ ]
-[\ \fB\-\-up\-restart\fR\ ]
-[\ \fB\-\-up\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-up\fR\ ]
+[\ \fB\-\-up\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-up\-restart\fR\ ]
 [\ \fB\-\-user\fR\ \fIuser\fR\ ]
 [\ \fB\-\-verb\fR\ \fIn\fR\ ]
 [\ \fB\-\-writepid\fR\ \fIfile\fR\ ]
@@ -373,6 +385,7 @@ secret static.key
 .LP
 .RE
 .fi
+.\"*********************************************************
 .SS Tunnel Options:
 .TP
 .B --mode m
@@ -776,6 +789,10 @@ if you have a configuration where the local host uses
 but the remote host does not, use
 .B --ifconfig-nowarn
 on the local host.
+
+This option will also silence warnings about potential
+address conflicts which occasionally annoy more experienced
+users by triggering "false positive" warnings.
 .\"*********************************************************
 .TP
 .B --route network [netmask] [gateway] [metric]
@@ -842,7 +859,7 @@ for use with
 .B --route.
 .\"*********************************************************
 .TP
-.B --route-delay [n]
+.B --route-delay [n] [w]
 Delay
 .B n
 seconds (default=0) after connection
@@ -867,9 +884,12 @@ used to set
 tap adapter addresses.  The delay will give the DHCP handshake
 time to complete before routes are added.
 
-A better solution would be to poll the virtual adapter, waiting
-for its IP address to become defined, but unfortunately there
-is no platform independent mechanism for doing this.
+On Windows,
+.B --route-delay
+tries to be more intelligent by waiting
+.B w
+seconds (w=30 by default)
+for the TAP-Win32 adapter to come up before adding routes.
 .\"*********************************************************
 .TP
 .B --route-up cmd
@@ -939,73 +959,31 @@ but not wiping out the original default gateway.
 .\"*********************************************************
 .TP
 .B --link-mtu n
-Take the link device MTU to be n and derive the TUN MTU
-from it (default=1300 for TUN devices).  The
-default is a conservative
-value that was chosen
-because it has a higher probability of working correctly.
-However, for many
-cases, using a value of 1472 will maximize performance for TUN devices
-over IPv4.
-
-Fundamentally,
-.B --link-mtu
-sets an upper bound on the size of UDP packets which are sent
-between OpenVPN peers.
-
-Prior to OpenVPN 1.5, this option was named
-.B --udp-mtu.
-While deprecated, this name will still be supported
-for compatibility.
-
-The MTU (Maximum Transmission Units) is
-the maximum datagram size in bytes that can be sent unfragmented
-over a particular network path.  OpenVPN requires that packets
-on the control or data channels be sent unfragmented.
-
-Typically, the link MTU should be set to a value between 1300 and 1500.
-The optimal size for link MTU is the largest
-MTU that can be handled by every router on the link path.
-The link MTU value should be equal on both peers.
-
-MTU problems often manifest themselves as connections which
-hang during periods of active usage.  The
-.B --fragment
-and
-.B --mssfix
-options are provided as workarounds to such problems.
-When using either of these options, it's best to
-set
-.B --tun-mtu
-to 1500.
-
-OpenVPN
-adds a small amount of overhead to each tunnel packet before
-it is forwarded from the TUN device over the secure link channel.
-This overhead consists of data fields such as the HMAC signature,
-packet ID, encryption block padding, etc.  Because of this overhead,
-the TUN device MTU should be slightly smaller than the link device
-MTU to make room for the extra bytes which OpenVPN adds to every
-data channel packet.  OpenVPN allows you to explicitly specify either
-the TUN MTU or the link MTU (but not both).  OpenVPN will then
-compute the value you didn't specify based on the value you did.
-OpenVPN will compute exactly how much overhead it will need to add
-to each packet, based on the other options you specify.  If you
-specify an
-.B --up
-script, OpenVPN will pass the TUN MTU and link MTU values on the command line
-to the script.
+Sets an upper bound on the size of UDP packets which are sent
+between OpenVPN peers.  It's best not to set this parameter unless
+you know what you're doing.
 .\"*********************************************************
 .TP
 .B --tun-mtu n
 Take the TUN device MTU to be
 .B n
 and derive the link MTU
-from it (default=1500 for TAP devices).
+from it (default=1500).  In most cases, you will probably want to
+leave this parameter set to its default value.
 
-See
-.B --link-mtu
-above more more information on MTU.
+The MTU (Maximum Transmission Units) is
+the maximum datagram size in bytes that can be sent unfragmented
+over a particular network path.  OpenVPN requires that packets
+on the control or data channels be sent unfragmented.
+
+MTU problems often manifest themselves as connections which
+hang during periods of active usage.
+
+It's best to use the
+.B --fragment
+and/or
+.B --mssfix
+options to deal with MTU sizing issues.
 .\"*********************************************************
 .TP
 .B --tun-mtu-extra n
@@ -1064,16 +1042,16 @@ the UDP header itself.
 
 The
 .B --fragment
-option only makes sense when you are using the UDP protocol
-for OpenVPN peer-to-peer communication, i.e.
-.B --proto udp.
+option only makes sense when you are using the UDP protocol (
+.B --proto udp
+).
 
 .B --fragment
 adds 4 bytes of overhead per datagram.
 
 See the
 .B --mssfix
-option below for an important companion option to
+option below for an important related option to
 .B --fragment.
 
 It should also be noted that this option is not meant to replace
@@ -1300,6 +1278,35 @@ Also note that
 and
 .B --ping-restart
 are mutually exclusive and cannot be used together.
+.\"*********************************************************
+.TP
+.B --keepalive n m
+A helper directive designed to simplify the expression of
+.B --ping
+and
+.B --ping-restart
+in server mode configurations.
+
+For example,
+.B --keepalive 10 60
+expands as follows:
+
+.RS
+.ft 3
+.nf
+.sp
+ if mode server:
+   ping 10
+   ping-restart 120
+   push "ping 10"
+   push "ping-restart 60"
+ else
+   ping 10
+   ping-restart 60
+.ft
+.LP
+.RE
+.fi
 .\"*********************************************************
 .TP
 .B --ping-timer-rem
@@ -1876,17 +1883,136 @@ OpenVPN will periodically sample the compression process to measure its
 efficiency.  If the data being sent over the tunnel is already compressed,
 the compression efficiency will be very low, triggering openvpn to disable
 compression for a period of time until the next re-sample test.
+.\"*********************************************************
 .SS Multi-Client Server options
-Starting with OpenVPN 2.0, a multi-client UDP server mode
+Starting with OpenVPN 2.0, a multi-client TCP/UDP server mode
 is supported, and can be enabled with the
 .B --mode server
 option.  In server mode, OpenVPN will listen on a single
-UDP port for incoming client connections.  All client
+port for incoming client connections.  All client
 connections will be routed through a single tun or tap
 interface.  This mode is designed for scalability and should
 be able to support hundreds or even thousands of clients
 on sufficiently fast hardware.  SSL/TLS authentication must
 be used in this mode.
+.\"*********************************************************
+.TP
+.B --server network netmask
+A helper directive designed to simplify the configuration
+of OpenVPN's server mode.  This directive will set up an
+OpenVPN server which will allocate addresses to clients
+out of the given network/netmask.  The server itself
+will take the ".1" address of the given network
+for use as the server-side endpoint of the local
+TUN/TAP interface.
+
+For example,
+.B --server 10.8.0.0 255.255.255.0
+expands as follows:
+
+.RS
+.ft 3
+.nf
+.sp
+ mode server
+ tls-server
+
+ if dev tun:
+   ifconfig 10.8.0.1 10.8.0.2 
+   ifconfig-pool 10.8.0.4 10.8.0.251
+   route 10.8.0.0 255.255.255.0
+   if client-to-client:
+     push "route 10.8.0.0 255.255.255.0"
+   else
+     push "route 10.8.0.1"
+
+ if dev tap:
+   ifconfig 10.8.0.1 255.255.255.0
+   ifconfig-pool 10.8.0.2 10.8.0.254 255.255.255.0
+   push "route-gateway 10.8.0.1"
+.ft
+.LP
+.RE
+.fi
+
+Don't use
+.B --server
+if you are ethernet bridging.  Use
+.B --server-bridge
+instead.
+.\"*********************************************************
+.TP
+.B --server-bridge gateway netmask pool-start-IP pool-end-IP
+
+A helper directive similar to
+.B --server
+which is designed to simplify the configuration
+of OpenVPN's server mode in ethernet bridging configurations.
+
+To configure ethernet bridging, you 
+must first use your OS's bridging capability
+to bridge the TAP interface with the ethernet
+NIC interface.  For example, on Linux this is done
+with the
+.B brctl
+tool, and with Windows XP it is done in the Network
+Connections Panel by selecting the ethernet and
+TAP adapters and right-clicking on "Bridge Connections".
+
+Next you you must manually set the
+IP/netmask on the bridge interface.  The
+.B gateway
+and
+.B netmask
+parameters to
+.B --server-bridge
+can be set to either the IP/netmask of the
+bridge interface, or the IP/netmask of the
+default gateway/router on the bridged
+subnet.
+
+Finally, set aside a IP range in the bridged
+subnet,
+denoted by
+.B pool-start-IP
+and
+.B pool-end-IP,
+for OpenVPN to allocate to connecting
+clients.
+
+For example,
+.B server-bridge 10.8.0.4 255.255.255.0 10.8.0.128 10.8.0.254
+expands as follows:
+
+.RS
+.ft 3
+.nf
+.sp
+mode server
+tls-server
+
+ifconfig-pool 10.8.0.128 10.8.0.254 255.255.255.0
+push "route-gateway 10.8.0.4"
+.ft
+.LP
+.RE
+.fi
+.\"*********************************************************
+.TP
+.B --client
+A helper directive designed to simplify the configuration
+of OpenVPN's client mode.  This directive is equivalent to:
+
+.RS
+.ft 3
+.nf
+.sp
+ pull
+ tls-client
+.ft
+.LP
+.RE
+.fi
 .\"*********************************************************
 .TP
 .B --push "option"
@@ -1967,7 +2093,7 @@ routing table as well (such as by using the
 directive).  The reason why two routes are needed
 is that the
 .B --route
-directive routes the packet from the system
+directive routes the packet from the kernel
 to OpenVPN.  Once in OpenVPN, the
 .B --iroute
 directive routes to the specific client.
@@ -2067,6 +2193,17 @@ Allocate
 buffers for broadcast datagrams (default=256).
 .\"*********************************************************
 .TP
+.B --tcp-queue-limit n
+Maximum number of queued TCP output packets (default=64).
+
+When OpenVPN is tunneling data from a TUN/TAP device to a
+remote client over a TCP connection, it is possible that the TUN/TAP device
+might produce data at a faster rate than the TCP connection
+can support.  When the number of queued TCP output packets reaches
+this limit, OpenVPN will start to drop packets coming from
+the TUN/TAP device.
+.\"*********************************************************
+.TP
 .B --max-clients n
 Limit server to a maximum of
 .B n
@@ -2084,6 +2221,12 @@ will ultimately fail to authenticate.
 
 This is an imperfect solution however, because in a real
 DoS scenario, legitimate connections might also be refused.
+
+For the best protection against DoS attacks in server mode,
+use
+.B --proto udp
+and
+.B --tls-auth.
 .\"*********************************************************
 .TP
 .B --learn-address cmd
@@ -2120,6 +2263,7 @@ or MAC address and the client's authenticated common name,
 it allows a user-defined script to configure firewall access
 policies with regard to the client's high-level common name,
 rather than the low level client virtual addresses.
+.\"*********************************************************
 .SS Data Channel Encryption Options:
 These options are meaningful for both Static & TLS-negotiated key modes
 (must be compatible between peers).
@@ -2469,6 +2613,7 @@ a new platform, or to isolate problems in the compiler, OpenSSL
 crypto library, or OpenVPN's crypto code.  Since it is a self-test mode,
 problems with encryption and authentication can be debugged independently
 of network and tunnel issues.
+.\"*********************************************************
 .SS TLS Mode Options:
 TLS mode is the most powerful crypto mode of OpenVPN in both security and flexibility.
 TLS mode works by establishing control and
@@ -2907,6 +3052,7 @@ overall integrity of the PKI.
 
 The only time when it would be necessary to rebuild the entire PKI from scratch would be
 if the root certificate key itself was compromised.
+.\"*********************************************************
 .SS SSL Library information:
 .\"*********************************************************
 .TP
@@ -2929,6 +3075,7 @@ option.
 Show all TLS ciphers (TLS used only as a control channel).  The TLS
 ciphers will be sorted from highest preference (most secure) to
 lowest.
+.\"*********************************************************
 .SS Generate a random key:
 Used only for non-TLS static key encryption mode.
 .\"*********************************************************
@@ -2947,6 +3094,7 @@ peer over a pre-existing secure channel such as
 .B --secret file
 Write key to
 .B file.
+.\"*********************************************************
 .SS TUN/TAP persistent tunnel config mode:
 Available with linux 2.4.7+.  These options comprise a standalone mode
 of OpenVPN which can be used to create and delete persistent tunnels.
@@ -2998,6 +3146,7 @@ Remove a persistent tunnel.
 .TP
 .B --dev tunX | tapX
 TUN/TAP device
+.\"*********************************************************
 .SS Windows-Specific Options:
 .\"*********************************************************
 .TP
@@ -3069,6 +3218,18 @@ that it works okay in practice.  If you use this option,
 it is best to leave the TCP/IP properties for the TAP-Win32
 adapter in their default state, i.e. "Obtain an IP address
 automatically."
+.\"*********************************************************
+.TP
+.B --route-method m
+Which method
+.B m
+to use for adding routes on Windows?
+
+.B ipapi
+(default) -- Use IP helper API.
+.br
+.B exe
+-- Call the route.exe shell command.
 .\"*********************************************************
 .TP
 .B --dhcp-option type [parm]
@@ -3241,12 +3402,11 @@ Show OpenVPN's view of the system routing table and network
 adapter list.
 .\"*********************************************************
 .SH SCRIPTING AND ENVIRONMENTAL VARIABLES
-Starting with 1.5-beta7, OpenVPN now exports a series
+OpenVPN exports a series
 of environmental variables for use by
-.B --up, --down, --ipchange, --tls-verify
-or
-.B --route-up
-scripts.
+.B --up, --down, --ipchange, --tls-verify, --route-up,
+and other scripts.
+.\"*********************************************************
 .SS Script Order of Execution
 .\"*********************************************************
 .TP
@@ -3291,6 +3451,7 @@ Executed in
 .B --mode server
 mode whenever an IPv4 address/route or MAC address is added to OpenVPN's
 internal routing table.
+.\"*********************************************************
 .SS Environmental Variables
 Once set, a variable is persisted
 indefinitely until it is reset by a new value or a restart,
@@ -3693,6 +3854,7 @@ Prior to running these examples, you should have OpenVPN installed on two
 machines with network connectivity between them.  If you have not
 yet installed OpenVPN, consult the INSTALL file included in the OpenVPN
 distribution.
+.\"*********************************************************
 .SS TUN/TAP Setup:
 If you are using Linux 2.4 or higher,
 make the tun device node and load the tun module:
@@ -3714,6 +3876,7 @@ and follow the installation instructions.
 For other platforms, consult the INSTALL file at
 .I http://openvpn.sourceforge.net/install.html
 for more information.
+.\"*********************************************************
 .SS Firewall Setup:
 If firewalls exist between
 the two machines, they should be set to forward UDP port 5000
@@ -3734,6 +3897,7 @@ the following command to allow incoming packets on the TUN device:
 .LP
 See the firewalls section below for more information on configuring firewalls
 for use with OpenVPN.
+.\"*********************************************************
 .SS VPN Address Setup:
 For purposes
 of our example, our two machines will be called
@@ -3782,6 +3946,7 @@ not part of any existing subnet on the networks of
 either peer, unless you are bridging.  If you use an address that is part of
 your local subnet for either of the tunnel endpoints,
 you will get a weird feedback loop.
+.\"*********************************************************
 .SS Example 1: A simple tunnel without security
 .LP
 On may:
@@ -3809,6 +3974,7 @@ option will produce verbose output, similar to the
 program.  Omit the
 .B --verb 9
 option to have OpenVPN run quietly.
+.\"*********************************************************
 .SS Example 2: A tunnel with static-key security (i.e. using a pre-shared secret)
 First build a static key on may.
 .IP
@@ -3841,6 +4007,7 @@ On may:
 On june:
 .IP
 .B ping 10.4.0.1
+.\"*********************************************************
 .SS Example 3: A tunnel with full TLS-based security
 For this test, we will designate
 .B may
@@ -3895,6 +4062,7 @@ For production operations, a key renegotiation interval of 60 seconds
 is probably too frequent.  Omit the
 .B --reneg-sec 60
 option to use OpenVPN's default key renegotiation interval of one hour.
+.\"*********************************************************
 .SS Routing:
 Assuming you can ping across the tunnel,
 the next step is to route a real subnet over

@@ -58,7 +58,7 @@ bool do_persist_tuntap (const struct options *options);
 
 void pre_setup (const struct options *options);
 
-void init_instance (struct context *c);
+void init_instance (struct context *c, unsigned int flags);
 
 void do_route (const struct options *options, struct route_list *route_list, const struct tuntap *tt);
 
@@ -86,12 +86,15 @@ void inherit_context_child (struct context *dest,
 void inherit_context_top (struct context *dest,
 			  const struct context *src);
 
-#define CC_GC_FREE     (1<<0)
-#define CC_USR1_TO_HUP (1<<1)
+#define CC_GC_FREE          (1<<0)
+#define CC_USR1_TO_HUP      (1<<1)
+#define CC_HARD_USR1_TO_HUP (1<<2)
 void close_context (struct context *c, int sig, unsigned int flags);
 
 struct context_buffers *init_context_buffers (const struct frame *frame);
 
 void free_context_buffers (struct context_buffers *b);
+
+void initialization_sequence_completed (struct context *c);
 
 #endif

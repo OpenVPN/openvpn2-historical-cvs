@@ -1,7 +1,43 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.38 2004/08/02 12:55:25 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.39 2004/08/19 03:28:08 jimyonan Exp $
+
+2004.08.18 -- Version 2.0-beta11
+
+* Added --server, --server-bridge, --client, and
+  --keepalive helper directives.  See client.conf
+  and server.conf in sample-config-files for sample
+  configurations which use the new directives.
+* On Windows, added --route-method to control
+  whether IP Helper API or route.exe is used
+  to add/delete routes.
+* On Windows, added a second parameter to
+  --route-delay to control the maximum time period
+  to wait for the TAP-Win32 adapter to come up
+  before adding routes.
+* Fixed bug in Windows version where configurations
+  which omit --ifconfig might fail to recognize when
+  the TAP adapter is up.
+* Proxy connection failures will now retry according
+  to the --connect-retry parameter. 
+* Fixed --dev null handling on Windows so that TLS
+  loopback test described in INSTALL file works
+  correctly on Windows.
+* Added "Initialization Sequence Completed" message
+  after all initialization steps have been completed
+  and the VPN can be considered "up".
+* Better sanity-checking on --ifconfig-pool parameters.
+* Added --tcp-queue-limit option to control
+  TUN/TAP -> TCP socket overflow.
+* --ifconfig-nowarn flag will now silence general
+  warnings about possible --ifconfig address
+  conflicts, including the warning about --ifconfig
+  and --remote addresses being in same /24 subnet.
+* Fixed case where server mode did not correctly
+  identify certain types of ethernet multicast packets
+  (Marcel de Kogel).
+* Added --explicit-exit-notify option (experimental).
 
 2004.08.02 -- Version 2.0-beta10
 

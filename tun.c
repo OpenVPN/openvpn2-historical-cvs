@@ -118,17 +118,17 @@ guess_tuntap_dev (const char *dev,
 		  struct gc_arena *gc)
 {
 #ifdef WIN32
-
-  struct buffer out = alloc_buf_gc (256, gc);
-
-  get_device_guid (dev_node, BPTR (&out), buf_forward_capacity (&out), gc);
-
-  return BSTR (&out);
-
-#else
-/* default case */
-  return dev;
+  const int dt = dev_type_enum (dev, dev_type);
+  if (dt == DEV_TYPE_TUN || dt == DEV_TYPE_TAP)
+    {
+      struct buffer out = alloc_buf_gc (256, gc);
+      get_device_guid (dev_node, BPTR (&out), buf_forward_capacity (&out), gc);
+      return BSTR (&out);
+    }
 #endif
+
+  /* default case */
+  return dev;
 }
 
 /*
@@ -156,6 +156,9 @@ ipv6_support (bool ipv6, bool ipv6_explicitly_supported, struct tuntap* tt)
     msg (M_WARN, "NOTE: explicit support for IPv6 tun devices is not provided for this OS");
 }
 
+/* --ifconfig-nowarn disables some options sanity checking */
+static const char ifconfig_warn_how_to_silence[] = "(silence this warning with --ifconfig-nowarn)";
+
 /*
  * If !tun, make sure ifconfig_remote_netmask looks
  *  like a netmask.
@@ -171,12 +174,15 @@ ifconfig_sanity_check (bool tun, in_addr_t addr)
   if (tun)
     {
       if (looks_like_netmask)
-	msg (M_WARN, "WARNING: Since you are using --dev tun, the second argument to --ifconfig must be an IP address.  You are using something (%s) that looks more like a netmask.", print_in_addr_t (addr, 0, &gc));
+	msg (M_WARN, "WARNING: Since you are using --dev tun, the second argument to --ifconfig must be an IP address.  You are using something (%s) that looks more like a netmask. %s",
+	     print_in_addr_t (addr, 0, &gc),
+	     ifconfig_warn_how_to_silence);
     }
   else /* tap */
     {
       if (!looks_like_netmask)
-	msg (M_WARN, "WARNING: Since you are using --dev tap, the second argument to --ifconfig must be a netmask, for example something like 255.255.255.0.");
+	msg (M_WARN, "WARNING: Since you are using --dev tap, the second argument to --ifconfig must be a netmask, for example something like 255.255.255.0. %s",
+	     ifconfig_warn_how_to_silence);
     }
   gc_free (&gc);
 }
@@ -222,19 +228,21 @@ check_addr_clash (const char *name,
 
 	  if (public == local || public == remote_netmask)
 	    msg (M_WARN,
-		 "WARNING: --%s address [%s] conflicts with --ifconfig address pair [%s, %s]",
+		 "WARNING: --%s address [%s] conflicts with --ifconfig address pair [%s, %s]. %s",
 		 name,
 		 print_in_addr_t (public, 0, &gc),
 		 print_in_addr_t (local, 0, &gc),
-		 print_in_addr_t (remote_netmask, 0, &gc));
+		 print_in_addr_t (remote_netmask, 0, &gc),
+		 ifconfig_warn_how_to_silence);
 
 	  if (public_net == local_net || public_net == remote_net)
 	    msg (M_WARN,
-		 "WARNING: potential conflict between --%s address [%s] and --ifconfig address pair [%s, %s] -- this is a warning only that is triggered when local/remote addresses exist within the same /24 subnet as --ifconfig endpoints",
+		 "WARNING: potential conflict between --%s address [%s] and --ifconfig address pair [%s, %s] -- this is a warning only that is triggered when local/remote addresses exist within the same /24 subnet as --ifconfig endpoints. %s",
 		 name,
 		 print_in_addr_t (public, 0, &gc),
 		 print_in_addr_t (local, 0, &gc),
-		 print_in_addr_t (remote_netmask, 0, &gc));
+		 print_in_addr_t (remote_netmask, 0, &gc),
+		 ifconfig_warn_how_to_silence);
 	}
       else if (type == DEV_TYPE_TAP)
 	{
@@ -242,11 +250,12 @@ check_addr_clash (const char *name,
 	  const in_addr_t virtual_network = local & remote_netmask;
 	  if (public_network == virtual_network)
 	    msg (M_WARN,
-		 "WARNING: --%s address [%s] conflicts with --ifconfig subnet [%s, %s] -- local and remote addresses cannot be inside of the --ifconfig subnet",
+		 "WARNING: --%s address [%s] conflicts with --ifconfig subnet [%s, %s] -- local and remote addresses cannot be inside of the --ifconfig subnet. %s",
 		 name,
 		 print_in_addr_t (public, 0, &gc),
 		 print_in_addr_t (local, 0, &gc),
-		 print_in_addr_t (remote_netmask, 0, &gc));
+		 print_in_addr_t (remote_netmask, 0, &gc),
+		 ifconfig_warn_how_to_silence);
 	}
     }
   gc_free (&gc);
@@ -346,7 +355,8 @@ init_tun (const char *dev,       /* --dev option */
 	  const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
 	  const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
 	  in_addr_t local_public,
-	  in_addr_t remote_public)
+	  in_addr_t remote_public,
+	  const bool strict_warn)
 {
   struct gc_arena gc = gc_new ();
   struct tuntap *tt;
@@ -397,24 +407,30 @@ init_tun (const char *dev,       /* --dev option */
 				    NULL,
 				    NULL);
 
-      ifconfig_sanity_check (tun, tt->remote_netmask);
-
       /*
-       * If local_public or remote_public addresses are defined,
-       * make sure they do not clash with our virtual subnet.
+       * Look for common errors in --ifconfig parms
        */
+      if (strict_warn)
+	{
+	  ifconfig_sanity_check (tun, tt->remote_netmask);
 
-      check_addr_clash ("local",
-			tt->type,
-			local_public,
-			tt->local,
-			tt->remote_netmask);
+	  /*
+	   * If local_public or remote_public addresses are defined,
+	   * make sure they do not clash with our virtual subnet.
+	   */
 
-      check_addr_clash ("remote",
-			tt->type,
-			remote_public,
-			tt->local,
-			tt->remote_netmask);
+	  check_addr_clash ("local",
+			    tt->type,
+			    local_public,
+			    tt->local,
+			    tt->remote_netmask);
+
+	  check_addr_clash ("remote",
+			    tt->type,
+			    remote_public,
+			    tt->local,
+			    tt->remote_netmask);
+	}
 
       /*
        * Set ifconfig parameters
@@ -2344,16 +2360,31 @@ is_adapter_up (const struct tuntap *tt, const IP_ADAPTER_INFO *list)
   if (ai)
     {
       const int n = get_adapter_n_ip_netmask (ai);
+
+      /* loop once for every IP/netmask assigned to adapter */
       for (i = 0; i < n; ++i)
 	{
 	  in_addr_t ip, netmask;
 	  if (get_adapter_ip_netmask (ai, i, &ip, &netmask))
 	    {
-	      if (tt->local && tt->adapter_netmask && tt->local == ip && tt->adapter_netmask == netmask)
-		ret = true;
+	      if (tt->local && tt->adapter_netmask)
+		{
+		  /* wait for our --ifconfig parms to match the actual adapter parms */
+		  if (tt->local == ip && tt->adapter_netmask == netmask)
+		    ret = true;
+		}
+	      else
+		{
+		  /* --ifconfig was not defined, maybe using a real DHCP server */
+		  if (ip && netmask)
+		    ret = true;
+		}
 	    }
 	}
     }
+  else
+    ret = true; /* this can occur when TAP adapter is bridged */
+
   return ret;
 }
 

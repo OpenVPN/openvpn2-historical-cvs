@@ -2096,7 +2096,7 @@ tls_process (struct tls_multi *multi,
 	      if (ks->state < S_ACTIVE)
 		{
 		  msg (D_TLS_ERRORS,
-		       "TLS Error: TLS key negotiation failed to occur within %d seconds",
+		       "TLS Error: TLS key negotiation failed to occur within %d seconds (check your network connectivity)",
 		       session->opt->handshake_window);
 		  goto error;
 		}
@@ -2253,7 +2253,7 @@ tls_process (struct tls_multi *multi,
 		  ASSERT (session->opt->key_method == 2);
 		  ASSERT (buf_init (buf, 0));
 
-		  /* write a uin32 0 */
+		  /* write a uint32 0 */
 		  ASSERT (buf_write_u32 (buf, 0));
 
 		  /* write key_method + flags */
@@ -3131,7 +3131,7 @@ tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
 	  /*
 	   * This can occur due to bogus data or DoS packets.
 	   */
-	  msg (D_TLS_ERRORS,
+	  msg (D_TLS_STATE_ERRORS,
 	       "TLS State Error: No TLS state for client %s, opcode=%d",
 	       print_sockaddr (from, &gc),
 	       op);
@@ -3140,7 +3140,7 @@ tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
 
       if (key_id != 0)
 	{
-	  msg (D_TLS_ERRORS,
+	  msg (D_TLS_STATE_ERRORS,
 	       "TLS State Error: Unknown key ID (%d) received from %s -- 0 was expected",
 	       key_id,
 	       print_sockaddr (from, &gc));
@@ -3149,7 +3149,7 @@ tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
 
       if (buf->len > EXPANDED_SIZE_DYNAMIC (&tas->frame))
 	{
-	  msg (D_TLS_ERRORS,
+	  msg (D_TLS_STATE_ERRORS,
 	       "TLS State Error: Large packet (size %d) received from %s -- a packet no larger than %d bytes was expected",
 	       buf->len,
 	       print_sockaddr (from, &gc),

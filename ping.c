@@ -68,7 +68,7 @@ check_ping_restart_dowork (struct context *c)
     case PING_RESTART:
       msg (M_INFO, "%sInactivity timeout (--ping-restart), restarting",
 	   format_common_name (c, &gc));
-      c->sig->signal_received = SIGUSR1;
+      c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- Ping Restart */
       c->sig->signal_text = "ping-restart";
       break;
     default:

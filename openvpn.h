@@ -316,6 +316,12 @@ struct context_2
   /* indicates that the do_up_delay function has run */
   bool do_up_ran;
 
+  /* indicates that we have received a SIGTERM when
+     options->explicit_exit_notification is enabled,
+     but we have not exited yet */
+  time_t explicit_exit_notification_time_wait;
+  struct event_timeout explicit_exit_notification_interval;
+
 #if P2MP
 
   /* --ifconfig endpoints to be pushed to client */

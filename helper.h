@@ -23,50 +23,16 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef POOL_H
-#define POOL_H
+/*
+ * Process helper directives such as server, client, and keepalive.
+ */
 
-#if P2MP
+#ifndef HELPER_H
+#define HELPER_H
 
-/*#define IFCONFIG_POOL_TEST*/
+#include "options.h"
 
-#include "basic.h"
-#include "thread.h"
+void helper_keepalive (struct options *o);
+void helper_client_server (struct options *o);
 
-#define IFCONFIG_POOL_MAX         65536
-#define IFCONFIG_POOL_MIN_NETBITS    16
-
-#define IFCONFIG_POOL_30NET   0
-#define IFCONFIG_POOL_INDIV   1
-
-struct ifconfig_pool_entry
-{
-  bool in_use;
-  char *common_name;
-  time_t last_release;
-};
-
-struct ifconfig_pool
-{
-  in_addr_t base;
-  int size;
-  int type;
-  struct ifconfig_pool_entry *list;
-};
-
-typedef int ifconfig_pool_handle;
-
-struct ifconfig_pool *ifconfig_pool_init (int type, in_addr_t start, in_addr_t end);
-
-void ifconfig_pool_free (struct ifconfig_pool *pool);
-
-ifconfig_pool_handle ifconfig_pool_acquire (struct ifconfig_pool *pool, in_addr_t *local, in_addr_t *remote, const char *common_name);
-
-bool ifconfig_pool_release (struct ifconfig_pool* pool, ifconfig_pool_handle hand);
-
-#ifdef IFCONFIG_POOL_TEST
-void ifconfig_pool_test (in_addr_t start, in_addr_t end);
-#endif
-
-#endif
 #endif

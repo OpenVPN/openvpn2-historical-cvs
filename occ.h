@@ -32,7 +32,7 @@
 #define OCC_STRING_SIZE 16
 
 /*
- * OCC protocol opcodes used for options consistency checks.
+ * OCC (OpenVPN Configuration Control) protocol opcodes.
  */
 
 #define OCC_REQUEST   0		/* request options string from peer */
@@ -62,6 +62,11 @@
  * once every n seconds, if --mtu-test is specified.
  */
 #define OCC_MTU_LOAD_INTERVAL_SECONDS 3
+
+/*
+ * Send an exit message to remote.
+ */
+#define OCC_EXIT               6
 
 /*
  * Used to conduct a load test command sequence

@@ -39,6 +39,8 @@
 #include "session_id.h"
 #include "mtu.h"
 
+//#define EXPONENTIAL_BACKOFF // JYFIXME
+
 #define RELIABLE_ACK_SIZE 8
 
 struct reliable_ack

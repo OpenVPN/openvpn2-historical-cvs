@@ -97,6 +97,7 @@ struct multi_context {
   const char *learn_address_script;
   bool enable_c2c;
   int max_clients;
+  int tcp_queue_limit;
 
   struct multi_instance *pending;
   struct multi_instance *earliest_wakeup;
@@ -161,6 +162,24 @@ void multi_print_status (struct multi_context *m, struct status_output *so);
 
 struct multi_instance *multi_get_queue (struct mbuf_set *ms);
 
+void multi_add_mbuf (struct multi_context *m,
+		     struct multi_instance *mi,
+		     struct mbuf_buffer *mb);
+
+
+/*
+ * Return true if our output queue is not full
+ */
+static inline bool
+multi_output_queue_ready (const struct multi_context *m,
+			  const struct multi_instance *mi)
+{
+  if (mi->tcp_link_out_deferred)
+    return mbuf_len (mi->tcp_link_out_deferred) <= m->tcp_queue_limit;
+  else
+    return true;
+}
+
 /*
  * Determine which instance has pending output
  * and prepare the output for sending in
@@ -176,21 +195,6 @@ multi_process_outgoing_link_pre (struct multi_context *m)
   else if (mbuf_defined (m->mbuf))
     mi = multi_get_queue (m->mbuf);
   return mi;
-}
-
-/*
- * Add a mbuf buffer to a particular
- * instance.
- */
-static inline void
-multi_add_mbuf (struct multi_context *m,
-		struct multi_instance *mi,
-		struct mbuf_buffer *mb)
-{
-  struct mbuf_item item;
-  item.buffer = mb;
-  item.instance = mi;
-  mbuf_add_item (m->mbuf, &item);
 }
 
 /*

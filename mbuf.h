@@ -84,6 +84,12 @@ mbuf_defined (const struct mbuf_set *ms)
   return ms && ms->len;
 }
 
+static inline bool
+mbuf_len (const struct mbuf_set *ms)
+{
+  return ms->len;
+}
+
 static inline int
 mbuf_maximum_queued (const struct mbuf_set *ms)
 {

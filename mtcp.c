@@ -617,7 +617,7 @@ tunnel_server_tcp (struct context *top)
   context_clear_2 (top);
 
   /* initialize top-tunnel instance */
-  init_instance (top);
+  init_instance (top, CC_HARD_USR1_TO_HUP);
   if (IS_SIG (top))
     return;
   

@@ -135,6 +135,10 @@ struct options
   int fragment;          /* internal fragmentation size */
 
   bool mlock;
+
+  int keepalive_ping;           /* a proxy for ping/ping-restart */
+  int keepalive_timeout;
+
   int inactivity_timeout;
   int ping_send_timeout;        /* Send a TCP/UDP ping to remote every n seconds */
   int ping_rec_timeout;         /* Expect a TCP/UDP ping from remote at least once every n seconds */
@@ -145,6 +149,8 @@ struct options
 # define PING_EXIT    1
 # define PING_RESTART 2
   int ping_rec_timeout_action;  /* What action to take on ping_rec_timeout (exit or restart)? */
+
+  int explicit_exit_notification;  /* Explicitly tell peer when we are exiting via OCC_EXIT message */
 
   bool persist_tun;             /* Don't close/reopen TUN/TAP dev on SIGUSR1 or PING_RESTART */
   bool persist_local_ip;        /* Don't re-resolve local address on SIGUSR1 or PING_RESTART */
@@ -199,6 +205,7 @@ struct options
   const char *route_default_gateway;
   bool route_noexec;
   int route_delay;
+  int route_delay_window;
   bool route_delay_defined;
   struct route_option_list *routes;
 
@@ -223,6 +230,18 @@ struct options
 #endif
 
 #if P2MP
+  bool server_defined;
+  in_addr_t server_network;
+  in_addr_t server_netmask;
+
+  bool server_bridge_defined;
+  in_addr_t server_bridge_ip;
+  in_addr_t server_bridge_netmask;
+  in_addr_t server_bridge_pool_start;
+  in_addr_t server_bridge_pool_end;
+
+  bool client;
+
   struct push_list *push_list;
   bool pull; /* client pull of config options from server */
   struct options_pre_pull *pre_pull;
@@ -238,6 +257,7 @@ struct options
   const char *tmp_dir;
   const char *client_config_dir;
   int n_bcast_buf;
+  int tcp_queue_limit;
   struct iroute *iroutes;
   bool push_ifconfig_defined;
   in_addr_t push_ifconfig_local;
@@ -314,6 +334,7 @@ struct options
   const char *exit_event_name;
   bool exit_event_initial_state;
   bool show_net_up;
+  int route_method;
 #endif
 };
 
@@ -322,24 +343,25 @@ struct options
 /*
  * Option classes.
  */
-#define OPT_P_GENERAL   (1<<0)
-#define OPT_P_UP        (1<<1)
-#define OPT_P_ROUTE     (1<<2)
-#define OPT_P_IPWIN32   (1<<3)
-#define OPT_P_SCRIPT    (1<<4)
-#define OPT_P_SETENV    (1<<5)
-#define OPT_P_SHAPER    (1<<6)
-#define OPT_P_TIMER     (1<<7)
-#define OPT_P_PERSIST   (1<<8)
-#define OPT_P_COMP      (1<<9)  /* TODO */
-#define OPT_P_MESSAGES  (1<<10)
-#define OPT_P_CRYPTO    (1<<11) /* TODO */
-#define OPT_P_TLS_PARMS (1<<12) /* TODO */
-#define OPT_P_MTU       (1<<13) /* TODO */
-#define OPT_P_NICE      (1<<14)
-#define OPT_P_PUSH      (1<<15)
-#define OPT_P_INSTANCE  (1<<16)
-#define OPT_P_CONFIG    (1<<17)
+#define OPT_P_GENERAL         (1<<0)
+#define OPT_P_UP              (1<<1)
+#define OPT_P_ROUTE           (1<<2)
+#define OPT_P_IPWIN32         (1<<3)
+#define OPT_P_SCRIPT          (1<<4)
+#define OPT_P_SETENV          (1<<5)
+#define OPT_P_SHAPER          (1<<6)
+#define OPT_P_TIMER           (1<<7)
+#define OPT_P_PERSIST         (1<<8)
+#define OPT_P_COMP            (1<<9)  /* TODO */
+#define OPT_P_MESSAGES        (1<<10)
+#define OPT_P_CRYPTO          (1<<11) /* TODO */
+#define OPT_P_TLS_PARMS       (1<<12) /* TODO */
+#define OPT_P_MTU             (1<<13) /* TODO */
+#define OPT_P_NICE            (1<<14)
+#define OPT_P_PUSH            (1<<15)
+#define OPT_P_INSTANCE        (1<<16)
+#define OPT_P_CONFIG          (1<<17)
+#define OPT_P_EXPLICIT_NOTIFY (1<<18)
 
 #define OPT_P_DEFAULT   (~OPT_P_INSTANCE)
 
@@ -349,6 +371,12 @@ struct options
 #else
 #define PULL_DEFINED(opt) (false)
 #define PUSH_DEFINED(opt) (false)
+#endif
+
+#ifdef WIN32
+#define ROUTE_OPTION_FLAGS(o) ((o)->route_method & ROUTE_METHOD_MASK)
+#else
+#define ROUTE_OPTION_FLAGS(o) (0)
 #endif
 
 #ifdef HAVE_GETTIMEOFDAY
@@ -399,6 +427,7 @@ bool apply_push_options (struct options *options,
 			 unsigned int *option_types_found);
 
 bool is_persist_option (const struct options *o);
+bool is_stateful_restart (const struct options *o);
 
 void options_detach (struct options *o);
 
@@ -409,4 +438,7 @@ void options_server_import (struct options *o,
 			    unsigned int *option_types_found);
 
 void pre_pull_default (struct options *o);
+
+void rol_check_alloc (struct options *options);
+
 #endif

@@ -202,7 +202,8 @@ struct tuntap *init_tun (const char *dev,       /* --dev option */
 			 const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
 			 const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
 			 in_addr_t local_public,
-			 in_addr_t remote_public);
+			 in_addr_t remote_public,
+			 const bool strict_warn);
 
 void init_tun_post (struct tuntap *tt,
 		    const struct frame *frame,

@@ -508,7 +508,7 @@ reliable_send (struct reliable *rel, int *opcode)
     }
   if (best)
     {
-#if 1
+#ifdef EXPONENTIAL_BACKOFF
       /* exponential backoff */
       best->next_try = reliable_unique_retry (rel, local_now + best->timeout);
       best->timeout *= 2;

@@ -108,7 +108,7 @@ void
 check_tls_errors_dowork (struct context *c)
 {
   /* TLS errors are fatal in TCP mode */
-  c->sig->signal_received = SIGUSR1;
+  c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- TLS error */
   msg (D_STREAM_ERRORS, "Fatal decryption error (check_tls_errors_dowork), restarting");
   c->sig->signal_text = "tls-error";
 }
@@ -243,10 +243,11 @@ check_add_routes_dowork (struct context *c)
       update_time ();
       event_timeout_clear (&c->c2.route_wakeup);
       event_timeout_clear (&c->c2.route_wakeup_expire);
+      initialization_sequence_completed (c);
     }
   else
     {
-      msg (D_ROUTE, "Route: Waiting for TAP-Win32 interface to come up...");
+      msg (D_ROUTE, "Route: Waiting for TUN/TAP interface to come up...");
       if (c->c2.route_wakeup.n != 1)
 	event_timeout_init (&c->c2.route_wakeup, 1, now);
     }
@@ -407,6 +408,10 @@ process_coarse_timers (struct context *c)
   /* Should we send an MTU load test? */
   check_send_occ_load_test (c);
 
+  /* Show we send an OCC_EXIT message to remote? */
+  if (c->c2.explicit_exit_notification_time_wait)
+    process_explicit_exit_notification_timer_wakeup (c);
+
   /* Should we ping the remote? */
   check_ping_send (c);
 }
@@ -442,7 +447,7 @@ check_timeout_random_component_dowork (struct context *c)
 {
   const int update_interval = 10; /* seconds */
   c->c2.update_timeout_random_component = now + update_interval;
-  c->c2.timeout_random_component.tv_usec = (time_t) get_random () & 0x000FFFFF;
+  c->c2.timeout_random_component.tv_usec = (time_t) get_random () & 0x0003FFFF;
   c->c2.timeout_random_component.tv_sec = 0;
 
   msg (D_INTERVAL, "RANDOM USEC=%d", (int) c->c2.timeout_random_component.tv_usec);
@@ -522,7 +527,7 @@ read_incoming_link (struct context *c)
 	}
       else
 	{
-	  c->sig->signal_received = SIGUSR1;
+	  c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- TCP connection reset */
 	  msg (D_STREAM_ERRORS, "Connection reset, restarting [%d]", status);
 	}
       c->sig->signal_text = "connection-reset";
@@ -625,9 +630,9 @@ process_incoming_link (struct context *c)
       if (!decrypt_status && link_socket_connection_oriented (c->c2.link_socket))
 	{
 	  /* decryption errors are fatal in TCP mode */
-	  c->sig->signal_received = SIGUSR1;
-	  msg (D_STREAM_ERRORS, "Fatal decryption error (process_incoming_link), restarting");
+	  c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- decryption error in TCP mode */
 	  c->sig->signal_text = "decryption-error";
+	  msg (D_STREAM_ERRORS, "Fatal decryption error (process_incoming_link), restarting");
 	  goto done;
 	}
 

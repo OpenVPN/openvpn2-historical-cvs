@@ -509,6 +509,15 @@ do_init_route_list (const struct options *options,
 }
 
 /*
+ * Called after all initialization has been completed.
+ */
+void
+initialization_sequence_completed (struct context *c)
+{
+  msg (M_INFO, "Initialization Sequence Completed");
+}
+
+/*
  * Possibly add routes and/or call route-up script
  * based on options.
  */
@@ -516,7 +525,7 @@ void
 do_route (const struct options *options, struct route_list *route_list, const struct tuntap *tt)
 {
   if (!options->route_noexec && route_list)
-    add_routes (route_list, tt, false);
+    add_routes (route_list, tt, ROUTE_OPTION_FLAGS (options));
 
   if (options->route_script)
     {
@@ -549,7 +558,8 @@ do_init_tun (struct context *c)
 			   c->options.ifconfig_local,
 			   c->options.ifconfig_remote_netmask,
 			   addr_host (&c->c1.link_socket_addr.local),
-			   addr_host (&c->c1.link_socket_addr.remote));
+			   addr_host (&c->c1.link_socket_addr.remote),
+			   !c->options.ifconfig_nowarn);
 
   init_tun_post (c->c1.tuntap,
 		 &c->c2.frame,
@@ -650,7 +660,7 @@ do_open_tun (struct context *c)
 }
 
 /*
- * Handled delayed tun/tap interface bringup due to --up-delay or --pull
+ * Handle delayed tun/tap interface bringup due to --up-delay or --pull
  */
 
 unsigned int
@@ -663,7 +673,8 @@ pull_permission_mask (void)
 	  | OPT_P_SHAPER
 	  | OPT_P_TIMER
 	  | OPT_P_PERSIST
-	  | OPT_P_MESSAGES);
+	  | OPT_P_MESSAGES
+	  | OPT_P_EXPLICIT_NOTIFY);
 }
 
 void
@@ -679,6 +690,9 @@ do_deferred_options (struct context *c, const unsigned int found)
       do_init_timers (c, true);
       msg (D_PUSH, "OPTIONS IMPORT: timers and/or timeouts modified");
     }
+  if (found & OPT_P_EXPLICIT_NOTIFY)
+    msg (D_PUSH, "OPTIONS IMPORT: explicit notify parm(s) modified");
+
   if (found & OPT_P_SHAPER)
     {
       msg (D_PUSH, "OPTIONS IMPORT: traffic shaper enabled");
@@ -720,8 +734,10 @@ do_up (struct context *c, bool pulled_options, unsigned int option_types_found)
 	  if (c->options.route_delay_defined)
 	    {
 	      event_timeout_init (&c->c2.route_wakeup, c->options.route_delay, now);
-	      event_timeout_init (&c->c2.route_wakeup_expire, c->options.route_delay + ROUTE_DELAY_WINDOW, now);
+	      event_timeout_init (&c->c2.route_wakeup_expire, c->options.route_delay + c->options.route_delay_window, now);
 	    }
+	  else
+	    initialization_sequence_completed (c);
 	}
       else if (pulled_options && (option_types_found & (OPT_P_UP|OPT_P_ROUTE|OPT_P_IPWIN32)))
 	{
@@ -736,21 +752,27 @@ do_up (struct context *c, bool pulled_options, unsigned int option_types_found)
  * TCP race.
  */
 static void
-socket_restart_pause (int proto, bool http_proxy, bool socks_proxy)
+socket_restart_pause (const struct context *c)
 {
+  const bool proxy = (c->options.http_proxy_server != NULL || c->options.socks_proxy_server != NULL);
+  const int retry = c->options.connect_retry_seconds;
+
   int sec = 0;
-  switch (proto)
+
+  switch (c->options.proto)
     {
     case PROTO_UDPv4:
-      sec = socks_proxy ? 3 : 0;
+      if (proxy)
+	sec = retry;
       break;
     case PROTO_TCPv4_SERVER:
       sec = 1;
       break;
     case PROTO_TCPv4_CLIENT:
-      sec = (http_proxy || socks_proxy) ? 10 : 3;
+      sec = retry;
       break;
     }
+
   if (sec)
     {
       msg (D_RESTART, "Restart pause, %d second(s)", sec);
@@ -1489,7 +1511,7 @@ do_close_tuntap (struct context *c)
 	{
 	  /* delete any routes we added */
 	  if (c->c1.route_list)
-	    delete_routes (c->c1.route_list, c->c1.tuntap);
+	    delete_routes (c->c1.route_list, c->c1.tuntap, ROUTE_OPTION_FLAGS (&c->options));
 
 	  msg (D_CLOSE, "Closing TUN/TAP interface");
 	  close_tun (c->c1.tuntap);
@@ -1637,7 +1659,7 @@ do_close_status_output (struct context *c)
  * Initialize a tunnel instance.
  */
 void
-init_instance (struct context *c)
+init_instance (struct context *c, unsigned int flags)
 {
   const struct options *options = &c->options;
   const bool child = (c->mode == CM_CHILD_TCP || c->mode == CM_CHILD_UDP);
@@ -1683,9 +1705,7 @@ init_instance (struct context *c)
 
   /* possible sleep if restart */
   if ((c->mode == CM_P2P || c->mode == CM_TOP) && !c->first_time)
-    socket_restart_pause (options->proto, options->http_proxy_server != NULL,
-			  options->socks_proxy_server != NULL);
-
+    socket_restart_pause (c);
 
   /* open --status file */
   if (c->mode == CM_P2P || c->mode == CM_TOP)
@@ -1789,7 +1809,7 @@ init_instance (struct context *c)
   if (IS_SIG (c))
     {
       c->sig->signal_text = "init_instance";
-      close_context (c, -1, CC_USR1_TO_HUP | CC_GC_FREE);
+      close_context (c, -1, flags);
     }
 }
 
@@ -1902,7 +1922,7 @@ inherit_context_child (struct context *dest,
     }
 
   /* context init */
-  init_instance (dest);
+  init_instance (dest, CC_USR1_TO_HUP | CC_GC_FREE);
   if (IS_SIG (dest))
     return;
 
@@ -1960,9 +1980,16 @@ close_context (struct context *c, int sig, unsigned int flags)
 {
   if (sig >= 0)
     c->sig->signal_received = sig;
-  if ((flags & CC_USR1_TO_HUP) && c->sig->signal_received == SIGUSR1)
-    c->sig->signal_received = SIGHUP;
+
+  if (c->sig->signal_received == SIGUSR1)
+    {
+      if ((flags & CC_USR1_TO_HUP)
+	  || (c->sig->hard && (flags & CC_HARD_USR1_TO_HUP)))
+	c->sig->signal_received = SIGHUP;
+    }
+
   close_instance (c);
+
   if (flags & CC_GC_FREE)
     context_gc_free (c);
 }

@@ -374,20 +374,21 @@ win32_signal_get (struct win32_signal *ws)
     }
   else if (ws->mode == WSO_MODE_CONSOLE)
     {
-      switch (win32_keyboard_get (ws)) {
-      case 0x3B: /* F1 -> USR1 */
-	ret = SIGUSR1;
-	break;
-      case 0x3C: /* F2 -> USR2 */
-	ret = SIGUSR2;
-	break;
-      case 0x3D: /* F3 -> HUP */
-	ret = SIGHUP;
-	break;
-      case 0x3E: /* F4 -> TERM */
-	ret = SIGTERM;
-	break;
-      }
+      switch (win32_keyboard_get (ws))
+	{
+	case 0x3B: /* F1 -> USR1 */
+	  ret = SIGUSR1;
+	  break;
+	case 0x3C: /* F2 -> USR2 */
+	  ret = SIGUSR2;
+	  break;
+	case 0x3D: /* F3 -> HUP */
+	  ret = SIGHUP;
+	  break;
+	case 0x3E: /* F4 -> TERM */
+	  ret = SIGTERM;
+	  break;
+	}
     }
   if (ret)
     {

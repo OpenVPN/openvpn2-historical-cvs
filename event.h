@@ -147,25 +147,11 @@ wait_signal (struct event_set *es, void *arg)
     event_ctl (es, &win32_signal.in, EVENT_READ, arg);
 }
 
-static inline void
-get_signal (volatile int *sig)
-{
-  *sig = win32_signal_get (&win32_signal);
-}
-
 #else
 
 static inline void
 wait_signal (struct event_set *es, void *arg)
 {
-}
-
-static inline void
-get_signal (volatile int *sig)
-{
-  const int i = siginfo_static.signal_received;
-  if (i)
-    *sig = i;
 }
 
 #endif

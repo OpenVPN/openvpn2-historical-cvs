@@ -1504,7 +1504,8 @@ struct proto_names {
 static const struct proto_names proto_names[] = {
   {"udp",        "UDPv4"},
   {"tcp-server", "TCPv4_SERVER"},
-  {"tcp-client", "TCPv4_CLIENT"}
+  {"tcp-client", "TCPv4_CLIENT"},
+  {"tcp",        "TCPv4"}
 };
 
 int

@@ -34,13 +34,19 @@
 
 #define MAX_ROUTES 100
 
+#ifdef WIN32
 /*
- * On Windows, after --route-delay triggers our
- * addition of routes, wait up to n seconds for
- * interfaces referenced by the route destination
- * to come up.
+ * Windows route methods
  */
-#define ROUTE_DELAY_WINDOW 30
+#define ROUTE_METHOD_IPAPI  0  /* use IP helper API */
+#define ROUTE_METHOD_EXE    1  /* use route.exe */
+#define ROUTE_METHOD_MASK   1
+#endif
+
+/*
+ * Route add flags (must stay clear of ROUTE_METHOD bits)
+ */
+#define ROUTE_DELETE_FIRST  2
 
 struct route_special_addr
 {
@@ -117,10 +123,11 @@ bool init_route_list (struct route_list *rl,
 
 void add_routes (struct route_list *rl,
 		 const struct tuntap *tt,
-		 bool delete_first);
+		 unsigned int flags);
 
 void delete_routes (struct route_list *rl,
-		    const struct tuntap *tt);
+		    const struct tuntap *tt,
+		    unsigned int flags);
 
 void setenv_routes (const struct route_list *rl);
 
@@ -129,19 +136,21 @@ void print_route_options (const struct route_option_list *rol,
 
 void print_routes (const struct route_list *rl, int level);
 
-bool netmask_to_netbits (in_addr_t network, in_addr_t netmask, int *netbits);
-
 #ifdef WIN32
+
 void show_routes (int msglev);
 bool test_routes (const struct route_list *rl, const struct tuntap *tt);
 bool add_route_ipapi (const struct route *r, const struct tuntap *tt);
 bool del_route_ipapi (const struct route *r, const struct tuntap *tt);
+
 #else
 static inline bool test_routes (const struct route_list *rl, const struct tuntap *tt) { return true; }
 #endif
 
+bool netmask_to_netbits (const in_addr_t network, const in_addr_t netmask, int *netbits);
+
 static inline in_addr_t
-netbits_to_netmask (int netbits)
+netbits_to_netmask (const int netbits)
 {
   const int addrlen = sizeof (in_addr_t) * 8;
   in_addr_t mask = 0;

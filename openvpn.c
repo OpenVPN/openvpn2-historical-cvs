@@ -743,6 +743,8 @@ openvpn (const struct options *options,
 	  crypto_options.packet_id = &packet_id;
 	  crypto_options.pid_persist = pid_persist;
 	  crypto_options.packet_id_long_form = true;
+	  crypto_options.packet_id_require_sequential
+	    = link_socket_proto_connection_oriented (options->proto);
 	  packet_id_persist_load_obj (pid_persist, crypto_options.packet_id);
 	}
 
@@ -884,6 +886,8 @@ openvpn (const struct options *options,
       to.server = options->tls_server;
       to.packet_id = options->packet_id;
       to.packet_id_long_form = packet_id_long_form;
+      to.packet_id_require_sequential
+	= link_socket_proto_connection_oriented (options->proto);
       to.transition_window = options->transition_window;
       to.handshake_window = options->handshake_window;
       to.packet_timeout = options->tls_timeout;
@@ -899,6 +903,8 @@ openvpn (const struct options *options,
 	  to.tls_auth_key = ks->tls_auth_key;
 	  to.tls_auth.pid_persist = pid_persist;
 	  to.tls_auth.packet_id_long_form = true;
+	  to.tls_auth.packet_id_require_sequential
+	    = to.packet_id_require_sequential;
 	  crypto_adjust_frame_parameters(&to.frame,
 					 &ks->key_type,
 					 false,
@@ -2111,17 +2117,17 @@ openvpn (const struct options *options,
 	       * us to examine the IPv4 header.
 	       */
 	      if (options->mssfix_defined)
+		{
+		  struct buffer ipbuf = to_tun;
+
+		  if (is_ipv4 (tuntap->type, &ipbuf))
 		    {
-		      struct buffer ipbuf = to_tun;
-
-		      if (is_ipv4 (tuntap->type, &ipbuf))
-			{
-			  /* possibly alter the TCP MSS */
-			  if (options->mssfix_defined)
-			    mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&frame)));
-			}
+		      /* possibly alter the TCP MSS */
+		      if (options->mssfix_defined)
+			mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&frame)));
 		    }
-
+		}
+	      
 	      if (to_tun.len <= MAX_RW_SIZE_TUN(&frame))
 		{
 		  /*

@@ -75,7 +75,8 @@ typedef uint32_t net_time_t;
 
 /*
  * DEBUGGING ONLY.
- * Make packet_id_type and net_time_t small.
+ * Make packet_id_type and net_time_t small
+ * to test wraparound logic and corner cases.
  */
 
 typedef uint8_t packet_id_type;
@@ -208,13 +209,18 @@ struct packet_id
 };
 
 /* should we accept an incoming packet id ? */
-bool packet_id_test (const struct packet_id_rec *p, const struct packet_id_net *pin);
+bool packet_id_test (const struct packet_id_rec *p,
+		     const struct packet_id_net *pin,
+		     bool require_sequential);
 
 /* change our current state to reflect an accepted packet id */
-void packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin, time_t current);
+void packet_id_add (struct packet_id_rec *p,
+		    const struct packet_id_net *pin,
+		    time_t current);
 
 /* expire TIME_BACKTRACK sequence numbers */ 
-void packet_id_reap (struct packet_id_rec *p, time_t current);
+void packet_id_reap (struct packet_id_rec *p,
+		     time_t current);
 
 /*
  * packet ID persistence

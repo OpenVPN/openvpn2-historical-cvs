@@ -213,6 +213,7 @@ struct crypto_options
   struct packet_id *packet_id;
   struct packet_id_persist *pid_persist;
   bool packet_id_long_form;
+  bool packet_id_require_sequential;
   bool use_iv;
 };
 

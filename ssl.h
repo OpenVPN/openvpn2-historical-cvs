@@ -242,6 +242,7 @@ struct tls_options
 
   /* use 32 bit or 64 bit packet-id? */
   bool packet_id_long_form;
+  bool packet_id_require_sequential;
 
   /* packet authentication for TLS handshake */
   struct crypto_options tls_auth;

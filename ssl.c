@@ -2121,6 +2121,7 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  opt->packet_id = multi->opt.packet_id ? &ks->packet_id : NULL;
 		  opt->pid_persist = NULL;
 		  opt->packet_id_long_form = multi->opt.packet_id_long_form;
+		  opt->packet_id_require_sequential = multi->opt.packet_id_require_sequential;
 		  ASSERT (buf_advance (buf, 1));
 		  ++ks->n_packets;
 		  ks->n_bytes += buf->len;
@@ -2439,6 +2440,7 @@ tls_pre_decrypt (struct tls_multi *multi,
   opt->packet_id = NULL;
   opt->pid_persist = NULL;
   opt->packet_id_long_form = false;
+  opt->packet_id_require_sequential = false;
   return ret;
 }
 

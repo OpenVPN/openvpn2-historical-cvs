@@ -1,13 +1,18 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.17 2003/10/10 12:49:35 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.18 2003/10/11 04:38:42 jimyonan Exp $
+	
+2003.10.xx -- Version 1.5-beta12
+
+* Don't allow any kind of sequence number backtracking or
+  message reordering when in TCP mode.
 	
 2003.10.08 -- Version 1.5-beta11
 
 * Modified code in the Windows version which sets the IP address
   and netmask of the TAP-Win32 adapter using the IP Helper API.
-  Most of the changes involve better error recovery when the
+  Most of the changes involve better error recovery when
   the IP Helper API returns an error status.  See the
   manual page entry on --ip-win32 for more info.
 

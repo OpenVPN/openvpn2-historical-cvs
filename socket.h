@@ -250,7 +250,6 @@ const char *proto2ascii (int proto, bool display_form);
 const char *proto2ascii_all ();
 int proto_remote (int proto, bool remote);
 
-
 /*
  * Overhead added to packets by various protocols.
  */

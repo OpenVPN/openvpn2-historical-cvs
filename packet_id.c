@@ -114,7 +114,9 @@ packet_id_reap (struct packet_id_rec *p, time_t current)
  * it is a replay.
  */
 bool
-packet_id_test (const struct packet_id_rec *p, const struct packet_id_net *pin)
+packet_id_test (const struct packet_id_rec *p,
+		const struct packet_id_net *pin,
+		bool require_sequential)
 {
   packet_id_type diff;
 
@@ -126,23 +128,47 @@ packet_id_test (const struct packet_id_rec *p, const struct packet_id_net *pin)
   if (!pin->id)
     return false;
 
-  if (pin->time == p->time)
+  if (!require_sequential)
     {
-      /* is packet-id greater than any one we've seen yet? */
-      if (pin->id > p->id)
-	return true;
+      /*
+       * In backtrack mode, we allow packet reordering subject
+       * to the SEQ_BACKTRACK and TIME_BACKTRACK constraints.
+       *
+       * This mode is used with UDP.
+       */
+      if (pin->time == p->time)
+	{
+	  /* is packet-id greater than any one we've seen yet? */
+	  if (pin->id > p->id)
+	    return true;
 
-      /* check packet-id sliding window for original/replay status */
-      diff = p->id - pin->id;
-      if (diff >= (packet_id_type) CIRC_LIST_SIZE (p->id_list))
+	  /* check packet-id sliding window for original/replay status */
+	  diff = p->id - pin->id;
+	  if (diff >= (packet_id_type) CIRC_LIST_SIZE (p->id_list))
+	    return false;
+
+	  return CIRC_LIST_ITEM (p->id_list, diff) == 0;
+	}
+      else if (pin->time < p->time) /* if time goes back, reject */
 	return false;
-
-      return CIRC_LIST_ITEM (p->id_list, diff) == 0;
+      else                          /* time moved forward */
+	return true;
     }
-  else if (pin->time < p->time) /* if time goes back, reject */
-    return false;
-  else                          /* time moved forward */
-    return true;
+  else
+    {
+      /*
+       * In non-backtrack mode, all sequence number series must
+       * begin at 1 and must increment linearly without gaps.
+       *
+       * This mode is used with TCP.
+       */
+      if (pin->time == p->time)
+	return pin->id == p->id + 1;
+      else if (pin->time < p->time) /* if time goes back, reject */
+	return false;
+      else                          /* time moved forward */
+	return pin->id == 1;
+    }
 }
 
 const char*
@@ -310,8 +336,11 @@ void packet_id_interactive_test ()
   bool count = 0;
   bool test;
 
+  const bool require_sequential = false;
+
   CLEAR (p);
   CLEAR (s);
+
   while (true) {
     char buf[80];
     if (!fgets(buf, sizeof(buf), stdin))
@@ -319,7 +348,7 @@ void packet_id_interactive_test ()
     if (sscanf (buf, "%lu,%u", &pin.time, &pin.id) == 2)
       {
 	packet_id_reap_test (&p, time (NULL));
-	test = packet_id_test (&p, &pin);
+	test = packet_id_test (&p, &pin, require_sequential);
 	printf ("packet_id_test (" packet_id_format ", " packet_id_format ") returned %d\n",
 		(time_type)pin.time,
 		(packet_id_print_type)pin.id,

@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [2.0_test26], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [2.0_test27], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -447,7 +447,7 @@ fi
 
 dnl enable strict compiler warnings
 if test "$STRICT" = "yes"; then
-   CFLAGS="$CFLAGS -Wall -W -Wpointer-arith -Wsign-compare -Winline -Wno-unused-parameter"
+   CFLAGS="$CFLAGS -Wall -W -Wpointer-arith -Wsign-compare -Winline -Wno-unused-parameter -Wno-unused-function"
 fi
 
 dnl enable profiling

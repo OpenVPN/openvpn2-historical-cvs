@@ -101,7 +101,15 @@ struct hash_iterator
   struct hash_element *last;
   bool bucket_marked;
   bool autolock;
+  int bucket_index_start;
+  int bucket_index_end;
 };
+
+void hash_iterator_init_range (struct hash *hash,
+			       struct hash_iterator *hi,
+			       bool autolock,
+			       int start_bucket,
+			       int end_bucket);
 
 void hash_iterator_init (struct hash *hash, struct hash_iterator *iter, bool autolock);
 struct hash_element *hash_iterator_next (struct hash_iterator *hi);
@@ -127,6 +135,12 @@ static inline int
 hash_n_elements (const struct hash *hash)
 {
   return hash->n_elements;
+}
+
+static inline int
+hash_n_buckets (const struct hash *hash)
+{
+  return hash->n_buckets;
 }
 
 static inline struct hash_bucket *

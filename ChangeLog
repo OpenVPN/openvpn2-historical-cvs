@@ -1,8 +1,19 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.25 2004/04/29 06:19:45 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.26 2004/05/06 21:24:28 jimyonan Exp $
 
+2004.05.06 -- Version 2.0-test27
+
+* Fixed bug in close_instance() which might cause
+  memory to be accessed after it had already been freed.
+* Fixed bug in verify_callback() that might have
+  caused uninitialized data to be referenced.
+* --iroute now allows full CIDR subnet routing.
+* Source addresses on VPN packets coming from a
+  particular client must be associated with that
+  client in the OpenVPN internal routing table.
+	
 2004.04.28 -- Version 2.0-test26
 
 * Optimized broadcast path in multi-client mode.

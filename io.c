@@ -26,8 +26,7 @@
 /*
  * I/O functionality used by both the sockets and TUN/TAP I/O layers.
  *
- * We also try to abstract away the differences between Posix and Win32
- * for the benefit of openvpn.c.
+ * We also try to abstract away the differences between Posix and Win32.
  */
 
 #ifdef WIN32

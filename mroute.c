@@ -42,6 +42,9 @@
 
 static const uint8_t ethernet_bcast_addr[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
+/*
+ * Don't learn certain addresses.
+ */
 bool
 mroute_learnable_address (const struct mroute_addr *addr)
 {
@@ -60,6 +63,10 @@ mroute_learnable_address (const struct mroute_addr *addr)
   return not_all_zeros && not_all_ones;
 }
 
+/*
+ * Given a raw packet in buf, return the src and dest
+ * addresses of the packet.
+ */
 unsigned int
 mroute_extract_addr_from_packet (struct mroute_addr *src,
 				 struct mroute_addr *dest,
@@ -80,19 +87,19 @@ mroute_extract_addr_from_packet (struct mroute_addr *src,
 		  if (src)
 		    {
 		      src->type = MR_ADDR_IPV4;
+		      src->netbits = 0;
 		      src->len = 4;
 		      memcpy (src->addr, &ip->saddr, 4);
 		    }
 		  if (dest)
 		    {
-		      in_addr_t dest_addr;
 		      dest->type = MR_ADDR_IPV4;
+		      dest->netbits = 0;
 		      dest->len = 4;
 		      memcpy (dest->addr, &ip->daddr, 4);
-		      memcpy (&dest_addr, &ip->daddr, 4);
 
 		      /* mcast address? */
-		      if ((ntohl (dest_addr) & IP_MCAST_SUBNET_MASK) == (unsigned long) IP_MCAST_NETWORK)
+		      if (((*(in_addr_t*)dest->addr) & htonl(IP_MCAST_SUBNET_MASK)) == htonl(IP_MCAST_NETWORK))
 			ret |= MROUTE_EXTRACT_MCAST;
 
 		      /* IGMP message? */
@@ -118,12 +125,14 @@ mroute_extract_addr_from_packet (struct mroute_addr *src,
 	  if (src)
 	    {
 	      src->type = MR_ADDR_ETHER;
+	      src->netbits = 0;
 	      src->len = 6;
 	      memcpy (src->addr, eth->source, 6);
 	    }
 	  if (dest)
 	    {
 	      dest->type = MR_ADDR_ETHER;
+	      dest->netbits = 0;
 	      dest->len = 6;
 	      memcpy (dest->addr, eth->dest, 6);
 
@@ -138,6 +147,10 @@ mroute_extract_addr_from_packet (struct mroute_addr *src,
   return ret;
 }
 
+/*
+ * Translate a struct sockaddr_in (saddr)
+ * to a struct mroute_addr (addr).
+ */
 bool
 mroute_extract_sockaddr_in (struct mroute_addr *addr, const struct sockaddr_in *saddr, bool use_port)
 {
@@ -146,6 +159,7 @@ mroute_extract_sockaddr_in (struct mroute_addr *addr, const struct sockaddr_in *
       if (use_port)
 	{
 	  addr->type = MR_ADDR_IPV4 | MR_WITH_PORT;
+	  addr->netbits = 0;
 	  addr->len = 6;
 	  memcpy (addr->addr, &saddr->sin_addr.s_addr, 4);
 	  memcpy (addr->addr + 4, &saddr->sin_port, 2);
@@ -153,6 +167,7 @@ mroute_extract_sockaddr_in (struct mroute_addr *addr, const struct sockaddr_in *
       else
 	{
 	  addr->type = MR_ADDR_IPV4;
+	  addr->netbits = 0;
 	  addr->len = 4;
 	  memcpy (addr->addr, &saddr->sin_addr.s_addr, 4);
 	}
@@ -161,6 +176,25 @@ mroute_extract_sockaddr_in (struct mroute_addr *addr, const struct sockaddr_in *
   return false;
 }
 
+/*
+ * Zero off the host bits in an address, leaving
+ * only the network bits, using the netbits member of
+ * struct mroute_addr as the controlling parameter.
+ */
+void
+mroute_addr_mask_host_bits (struct mroute_addr *ma)
+{
+  in_addr_t addr = ntohl(*(in_addr_t*)ma->addr);
+  ASSERT ((ma->type & MR_ADDR_MASK) == MR_ADDR_IPV4);
+  addr &= netbits_to_netmask (ma->netbits);
+  *(in_addr_t*)ma->addr = htonl (addr);
+}
+
+/*
+ * The mroute_addr hash function takes into account the
+ * address type, number of bits in the network address,
+ * and the actual address.
+ */
 uint32_t
 mroute_addr_hash_function (const void *key, uint32_t iv)
 {
@@ -177,49 +211,131 @@ mroute_addr_compare_function (const void *key1, const void *key2)
 }
 
 const char *
-mroute_addr_print (const struct mroute_addr *ma, struct gc_arena *gc)
+mroute_addr_print (const struct mroute_addr *ma,
+		   struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (64, gc);
-  bool with_port = false;
-  struct mroute_addr maddr = *ma;
-
-  // JYFIXME -- print addresses for all types
-  switch (maddr.type)
+  if (ma)
     {
-    case MR_ADDR_ETHER:
-      buf_printf (&out, "%s", format_hex_ex (ma->addr, 6, 0, 1, ":", gc)); 
-      break;
-    case MR_ADDR_IPV4|MR_WITH_PORT:
-      with_port = true;
-    case MR_ADDR_IPV4:
-      {
-	struct buffer buf;
-	in_addr_t addr;
-	int port;
-	bool status;
-	buf_set_read (&buf, maddr.addr, maddr.len);
-	addr = buf_read_u32 (&buf, &status);
-	if (status)
-	  buf_printf (&out, "%s", print_in_addr_t (addr, true, gc));
-	if (with_port)
+      struct mroute_addr maddr = *ma;
+
+      switch (maddr.type & MR_ADDR_MASK)
+	{
+	case MR_ADDR_ETHER:
+	  buf_printf (&out, "%s", format_hex_ex (ma->addr, 6, 0, 1, ":", gc)); 
+	  break;
+	case MR_ADDR_IPV4:
 	  {
-	    port = buf_read_u16 (&buf);
-	    if (port >= 0)
-	      buf_printf (&out, ":%d", port);
+	    struct buffer buf;
+	    in_addr_t addr;
+	    int port;
+	    bool status;
+	    buf_set_read (&buf, maddr.addr, maddr.len);
+	    addr = buf_read_u32 (&buf, &status);
+	    if (status)
+	      {
+		buf_printf (&out, "%s", print_in_addr_t (addr, true, gc));
+		if (maddr.type & MR_WITH_NETBITS)
+		  buf_printf (&out, "/%d", maddr.netbits);
+	      }
+	    if (maddr.type & MR_WITH_PORT)
+	      {
+		port = buf_read_u16 (&buf);
+		if (port >= 0)
+		  buf_printf (&out, ":%d", port);
+	      }
 	  }
-      }
-      break;
-    case MR_ADDR_IPV6:
-      buf_printf (&out, "IPV6"); 
-      break;
-    case MR_ADDR_IPV6|MR_WITH_PORT:
-      buf_printf (&out, "IPV6/PORT"); 
-      break;
-    default:
-      buf_printf (&out, "UNKNOWN"); 
-      break;
+	  break;
+	case MR_ADDR_IPV6:
+	  buf_printf (&out, "IPV6"); 
+	  break;
+	default:
+	  buf_printf (&out, "UNKNOWN"); 
+	  break;
+	}
+      return BSTR (&out);
     }
-  return BSTR (&out);
+  else
+    return "[NULL]";
+}
+
+/*
+ * mroute_helper's main job is keeping track of
+ * currently used CIDR netlengths, so we don't
+ * have to cycle through all 33.
+ */
+
+struct mroute_helper *
+mroute_helper_init (int ageable_ttl_secs)
+{
+  struct mroute_helper *mh;
+  ALLOC_OBJ_CLEAR (mh, struct mroute_helper);
+  mutex_init (&mh->mutex);
+  mh->ageable_ttl_secs = ageable_ttl_secs;
+  return mh;
+}
+
+static void
+mroute_helper_regenerate (struct mroute_helper *mh)
+{
+  int i, j = 0;
+  for (i = MR_HELPER_NET_LEN - 1; i >= 0; --i)
+    {
+      if (mh->net_len_refcount[i] > 0)
+	mh->net_len[j++] = (uint8_t) i;
+    }
+  mh->n_net_len = j;
+
+  if (check_debug_level (D_MULTI_DEBUG))
+    {
+      struct gc_arena gc = gc_new ();
+      struct buffer out = alloc_buf_gc (256, &gc);
+      buf_printf (&out, "MROUTE CIDR netlen:");
+      for (i = 0; i < mh->n_net_len; ++i)
+	{
+	  buf_printf (&out, " /%d", mh->net_len[i]);
+	}
+      msg (D_MULTI_DEBUG, "%s", BSTR (&out));
+      gc_free (&gc);
+    }
+}
+
+void
+mroute_helper_add_iroute (struct mroute_helper *mh, const struct iroute *ir)
+{
+  if (ir->netbits >= 0)
+    {
+      ASSERT (ir->netbits < MR_HELPER_NET_LEN);
+      mroute_helper_lock (mh);
+      ++mh->cache_generation;
+      ++mh->net_len_refcount[ir->netbits];
+      if (mh->net_len_refcount[ir->netbits] == 1)
+	mroute_helper_regenerate (mh);
+      mroute_helper_unlock (mh);
+    }
+}
+
+void
+mroute_helper_del_iroute (struct mroute_helper *mh, const struct iroute *ir)
+{
+  if (ir->netbits >= 0)
+    {
+      ASSERT (ir->netbits < MR_HELPER_NET_LEN);
+      mroute_helper_lock (mh);
+      ++mh->cache_generation;
+      --mh->net_len_refcount[ir->netbits];
+      ASSERT (mh->net_len_refcount[ir->netbits] >= 0);
+      if (!mh->net_len_refcount[ir->netbits])
+	mroute_helper_regenerate (mh);
+      mroute_helper_unlock (mh);
+    }
+}
+
+void
+mroute_helper_free (struct mroute_helper *mh)
+{
+  mutex_destroy (&mh->mutex);
+  free (mh);
 }
 
 #else

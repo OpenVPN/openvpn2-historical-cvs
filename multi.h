@@ -36,6 +36,18 @@
 #include "pool.h"
 
 /*
+ * Walk (don't run) through the routing table,
+ * deleting old entries, and possibly multi_instance
+ * structs as well which have been marked for deletion.
+ */
+struct multi_reap
+{
+  int bucket_base;
+  int buckets_per_pass;
+  time_t last_call;
+};
+
+/*
  * One multi_instance object per client instance.
  */
 struct multi_instance {
@@ -43,6 +55,7 @@ struct multi_instance {
   MUTEX_DEFINE (mutex);
   bool defined;
   bool halt;
+  int refcount;
   time_t created;
   struct timeval wakeup;       /* absolute time */
   struct mroute_addr real;
@@ -69,6 +82,9 @@ struct multi_context {
   struct mbuf_set *mbuf;
   struct ifconfig_pool *ifconfig_pool;
   struct frequency_limit *new_connection_limiter;
+  struct mroute_helper *route_helper;
+  struct multi_reap *reaper;
+  struct mroute_addr local;
 
   bool enable_c2c;
 };
@@ -84,6 +100,22 @@ struct multi_thread {
   struct multi_instance *earliest_wakeup;  
   struct context_buffers *context_buffers;
   struct context top;
+};
+
+/*
+ * Host route
+ */
+struct multi_route
+{
+  struct mroute_addr addr;
+  struct multi_instance *instance;
+
+# define MULTI_ROUTE_CACHE   (1<<0)
+# define MULTI_ROUTE_AGEABLE (1<<1)
+  unsigned int flags;
+
+  unsigned int cache_generation;
+  time_t last_reference;
 };
 
 void tunnel_server_single_threaded (struct context *top);
@@ -111,6 +143,49 @@ multi_add_mbuf (struct multi_context *m,
   item.buffer = mb;
   item.instance = mi;
   mbuf_add_item (m->mbuf, &item);
+}
+
+/*
+ * Instance reference counting
+ */
+
+static inline void
+multi_instance_inc_refcount (struct multi_instance *mi)
+{
+  ++mi->refcount;
+}
+
+static inline void
+multi_instance_dec_refcount (struct multi_instance *mi)
+{
+  if (--mi->refcount <= 0)
+    {
+      gc_free (&mi->gc);
+      free (mi);
+    }
+}
+
+static inline void
+multi_route_del (struct multi_route *route)
+{
+  multi_instance_dec_refcount (route->instance);
+  free (route);
+}
+
+static inline bool
+multi_route_defined (const struct multi_context *m,
+		     const struct multi_route *r)
+{
+  if (r->instance->halt)
+    return false;
+  else if ((r->flags & MULTI_ROUTE_CACHE)
+	   && r->cache_generation != m->route_helper->cache_generation)
+    return false;
+  else if ((r->flags & MULTI_ROUTE_AGEABLE)
+	   && r->last_reference + m->route_helper->ageable_ttl_secs < now)
+    return false;
+  else
+    return true;
 }
 
 #endif /* P2MP */

@@ -238,7 +238,7 @@ static const char usage_message[] =
   "--ifconfig-push local remote-netmask : Push an ifconfig option to remote,\n"
   "                  overrides --ifconfig-pool dynamic allocation.\n"
   "                  Must be associated with a specific client instance.\n"
-  "--iroute start end : Route IP address range from start to end to client.\n"
+  "--iroute network [netmask] : Route subnet to client.\n"
   "                  Sets up internal routes only, and must be\n"
   "                  associated with a specific client instance.\n"
   "--client-to-client : Internally route client-to-client traffic.\n"
@@ -604,36 +604,28 @@ show_p2mp_parms (const struct options *o)
 
 static void
 option_iroute (struct options *o,
-	       const char *start,
-	       const char *end,
+	       const char *network_str,
+	       const char *netmask_str,
 	       int msglevel)
 {
-  const unsigned int max_address_range = 4096;
   struct iroute *ir;
-  unsigned int diff;
-
-  msg (M_INFO, "IROUTE %s %s", start, end);
 
   ALLOC_OBJ_GC (ir, struct iroute, &o->gc);
-  ir->start = getaddr (GETADDR_HOST_ORDER, start, 0, NULL, NULL);
-  ir->end   = getaddr (GETADDR_HOST_ORDER, end,   0, NULL, NULL);
+  ir->network = getaddr (GETADDR_HOST_ORDER, network_str, 0, NULL, NULL);
+  ir->netbits = -1;
 
-  if (!ir->start || !ir->end)
+  if (netmask_str)
     {
-      msg (msglevel, "Dynamic Options Error: bad --iroute parameter (must be 1 or 2 IP addresses)");
-      return;
+      const in_addr_t netmask = getaddr (GETADDR_HOST_ORDER, netmask_str, 0, NULL, NULL);
+      if (!netmask_to_netbits (ir->network, netmask, &ir->netbits))
+	{
+	  msg (msglevel, "Options Error: in --iroute %s %s : Bad network/subnet specification",
+	       network_str,
+	       netmask_str);
+	  return;
+	}
     }
-  if (ir->start > ir->end)
-    {
-      msg (msglevel, "Dynamic Options Error: --iroute start address is greater than end address");
-      return;
-    }
-  diff = ir->end - ir->start;
-  if (diff > max_address_range)
-    {
-      msg (msglevel, "Dynamic Options Error: --iroute address range is too large (max = %u addresses)", max_address_range);
-      return;
-    }
+
   ir->next = o->iroutes;
   o->iroutes = ir;
 }
@@ -1045,6 +1037,9 @@ options_postprocess (struct options *options, bool first_time)
   if (options->socks_proxy_server && options->proto == PROTO_TCPv4_SERVER)
     msg (M_USAGE, "Options error: --socks-proxy can not be used in TCP Server mode");
 
+  if (options->proto == PROTO_TCPv4_SERVER && remote_list_len (options->remote_list) > 1)
+    msg (M_USAGE, "Options error: TCP server mode allows at most one --remote address");
+
 #if P2MP
   /*
    * Check consistency of --mode server options.
@@ -1055,8 +1050,8 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --mode server only works with --dev tun or --dev tap");
       if (options->pull)
 	msg (M_USAGE, "Options error: --pull cannot be used with --mode server");
-      if (options->proto != PROTO_UDPv4)
-	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp");
+      if (!(options->proto == PROTO_UDPv4 || options->proto == PROTO_TCPv4_SERVER))
+	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp or --proto tcp-server");
       if (!options->tls_server)
 	msg (M_USAGE, "Options error: --mode server requires --tls-server");
       if (options->tls_auth_file)
@@ -1069,6 +1064,10 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --tun-ipv6 cannot be used with --mode server");
       if (options->shaper)
 	msg (M_USAGE, "Options error: --shaper cannot be used with --mode server");
+#if 1
+      if (options->proto != PROTO_UDPv4)
+	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp");
+#endif
 
 #ifdef WIN32
       /*
@@ -2480,15 +2479,15 @@ add_option (struct options *options,
     }
   else if (streq (p[0], "iroute") && p[1])
     {
-      const char *end = p[1];
+      const char *netmask = NULL;
       VERIFY_PERMISSION (OPT_P_INSTANCE);
       ++i;
       if (p[2])
 	{
 	  ++i;
-	  end = p[2];
+	  netmask = p[2];
 	}
-      option_iroute (options, p[1], end, msglevel);
+      option_iroute (options, p[1], netmask, msglevel);
     }
   else if (streq (p[0], "ifconfig-push") && p[1] && p[2])
     {

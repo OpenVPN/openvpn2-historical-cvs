@@ -77,6 +77,15 @@ struct route_list {
   struct route routes[MAX_ROUTES];
 };
 
+#if P2MP
+/* internal OpenVPN route */
+struct iroute {
+  in_addr_t network;
+  int netbits;
+  struct iroute *next;
+};
+#endif
+
 struct route_option_list *new_route_option_list (struct gc_arena *a);
 
 struct route_list *new_route_list (struct gc_arena *a);
@@ -105,5 +114,16 @@ void print_route_options (const struct route_option_list *rol,
 
 void print_routes (const struct route_list *rl, int level);
 
+bool netmask_to_netbits (in_addr_t network, in_addr_t netmask, int *netbits);
+
+static inline in_addr_t
+netbits_to_netmask (int netbits)
+{
+  const int addrlen = sizeof (in_addr_t) * 8;
+  in_addr_t mask = 0;
+  if (netbits > 0 && netbits <= addrlen)
+    mask = ~0 << (addrlen-netbits);
+  return mask;
+}
 
 #endif

@@ -1986,7 +1986,7 @@ get_adapt_info (DWORD index)
   ULONG size = 0;
   DWORD status;
 
-  if (index != ~0)
+  if (index != (DWORD)~0)
     {
       if ((status = GetAdaptersInfo (NULL, &size)) != ERROR_BUFFER_OVERFLOW)
 	{
@@ -2098,7 +2098,7 @@ get_interface_index (const char *guid)
 	   (unsigned int)status,
 	   strerror_win32 (status, &gc));
       gc_free (&gc);
-      return ~0;
+      return (DWORD)~0;
     }
   else
     {
@@ -2384,7 +2384,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
     DWORD index = get_interface_index (device_guid);
     
     /* flush arp cache */
-    if (index != ~0)
+    if (index != (DWORD)~0)
       {
 	DWORD status;
 
@@ -2418,7 +2418,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	const char *error_suffix = "I am having trouble using the Windows 'IP helper API' to automatically set the IP address -- consider using other --ip-win32 methods (not 'ipapi')";
 
 	/* couldn't get adapter index */
-	if (index == ~0)
+	if (index == (DWORD)~0)
 	  {
 	    msg (M_FATAL, "ERROR: unable to get adapter index for interface %s -- %s",
 		 device_guid,

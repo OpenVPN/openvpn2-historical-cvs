@@ -102,6 +102,7 @@ static inline void
 check_inactivity_timeout (struct context *c)
 {
   void check_inactivity_timeout_dowork (struct context *c);
+
   if (c->options.inactivity_timeout
       && event_timeout_trigger (&c->c2.inactivity_interval, &c->c2.timeval))
     check_inactivity_timeout_dowork (c);

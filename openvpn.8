@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "22 February 2004"
+.TH openvpn 8 "01 May 2004"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -103,23 +103,29 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-cipher\fR\ \fIalg\fR\ ]
 [\ \fB\-\-client\-config\-dir\fR\ \fIdir\fR\ ]
 [\ \fB\-\-client\-connect\fR\ \fIscript\fR\ ]
+[\ \fB\-\-client\-connect\fR\ ]
+[\ \fB\-\-client\-disconnect\fR\ ]
 [\ \fB\-\-client\-disconnect\fR\ ]
 [\ \fB\-\-client\-to\-client\fR\ ]
 [\ \fB\-\-comp\-lzo\fR\ ]
 [\ \fB\-\-comp\-noadapt\fR\ ]
 [\ \fB\-\-config\fR\ \fIfile\fR\ ]
+[\ \fB\-\-connect\-freq\fR\ \fIn\ sec\fR\ ]
 [\ \fB\-\-connect\-retry\fR\ \fIn\fR\ ]
 [\ \fB\-\-crl\-verify\fR\ \fIcrl\fR\ ]
 [\ \fB\-\-daemon\fR\ \fI[progname]\fR\ ]
 [\ \fB\-\-dev\-node\fR\ \fInode\fR\ ]
 [\ \fB\-\-dev\-type\fR\ \fIdevice\-type\fR\ ]
 [\ \fB\-\-dev\fR\ \fItunX\ |\ tapX\ |\ null\fR\ ]
+[\ \fB\-\-dev\fR\ \fItunX\ |\ tapX\fR\ ]
 [\ \fB\-\-dh\fR\ \fIfile\fR\ ]
 [\ \fB\-\-dhcp\-option\fR\ \fItype\ [parm]\fR\ ]
 [\ \fB\-\-disable\-occ\fR\ ]
 [\ \fB\-\-down\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-down\fR\ ]
 [\ \fB\-\-float\fR\ ]
 [\ \fB\-\-fragment\fR\ \fImax\fR\ ]
+[\ \fB\-\-genkey\fR\ ]
 [\ \fB\-\-gremlin\fR\ ]
 [\ \fB\-\-group\fR\ \fIgroup\fR\ ]
 [\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
@@ -136,7 +142,8 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-inetd\fR\ \fI[wait|nowait]\ [progname]\fR\ ]
 [\ \fB\-\-ip\-win32\fR\ \fImethod\fR\ ]
 [\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
-[\ \fB\-\-iroute\fR\ \fIstart\-IP\ end\-IP\fR\ ]
+[\ \fB\-\-ipchange\fR\ ]
+[\ \fB\-\-iroute\fR\ \fInetwork\ [netmask]\fR\ ]
 [\ \fB\-\-key\-method\fR\ \fIm\fR\ ]
 [\ \fB\-\-key\fR\ \fIfile\fR\ ]
 [\ \fB\-\-keysize\fR\ \fIn\fR\ ]
@@ -145,6 +152,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-log\-append\fR\ \fIfile\fR\ ]
 [\ \fB\-\-log\fR\ \fIfile\fR\ ]
 [\ \fB\-\-lport\fR\ \fIport\fR\ ]
+[\ \fB\-\-mktun\fR\ ]
 [\ \fB\-\-mlock\fR\ ]
 [\ \fB\-\-mode\fR\ \fIm\fR\ ]
 [\ \fB\-\-mssfix\fR\ \fImax\fR\ ]
@@ -173,24 +181,30 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-push\fR\ \fI"option"\fR\ ]
 [\ \fB\-\-rcvbuf\fR\ \fIsize\fR\ ]
 [\ \fB\-\-redirect\-gateway\fR\ ]
-[\ \fB\-\-remote\fR\ \fIhost\fR\ ]
 [\ \fB\-\-remote\-random\fR\ ]
+[\ \fB\-\-remote\fR\ \fIhost\ [port]\fR\ ]
 [\ \fB\-\-reneg\-bytes\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-pkts\fR\ \fIn\fR\ ]
 [\ \fB\-\-reneg\-sec\fR\ \fIn\fR\ ]
 [\ \fB\-\-replay\-persist\fR\ \fIfile\fR\ ]
 [\ \fB\-\-replay\-window\fR\ \fIn\ [t]\fR\ ]
 [\ \fB\-\-resolv\-retry\fR\ \fIn\fR\ ]
+[\ \fB\-\-rmtun\fR\ ]
 [\ \fB\-\-route\-delay\fR\ \fI[n]\fR\ ]
 [\ \fB\-\-route\-gateway\fR\ \fIgw\fR\ ]
 [\ \fB\-\-route\-noexec\fR\ ]
 [\ \fB\-\-route\-up\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-route\-up\fR\ ]
 [\ \fB\-\-route\fR\ \fInetwork\ [netmask]\ [gateway]\ [metric]\fR\ ]
 [\ \fB\-\-rport\fR\ \fIport\fR\ ]
 [\ \fB\-\-secret\fR\ \fIfile\ [direction]\fR\ ]
+[\ \fB\-\-secret\fR\ \fIfile\fR\ ]
 [\ \fB\-\-setenv\fR\ \fIname\ value\fR\ ]
 [\ \fB\-\-shaper\fR\ \fIn\fR\ ]
 [\ \fB\-\-show\-adapters\fR\ ]
+[\ \fB\-\-show\-ciphers\fR\ ]
+[\ \fB\-\-show\-digests\fR\ ]
+[\ \fB\-\-show\-tls\fR\ ]
 [\ \fB\-\-show\-valid\-subnets\fR\ ]
 [\ \fB\-\-single\-session\fR\ ]
 [\ \fB\-\-sndbuf\fR\ \fIsize\fR\ ]
@@ -205,14 +219,17 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-tls\-server\fR\ ]
 [\ \fB\-\-tls\-timeout\fR\ \fIn\fR\ ]
 [\ \fB\-\-tls\-verify\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-tls\-verify\fR\ ]
 [\ \fB\-\-tmp\-dir\fR\ \fIdir\fR\ ]
 [\ \fB\-\-tran\-window\fR\ \fIn\fR\ ]
 [\ \fB\-\-tun\-ipv6\fR\ ]
 [\ \fB\-\-tun\-mtu\-extra\fR\ \fIn\fR\ ]
 [\ \fB\-\-tun\-mtu\fR\ \fIn\fR\ ]
+[\ \fB\-\-txqueuelen\fR\ \fIn\fR\ ]
 [\ \fB\-\-up\-delay\fR\ ]
 [\ \fB\-\-up\-restart\fR\ ]
 [\ \fB\-\-up\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-up\fR\ ]
 [\ \fB\-\-user\fR\ \fIuser\fR\ ]
 [\ \fB\-\-verb\fR\ \fIn\fR\ ]
 [\ \fB\-\-writepid\fR\ \fIfile\fR\ ]
@@ -1761,20 +1778,26 @@ or dynamically generated using a
 .B --client-connect
 script.
 .TP
-.B --iroute start-IP end-IP
-Generate an internal route, so that all IP addresses
-inclusively between
-.B start-IP
-and
-.B end-IP
-will be routed to a specific client instance.
-This option will insert addresses into OpenVPN's
-master virtual address hash table to be associated
-with a specific client common name (the common name
-is taken from the SSL/TLS certificate).  Bear in mind
-that each address in the range must be inserted
-into the hash table, and very large ranges will not
-be accepted.
+.B --iroute network [netmask]
+Generate an internal route to a specific
+client. The
+.B netmask
+parameter, if omitted, defaults to 255.255.255.255.
+
+This directive can be used to route a fixed subnet from
+the server to a particular client, regardless
+of where the client is connecting from.  Remember
+that you must also add the route to the system
+routing table as well (such as by using the
+.B --route
+directive).  The reason why two routes are needed
+is that the
+.B --route
+directive routes the packet from the system
+to OpenVPN.  Once in OpenVPN, the
+.B --iroute
+directive routes to the specific client.
+
 This option must be specified either in a client
 instance config file using
 .B --client-config-dir

@@ -411,18 +411,17 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   /* export current untrusted IP */
   setenv_untrusted (session);
   
-  if (opt->verify_x509name)
-    if (ctx->error_depth == 0)
-      {
-        if (strcmp (opt->verify_x509name, subject) == 0)
-          msg (D_HANDSHAKE, "VERIFY X509NAME OK: %s", subject);
-        else
-          {
-            msg (D_HANDSHAKE, "VERIFY X509NAME ERROR: %s, must be %s",
-                 subject, opt->verify_x509name);
-            goto err;		/* Reject connection */
-          }
-      }
+  if (opt->verify_x509name && ctx->error_depth == 0)
+    {
+      if (strcmp (opt->verify_x509name, subject) == 0)
+	msg (D_HANDSHAKE, "VERIFY X509NAME OK: %s", subject);
+      else
+	{
+	  msg (D_HANDSHAKE, "VERIFY X509NAME ERROR: %s, must be %s",
+	       subject, opt->verify_x509name);
+	  goto err;		/* Reject connection */
+	}
+    }
 
   if (opt->verify_command)
     {
@@ -501,14 +500,14 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   msg (D_HANDSHAKE, "VERIFY OK: depth=%d, %s", ctx->error_depth, subject);
 
   /* save common name in session object */
-  {
-    char common_name[TLS_CN_LEN];
-    if (ctx->error_depth == 0)
+  if (ctx->error_depth == 0)
+    {
+      char common_name[TLS_CN_LEN];
       extract_common_name (common_name, TLS_CN_LEN, subject);
-    if (session->common_name)
-      free (session->common_name);
-    session->common_name = string_alloc (common_name, NULL);
-  }
+      if (session->common_name)
+	free (session->common_name);
+      session->common_name = string_alloc (common_name, NULL);
+    }
   
   mutex_unlock_static (L_SCRIPT);
   return 1;			/* Accept connection */

@@ -1158,13 +1158,15 @@ do_link_socket_new (struct context *c)
  * bind the TCP/UDP socket
  */
 static void
-do_init_socket_1 (struct context *c)
+do_init_socket_1 (struct context *c, int mode)
 {
   link_socket_init_phase1 (c->c2.link_socket,
 			   c->options.local,
 			   c->c1.remote_list,
 			   c->options.local_port,
 			   c->options.proto,
+			   mode,
+			   c->c2.accept_from,
 			   c->c1.http_proxy,
 			   c->c1.socks_proxy,
 			   c->options.bind_local,
@@ -1327,7 +1329,10 @@ do_close_tls (struct context *c)
 {
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   if (c->c2.tls_multi)
-    tls_multi_free (c->c2.tls_multi, true);
+    {
+      tls_multi_free (c->c2.tls_multi, true);
+      c->c2.tls_multi = NULL;
+    }
 
   /* free options compatibility strings */
   if (c->c2.options_string_local)
@@ -1481,6 +1486,19 @@ void
 init_instance (struct context *c)
 {
   const struct options *options = &c->options;
+  const bool child = (c->mode == CM_CHILD_TCP || c->mode == CM_CHILD_UDP);
+  int link_socket_mode = LS_MODE_DEFAULT;
+
+  /* link_socket_mode allows CM_CHILD_TCP
+     instances to inherit acceptable fds
+     from a top-level parent */
+  if (c->options.proto == PROTO_TCPv4_SERVER)
+    {
+      if (c->mode == CM_TOP)
+	link_socket_mode = LS_MODE_TCP_LISTEN;
+      else if (c->mode == CM_CHILD_TCP)
+	link_socket_mode = LS_MODE_TCP_ACCEPT_FROM;
+    }
 
   /* init garbage collection level */
   gc_init (&c->c2.gc);
@@ -1507,7 +1525,7 @@ init_instance (struct context *c)
 			  options->socks_proxy_server != NULL);
 
   /* reset OCC state */
-  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+  if (c->mode == CM_P2P || child)
     c->c2.occ_op = occ_reset_op ();
 
   /* our wait-for-i/o objects, different for posix vs. win32 */
@@ -1515,11 +1533,11 @@ init_instance (struct context *c)
     wait_init (&c->c2.event_wait, WAIT_READ|WAIT_WRITE);
 
   /* allocate our socket object */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
+  if (c->mode == CM_P2P || c->mode == CM_TOP || c->mode == CM_CHILD_TCP)
     do_link_socket_new (c);
 
   /* initialize internal fragmentation object */
-  if (options->fragment && (c->mode == CM_P2P || c->mode == CM_CHILD))
+  if (options->fragment && (c->mode == CM_P2P || child))
     c->c2.fragment = fragment_init (&c->c2.frame);
 
   /* init crypto layer */
@@ -1527,7 +1545,7 @@ init_instance (struct context *c)
 
 #ifdef USE_LZO
   /* initialize LZO compression library. */
-  if (options->comp_lzo && (c->mode == CM_P2P || c->mode == CM_CHILD))
+  if (options->comp_lzo && (c->mode == CM_P2P || child))
     lzo_compress_init (&c->c2.lzo_compwork, options->comp_lzo_adaptive);
 #endif
 
@@ -1535,23 +1553,23 @@ init_instance (struct context *c)
   do_init_frame (c);
 
   /* initialize TLS MTU variables */
-  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+  if (c->mode == CM_P2P || child)
     do_init_frame_tls (c);
 
   /* init workspace buffers whose size is derived from frame size */
-  if (c->mode == CM_P2P)
+  if (c->mode == CM_P2P || c->mode == CM_CHILD_TCP)
     do_init_buffers (c);
 
   /* initialize internal fragmentation capability with known frame size */
-  if (options->fragment && (c->mode == CM_P2P || c->mode == CM_CHILD))
+  if (options->fragment && (c->mode == CM_P2P || child))
     do_init_fragment (c);
 
   /* initialize dynamic MTU variable */
   do_init_dynamic_mtu (c);
 
   /* bind the TCP/UDP socket */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
-    do_init_socket_1 (c);
+  if (c->mode == CM_P2P || c->mode == CM_TOP || c->mode == CM_CHILD_TCP)
+    do_init_socket_1 (c, link_socket_mode);
 
   /* initialize tun/tap device object,
      open tun/tap device, ifconfig, run up script, etc. */
@@ -1562,7 +1580,7 @@ init_instance (struct context *c)
   do_print_data_channel_mtu_parms (c);
 
   /* get local and remote options compatibility strings */
-  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+  if (c->mode == CM_P2P || child)
     do_compute_occ_strings (c);
 
   /* initialize output speed limiter */
@@ -1583,7 +1601,7 @@ init_instance (struct context *c)
   do_init_first_time_2 (c);
 
   /* finalize the TCP/UDP socket */
-  if (c->mode == CM_P2P || c->mode == CM_TOP)
+  if (c->mode == CM_P2P || c->mode == CM_TOP || c->mode == CM_CHILD_TCP)
     {
       do_init_socket_2 (c);
       if (IS_SIG (c))
@@ -1595,7 +1613,7 @@ init_instance (struct context *c)
     }
 
   /* initialize timers */
-  if (c->mode == CM_P2P || c->mode == CM_CHILD)
+  if (c->mode == CM_P2P || child)
     do_init_timers (c, false);
 }
 
@@ -1608,7 +1626,10 @@ close_instance (struct context *c)
   /* close event objects used for select() */
   do_close_event_wait (c);
 
-    if (c->mode == CM_P2P || c->mode == CM_CHILD || c->mode == CM_TOP)
+    if (c->mode == CM_P2P
+	|| c->mode == CM_CHILD_TCP
+	|| c->mode == CM_CHILD_UDP
+	|| c->mode == CM_TOP)
       {
 	/* if xinetd/inetd mode, don't allow restart */
 	do_close_check_if_restart_permitted (c);
@@ -1617,6 +1638,10 @@ close_instance (struct context *c)
 	if (c->options.comp_lzo)
 	  lzo_compress_uninit (&c->c2.lzo_compwork);
 #endif
+
+	/* remove non-parameter environmental vars except for signal */
+	if (c->mode == CM_P2P || c->mode == CM_TOP)
+	  do_close_remove_env (c);
 
 	/* free buffers */
 	do_close_free_buf (c);
@@ -1632,10 +1657,6 @@ close_instance (struct context *c)
 
 	/* close TUN/TAP device */
 	do_close_tuntap (c);
-
-	/* remove non-parameter environmental vars except for signal */
-	if (c->mode == CM_P2P || c->mode == CM_TOP)
-	  do_close_remove_env (c);
 
 	/* close packet-id persistance file */
 	do_close_packet_id (c);
@@ -1658,7 +1679,18 @@ inherit_context_child (struct context *dest,
 {
   CLEAR (*dest);
 
-  dest->mode = CM_CHILD;
+  switch (src->options.proto)
+    {
+    case PROTO_UDPv4:
+      dest->mode = CM_CHILD_UDP;
+      break;
+    case PROTO_TCPv4_SERVER:
+      dest->mode = CM_CHILD_TCP;
+      break;
+    default:
+      ASSERT (0);
+    }
+
   dest->first_time = false;
 
   dest->gc = gc_new ();
@@ -1685,19 +1717,33 @@ inherit_context_child (struct context *dest,
   if (IS_SIG (dest))
     return;
 
-  /* inherit buffers */
-  dest->c2.buffers = src->c2.buffers;
-
-  /* inherit parent link_socket and tuntap */
-  dest->c2.link_socket = src->c2.link_socket;
+  /* inherit tun/tap interface object */
   dest->c1.tuntap = src->c1.tuntap;
 
-  ALLOC_OBJ_GC (dest->c2.link_socket_info, struct link_socket_info, &dest->gc);
-  *dest->c2.link_socket_info = src->c2.link_socket->info;
+  /* UDP inherits some extra things which TCP does not */
+  if (dest->mode == CM_CHILD_UDP)
+    {
+      /* inherit buffers */
+      dest->c2.buffers = src->c2.buffers;
 
-  /* locally override some link_socket_info fields */
-  dest->c2.link_socket_info->lsa = &dest->c1.link_socket_addr;
-  dest->c2.link_socket_info->connection_established = false;
+      /* inherit parent link_socket and tuntap */
+      dest->c2.link_socket = src->c2.link_socket;
+
+      ALLOC_OBJ_GC (dest->c2.link_socket_info, struct link_socket_info, &dest->gc);
+      *dest->c2.link_socket_info = src->c2.link_socket->info;
+
+      /* locally override some link_socket_info fields */
+      dest->c2.link_socket_info->lsa = &dest->c1.link_socket_addr;
+      dest->c2.link_socket_info->connection_established = false;
+    }
+  else if (dest->mode == CM_CHILD_TCP)
+    {
+      /*
+       * The CM_TOP context does the socket listen(),
+       * and the CM_CHILD_TCP context does the accept().
+       */
+      dest->c2.accept_from = src->c2.link_socket;
+    }
 }
 
 void

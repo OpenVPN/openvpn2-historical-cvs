@@ -55,13 +55,6 @@ struct push_list {
   char options[MAX_PUSH_LIST_LEN];
 };
 
-/* internal OpenVPN route */
-struct iroute {
-  in_addr_t start;
-  in_addr_t end;
-  struct iroute *next;
-};
-
 #endif
 
 /* Command line options */

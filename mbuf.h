@@ -84,7 +84,9 @@ static inline bool
 mbuf_extract_item_lock (struct mbuf_set *ms, struct mbuf_item *item, bool lock)
 {
   if (lock)
-    mutex_lock (&ms->mutex);
+    {
+      mutex_lock (&ms->mutex);
+    }
   if (ms->len)
     {
       *item = ms->array[ms->head];
@@ -95,7 +97,9 @@ mbuf_extract_item_lock (struct mbuf_set *ms, struct mbuf_item *item, bool lock)
   else
     {
       if (lock)
-	mutex_unlock (&ms->mutex);
+	{
+	  mutex_unlock (&ms->mutex);
+	}
       return false;
     }
 }

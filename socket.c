@@ -289,6 +289,11 @@ socket_set_buffers (int fd, const struct socket_buffer_size *sbs)
     }
 }
 
+/*
+ * Remote list code allows clients to specify a list of
+ * potential remote server addresses.
+ */
+
 static void
 remote_list_next (struct remote_list *l)
 {
@@ -327,31 +332,20 @@ remote_list_randomize (struct remote_list *l)
     }
 }
 
-static void
-sock_remote_list_update (struct link_socket *sock)
-{
-  if (sock->remote_list)
-    {
-      remote_list_next (sock->remote_list);
-    }
-}
-
 static const char *
-sock_remote_host (const struct link_socket *sock)
+remote_list_host (const struct remote_list *rl)
 {
-  const struct remote_list *l = sock->remote_list;
-  if (l)
-    return l->array[l->current].hostname;
+  if (rl)
+    return rl->array[rl->current].hostname;
   else
     return NULL;
 }
 
 static int
-sock_remote_port (const struct link_socket *sock)
+remote_list_port (const struct remote_list *rl)
 {
-  const struct remote_list *l = sock->remote_list;
-  if (l)
-    return l->array[l->current].port;
+  if (rl)
+    return rl->array[rl->current].port;
   else
     return 0;
 }
@@ -362,7 +356,7 @@ sock_remote_port (const struct link_socket *sock)
  */
 
 static socket_descriptor_t
-create_socket_tcp (const struct socket_buffer_size *sbs)
+create_socket_tcp (void)
 {
   socket_descriptor_t sd;
 
@@ -374,7 +368,7 @@ create_socket_tcp (const struct socket_buffer_size *sbs)
     int on = 1;
     if (setsockopt (sd, SOL_SOCKET, SO_REUSEADDR,
 		    (void *) &on, sizeof (on)) < 0)
-      msg (M_SOCKERR, "Cannot setsockopt SO_REUSEADDR on TCP socket");
+      msg (M_SOCKERR, "TCP: Cannot setsockopt SO_REUSEADDR on TCP socket");
   }
 
 #if 0
@@ -385,23 +379,20 @@ create_socket_tcp (const struct socket_buffer_size *sbs)
     linger.l_linger = 2;
     if (setsockopt (sd, SOL_SOCKET, SO_LINGER,
 		    (void *) &linger, sizeof (linger)) < 0)
-      msg (M_SOCKERR, "Cannot setsockopt SO_LINGER on TCP socket");
+      msg (M_SOCKERR, "TCP: Cannot setsockopt SO_LINGER on TCP socket");
   }
 #endif
-
-  socket_set_buffers (sd, sbs);
 
   return sd;
 }
 
 static socket_descriptor_t
-create_socket_udp (const struct socket_buffer_size *sbs)
+create_socket_udp (void)
 {
   socket_descriptor_t sd;
 
   if ((sd = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-    msg (M_SOCKERR, "Cannot create UDP socket");
-  socket_set_buffers (sd, sbs);
+    msg (M_SOCKERR, "UDP: Cannot create UDP socket");
   return sd;
 }
 
@@ -411,17 +402,17 @@ create_socket (struct link_socket *sock)
   /* create socket */
   if (sock->info.proto == PROTO_UDPv4)
     {
-      sock->sd = create_socket_udp (&sock->socket_buffer_sizes);
+      sock->sd = create_socket_udp ();
 
       if (sock->socks_proxy)
 	{
-	  sock->ctrl_sd = create_socket_tcp (NULL);
+	  sock->ctrl_sd = create_socket_tcp ();
 	}
     }
   else if (sock->info.proto == PROTO_TCPv4_SERVER
 	   || sock->info.proto == PROTO_TCPv4_CLIENT)
     {
-      sock->sd = create_socket_tcp (&sock->socket_buffer_sizes);
+      sock->sd = create_socket_tcp ();
     }
   else
     {
@@ -432,6 +423,77 @@ create_socket (struct link_socket *sock)
 /*
  * Functions used for establishing a TCP stream connection.
  */
+
+static void
+socket_do_listen (socket_descriptor_t sd,
+		  const struct sockaddr_in *local,
+		  bool do_listen,
+		  bool do_set_nonblock)
+{
+  struct gc_arena gc = gc_new ();
+  if (do_listen)
+    {
+      msg (M_INFO, "Listening for incoming TCP connection on %s", 
+	   print_sockaddr (local, &gc));
+      if (listen (sd, 1))
+	msg (M_SOCKERR, "TCP: listen() failed");
+    }
+
+  /* set socket to non-blocking mode */
+  if (do_set_nonblock)
+    set_nonblock (sd);
+
+  gc_free (&gc);
+}
+
+static socket_descriptor_t
+socket_do_accept (socket_descriptor_t sd,
+		  struct sockaddr_in *remote,
+		  const bool nowait)
+{
+  socklen_t remote_len = sizeof (*remote);
+  socket_descriptor_t new_sd = -1;
+
+#ifdef HAVE_GETPEERNAME
+  if (nowait)
+    {
+      new_sd = getpeername (sd, (struct sockaddr *) remote, &remote_len);
+
+      if (new_sd == -1)
+	msg (D_LINK_ERRORS | M_ERRNO_SOCK, "TCP: getpeername() failed");
+      else
+	new_sd = sd;
+    }
+#else
+  if (nowait)
+    msg (M_WARN, "TCP: this OS does not provide the getpeername() function");
+#endif
+  else
+    {
+      new_sd = accept (sd, (struct sockaddr *) remote, &remote_len);
+    }
+
+  if (new_sd == -1)
+    {
+      msg (D_LINK_ERRORS | M_ERRNO_SOCK, "TCP: accept() failed");
+    }
+  else if (remote_len != sizeof (*remote))
+    {
+      msg (D_LINK_ERRORS, "TCP: Received strange incoming connection with unknown address length=%d", remote_len);
+      openvpn_close_socket (new_sd);
+      new_sd = -1;
+    }
+  return new_sd;
+}
+
+static void
+tcp_connection_established (const struct sockaddr_in *remote)
+{
+  struct gc_arena gc = gc_new ();
+  msg (M_INFO, "TCP connection established with %s", 
+       print_sockaddr (remote, &gc));
+  gc_free (&gc);
+}
 
 static int
 socket_listen_accept (socket_descriptor_t sd,
@@ -444,20 +506,10 @@ socket_listen_accept (socket_descriptor_t sd,
 		      volatile int *signal_received)
 {
   struct gc_arena gc = gc_new ();
-  socklen_t remote_len = sizeof (*remote);
   struct sockaddr_in remote_verify = *remote;
   int new_sd = -1;
 
-  if (do_listen)
-    {
-      msg (M_INFO, "Listening for incoming TCP connection on %s", 
-	   print_sockaddr (local, &gc));
-      if (listen (sd, 1))
-	msg (M_SOCKERR, "listen() failed");
-    }
-
-  /* set socket to non-blocking mode */
-  set_nonblock (sd);
+  socket_do_listen (sd, local, do_listen, true);
 
   while (true)
     {
@@ -480,49 +532,24 @@ socket_listen_accept (socket_descriptor_t sd,
 	}
 
       if (status < 0)
-	msg (D_LINK_ERRORS | M_ERRNO_SOCK, "select() failed");
+	msg (D_LINK_ERRORS | M_ERRNO_SOCK, "TCP: select() failed");
 
       if (status <= 0)
 	continue;
 
-#ifdef HAVE_GETPEERNAME
-      if (nowait)
-        {
-	  new_sd = getpeername (sd, (struct sockaddr *) remote, &remote_len);
+      new_sd = socket_do_accept (sd, remote, nowait);
 
-	  if (new_sd == -1)
-	    msg (D_LINK_ERRORS | M_ERRNO_SOCK, "getpeername() failed");
-	  else
-	    new_sd = sd;
-	}
-#else
-      if (nowait)
-	msg (M_WARN, "WARNING: this OS does not provide the getpeername() function");
-#endif
-      else
-        {
-	  new_sd = accept (sd, (struct sockaddr *) remote, &remote_len);
-	}
-
-      if (new_sd == -1)
-	{
-	  msg (D_LINK_ERRORS | M_ERRNO_SOCK, "accept() failed");
-	}
-      else if (remote_len != sizeof (*remote))
-	{
-	  msg (D_LINK_ERRORS, "WARNING: Received strange incoming connection with unknown address length=%d", remote_len);
-	}
-      else
+      if (new_sd >= 0)
 	{
 	  update_remote (remote_dynamic, &remote_verify, remote_changed);
 	  if (addr_defined (&remote_verify)
 	      && !addr_match (&remote_verify, remote))
 	    {
 	      msg (M_WARN,
-		   "NOTE: Rejected connection attempt from %s due to --remote setting",
+		   "TCP NOTE: Rejected connection attempt from %s due to --remote setting",
 		   print_sockaddr (remote, &gc));
 	      if (openvpn_close_socket (new_sd))
-		msg (M_SOCKERR, "close socket failed (new_sd)");
+		msg (M_SOCKERR, "TCP: close socket failed (new_sd)");
 	    }
 	  else
 	    break;
@@ -531,9 +558,9 @@ socket_listen_accept (socket_descriptor_t sd,
     }
 
   if (!nowait && openvpn_close_socket (sd))
-    msg (M_SOCKERR, "close socket failed (sd)");
-  msg (M_INFO, "TCP connection established with %s", 
-       print_sockaddr (remote, &gc));
+    msg (M_SOCKERR, "TCP: close socket failed (sd)");
+
+  tcp_connection_established (remote);
 
   gc_free (&gc);
   return new_sd;
@@ -542,10 +569,10 @@ socket_listen_accept (socket_descriptor_t sd,
 static void
 socket_connect (socket_descriptor_t *sd,
 		struct sockaddr_in *remote,
+		struct remote_list *remote_list,
 		const char *remote_dynamic,
 		bool *remote_changed,
 		const int connect_retry_seconds,
-		const struct socket_buffer_size *sbs,
 		volatile int *signal_received)
 {
   struct gc_arena gc = gc_new ();
@@ -565,13 +592,22 @@ socket_connect (socket_descriptor_t *sd,
 	break;
 
       msg (D_LINK_ERRORS | M_ERRNO_SOCK,
-	   "connect() failed, will try again in %d seconds, error",
+	   "TCP: connect to %s failed, will try again in %d seconds",
+	   print_sockaddr (remote, &gc),
 	   connect_retry_seconds);
 
       openvpn_close_socket (*sd);
       sleep (connect_retry_seconds);
 
-      *sd = create_socket_tcp (sbs);
+      if (remote_list)
+	{
+	  remote_list_next (remote_list);
+	  remote_dynamic = remote_list_host (remote_list);
+	  remote->sin_port = htons (remote_list_port (remote_list));
+	  *remote_changed = true;
+	}
+
+      *sd = create_socket_tcp ();
       update_remote (remote_dynamic, remote, remote_changed);
     }
 
@@ -643,7 +679,7 @@ resolve_bind_local (struct link_socket *sock)
 		sizeof (sock->info.lsa->local)))
 	{
 	  const int errnum = openvpn_errno_socket ();
-	  msg (M_FATAL, "Socket bind failed on local address %s: %s",
+	  msg (M_FATAL, "TCP/UDP: Socket bind failed on local address %s: %s",
 	       print_sockaddr (&sock->info.lsa->local, &gc),
 	       strerror_ts (errnum, &gc));
 	}
@@ -720,7 +756,7 @@ resolve_remote (struct link_socket *sock,
       /* should we re-use previous active remote address? */
       if (addr_defined (&sock->info.lsa->actual))
 	{
-	  msg (M_INFO, "Preserving recently used remote address: %s",
+	  msg (M_INFO, "TCP/UDP: Preserving recently used remote address: %s",
 	       print_sockaddr (&sock->info.lsa->actual, &gc));
 	  if (remote_dynamic)
 	    *remote_dynamic = NULL;
@@ -754,6 +790,8 @@ link_socket_init_phase1 (struct link_socket *sock,
 			 struct remote_list *remote_list,
 			 int local_port,
 			 int proto,
+			 int mode,
+			 const struct link_socket *accept_from,
 			 struct http_proxy_info *http_proxy,
 			 struct socks_proxy_info *socks_proxy,
 			 bool bind_local,
@@ -773,9 +811,16 @@ link_socket_init_phase1 (struct link_socket *sock,
   ASSERT (sock);
 
   sock->remote_list = remote_list;
-  sock_remote_list_update (sock);
-  remote_host = sock_remote_host (sock);
-  remote_port = sock_remote_port (sock);
+  remote_list_next (remote_list);
+  remote_host = remote_list_host (remote_list);
+  remote_port = remote_list_port (remote_list);
+
+  sock->mode = mode;
+  if (mode == LS_MODE_TCP_ACCEPT_FROM)
+    {
+      ASSERT (accept_from);
+      sock->sd = accept_from->sd;
+    }
 
   sock->local_host = local_host;
   sock->local_port = local_port;
@@ -898,21 +943,47 @@ link_socket_init_phase2 (struct link_socket *sock,
       /* TCP client/server */
       if (sock->info.proto == PROTO_TCPv4_SERVER)
 	{
-	  sock->sd = socket_listen_accept (sock->sd,
+	  switch (sock->mode)
+	    {
+	    case LS_MODE_DEFAULT:
+	      sock->sd = socket_listen_accept (sock->sd,
+					       &sock->info.lsa->actual,
+					       remote_dynamic,
+					       &remote_changed,
+					       &sock->info.lsa->local,
+					       true,
+					       false,
+					       signal_received);
+	      break;
+	    case LS_MODE_TCP_LISTEN:
+	      socket_do_listen (sock->sd,
+				&sock->info.lsa->local,
+				true,
+				false);
+	      break;
+	    case LS_MODE_TCP_ACCEPT_FROM:
+	      sock->sd = socket_do_accept (sock->sd,
 					   &sock->info.lsa->actual,
-					   remote_dynamic,
-					   &remote_changed,
-					   &sock->info.lsa->local,
-					   true,
-					   false,
-					   signal_received);
+					   false);
+	      if (sock->sd == -1)
+		{
+		  *signal_received = SIGTERM;
+		  goto done;
+		}
+	      tcp_connection_established (&sock->info.lsa->actual);
+	      break;
+	    default:
+	      ASSERT (0);
+	    }
 	}
       else if (sock->info.proto == PROTO_TCPv4_CLIENT)
 	{
-	  socket_connect (&sock->sd, &sock->info.lsa->actual,
-			  remote_dynamic, &remote_changed,
+	  socket_connect (&sock->sd,
+			  &sock->info.lsa->actual,
+			  sock->remote_list,
+			  remote_dynamic,
+			  &remote_changed,
 			  sock->connect_retry_seconds,
-			  &sock->socket_buffer_sizes,
 			  signal_received);
 
 	  if (*signal_received)
@@ -938,10 +1009,12 @@ link_socket_init_phase2 (struct link_socket *sock,
 	}
       else if (sock->info.proto == PROTO_UDPv4 && sock->socks_proxy)
 	{
-	  socket_connect (&sock->ctrl_sd, &sock->info.lsa->actual,
-			  remote_dynamic, &remote_changed,
+	  socket_connect (&sock->ctrl_sd,
+			  &sock->info.lsa->actual,
+			  NULL,
+			  remote_dynamic,
+			  &remote_changed,
 			  sock->connect_retry_seconds,
-			  &sock->socket_buffer_sizes,
 			  signal_received);
 
 	  if (*signal_received)
@@ -972,10 +1045,13 @@ link_socket_init_phase2 (struct link_socket *sock,
 
       if (remote_changed)
 	{
-	  msg (M_INFO, "Note: Dynamic remote address changed during TCP connection establishment");
+	  msg (M_INFO, "TCP/UDP: Dynamic remote address changed during TCP connection establishment");
 	  sock->info.lsa->remote.sin_addr.s_addr = sock->info.lsa->actual.sin_addr.s_addr;
 	}
     }
+
+  /* set socket buffers based on --sndbuf and --rcvbuf options */
+  socket_set_buffers (sock->sd, &sock->socket_buffer_sizes);
 
   /* set socket to non-blocking mode */
   set_nonblock (sock->sd);
@@ -1023,15 +1099,15 @@ link_socket_close (struct link_socket *sock)
 	  overlapped_io_close (&sock->reads);
 	  overlapped_io_close (&sock->writes);
 #endif
-	  msg (D_CLOSE, "Closing TCP/UDP socket");
+	  msg (D_CLOSE, "TCP/UDP: Closing socket");
 	  if (openvpn_close_socket (sock->sd))
-	    msg (M_WARN | M_ERRNO_SOCK, "Warning: Close Socket failed");
+	    msg (M_WARN | M_ERRNO_SOCK, "TCP/UDP: Close Socket failed");
 	  sock->sd = -1;
 	}
       if (sock->ctrl_sd != -1)
 	{
 	  if (openvpn_close_socket (sock->ctrl_sd))
-	    msg (M_WARN | M_ERRNO_SOCK, "Warning: Close Socket failed");
+	    msg (M_WARN | M_ERRNO_SOCK, "TCP/UDP: Close Socket failed");
 	  sock->ctrl_sd = -1;
 	}
       stream_buf_close (&sock->stream_buf);
@@ -1102,7 +1178,7 @@ link_socket_bad_incoming_addr (struct buffer *buf,
   struct gc_arena gc = gc_new ();
 
   msg (D_LINK_ERRORS,
-       "NOTE: Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
+       "TCP/UDP: Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
        print_sockaddr (from_addr, &gc),
        (int)from_addr->sin_family,
        print_sockaddr (&info->lsa->remote, &gc));
@@ -1114,7 +1190,7 @@ link_socket_bad_incoming_addr (struct buffer *buf,
 void
 link_socket_bad_outgoing_addr (void)
 {
-  msg (D_READ_WRITE, "No outgoing address to send packet");
+  msg (D_READ_WRITE, "TCP/UDP: No outgoing address to send packet");
 }
 
 in_addr_t

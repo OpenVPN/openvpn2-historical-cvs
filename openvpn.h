@@ -147,12 +147,13 @@ struct context_2
   bool ptos_defined;
 #endif
 
-  struct link_socket *link_socket;	/* socket used for TCP/UDP connection to remote */
+  struct link_socket *link_socket;	 /* socket used for TCP/UDP connection to remote */
   bool link_socket_owned;
   struct link_socket_info *link_socket_info;
+  const struct link_socket *accept_from; /* possibly do accept() on a parent link_socket */
 
-  struct sockaddr_in to_link_addr;	/* IP address of remote */
-  struct sockaddr_in from;              /* address of incoming datagram */
+  struct sockaddr_in to_link_addr;	 /* IP address of remote */
+  struct sockaddr_in from;               /* address of incoming datagram */
 
   /* MTU frame parameters */
   struct frame frame;
@@ -331,10 +332,11 @@ struct context
   MUTEX_DEFINE (mutex); // JYFIXME -- init/uninit me
 
   /* context modes */
-# define CM_P2P     0 /* standalone point-to-point session */
-# define CM_TOP     1 /* top level of a multi-client or point-to-multipoint server */
-# define CM_THREAD  2 /* clone of a CM_TOP context for one thread */
-# define CM_CHILD   3 /* child context of a CM_TOP or CM_THREAD */
+# define CM_P2P         0 /* standalone point-to-point session */
+# define CM_TOP         1 /* top level of a multi-client or point-to-multipoint server */
+# define CM_THREAD      2 /* clone of a CM_TOP context for one thread */
+# define CM_CHILD_UDP   3 /* child context of a CM_TOP or CM_THREAD */
+# define CM_CHILD_TCP   4 /* child context of a CM_TOP or CM_THREAD */
   int mode;
 
   /* garbage collection for context scope

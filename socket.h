@@ -158,6 +158,11 @@ struct link_socket
 # define INETD_NOWAIT 2
   int inetd;
 
+# define LS_MODE_DEFAULT           0
+# define LS_MODE_TCP_LISTEN        1
+# define LS_MODE_TCP_ACCEPT_FROM   2
+  int mode;
+
   int resolve_retry_seconds;
   int connect_retry_seconds;
   int mtu_discover_type;
@@ -220,12 +225,18 @@ int socket_finalize (
 
 struct link_socket *link_socket_new (void);
 
+/*
+ * Initialize link_socket object.
+ */
+
 void
 link_socket_init_phase1 (struct link_socket *sock,
 			 const char *local_host,
 			 struct remote_list *remote_list,
 			 int local_port,
 			 int proto,
+			 int mode,
+			 const struct link_socket *accept_from,
 			 struct http_proxy_info *http_proxy,
 			 struct socks_proxy_info *socks_proxy,
 			 bool bind_local,
@@ -342,6 +353,15 @@ datagram_overhead (int proto)
 /*
  * Misc inline functions
  */
+
+static inline int
+remote_list_len (const struct remote_list *rl)
+{
+  if (rl)
+    return rl->len;
+  else
+    return 0;
+}
 
 static inline bool
 legal_ipv4_port (int port)

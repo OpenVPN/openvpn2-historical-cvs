@@ -230,24 +230,43 @@ void_ptr_compare_function (const void *key1, const void *key2)
 }
 
 void
-hash_iterator_init (struct hash *hash,
-		    struct hash_iterator *hi,
-		    bool autolock)
+hash_iterator_init_range (struct hash *hash,
+		       struct hash_iterator *hi,
+		       bool autolock,
+		       int start_bucket,
+		       int end_bucket)
 {
+  if (end_bucket > hash->n_buckets)
+    end_bucket = hash->n_buckets;
+
+  ASSERT (start_bucket >= 0 && start_bucket <= end_bucket);
+
   hi->hash = hash;
-  hi->bucket_index = -1;
   hi->elem = NULL;
   hi->bucket = NULL;
   hi->autolock = autolock;
   hi->last = NULL;
   hi->bucket_marked = false;
+  hi->bucket_index_start = start_bucket;
+  hi->bucket_index_end = end_bucket;
+  hi->bucket_index = hi->bucket_index_start - 1;
+}
+
+void
+hash_iterator_init (struct hash *hash,
+		    struct hash_iterator *hi,
+		    bool autolock)
+{
+  hash_iterator_init_range (hash, hi, autolock, 0, hash->n_buckets);
 }
 
 static inline void
 hash_iterator_lock (struct hash_iterator *hi, struct hash_bucket *b)
 {
   if (hi->autolock)
-    mutex_lock (&b->mutex);
+    {
+      mutex_lock (&b->mutex);
+    }
   hi->bucket = b;
   hi->last = NULL;
   hi->bucket_marked = false;
@@ -264,7 +283,9 @@ hash_iterator_unlock (struct hash_iterator *hi)
 	  hi->bucket_marked = false;
 	}
       if (hi->autolock)
-	mutex_unlock (&hi->bucket->mutex);
+	{
+	  mutex_unlock (&hi->bucket->mutex);
+	}
       hi->bucket = NULL;
       hi->last = NULL;
     }
@@ -294,7 +315,7 @@ hash_iterator_next (struct hash_iterator *hi)
     }
   else
     {
-      while (++hi->bucket_index < hi->hash->n_buckets)
+      while (++hi->bucket_index < hi->bucket_index_end)
 	{
 	  struct hash_bucket *b;
 	  hash_iterator_unlock (hi);
@@ -453,19 +474,25 @@ list_test (void)
 
     /* output contents of hash table */
     {
-      struct hash_iterator hi;
-      struct hash_element *he;
+      int base;
+      int inc = 0;
       int count = 0;
-      hash_iterator_init (hash, &hi, true);
 
-      while ((he = hash_iterator_next (&hi)))
-	{
-	  struct word *w = (struct word *) he->value;
-	  printf ("%6d '%s'\n", w->n, w->word);
-	  ++count;
-	}
+      for (base = 0; base < hash_n_buckets (hash); base += inc) {
+	struct hash_iterator hi;
+	struct hash_element *he;
+	inc = (get_random () % 3) + 1;
+	hash_iterator_init_range (hash, &hi, true, base, base + inc);
 
-      hash_iterator_free (&hi);
+	while ((he = hash_iterator_next (&hi)))
+	  {
+	    struct word *w = (struct word *) he->value;
+	    printf ("%6d '%s'\n", w->n, w->word);
+	    ++count;
+	  }
+
+	hash_iterator_free (&hi);
+      }
       ASSERT (count == hash_n_elements (hash));
     }
 	

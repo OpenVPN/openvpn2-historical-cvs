@@ -1190,3 +1190,27 @@ get_default_gateway (in_addr_t *ret)
 }
 
 #endif
+
+bool
+netmask_to_netbits (in_addr_t network, in_addr_t netmask, int *netbits)
+{
+  int i;
+  const int addrlen = sizeof (in_addr_t) * 8;
+
+  if ((network & netmask) == network)
+    {
+      for (i = 0; i <= addrlen; ++i)
+	{
+	  in_addr_t mask = netbits_to_netmask (i);
+	  if (mask == netmask)
+	    {
+	      if (i == addrlen)
+		*netbits = -1;
+	      else
+		*netbits = i;
+	      return true;
+	    }
+	}
+    }
+  return false;
+}

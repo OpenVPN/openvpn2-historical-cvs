@@ -46,8 +46,110 @@
 
 #define MULTI_DEBUG // JYFIXME
 
+/*
+ * Reaper constants.  The reaper is the process where the virtual address
+ * and virtual route hash table is scanned for dead entries which are
+ * then removed.  The hash table could potentially be quite large, so we
+ * don't want to reap in a single pass.
+ */
+#define REAP_MAX_WAKEUP   10  /* Do reap pass at least once per n seconds */
+#define REAP_DIVISOR     256  /* How many passes to cover whole hash table */
+#define REAP_MIN          16  /* Minimum number of buckets per pass */
+#define REAP_MAX        1024  /* Maximum number of buckets per pass */
+
+/*
+ * Mark a cached host route for deletion after this
+ * many seconds without any references.
+ */
+#define MULTI_CACHE_ROUTE_TTL 60
+
 static bool multi_process_post (struct multi_thread *mt, struct multi_instance *mi);
 
+static void
+multi_reap_range (const struct multi_context *m,
+		  int start_bucket,
+		  int end_bucket)
+{
+  struct gc_arena gc = gc_new ();
+  struct hash_iterator hi;
+  struct hash_element *he;
+
+  if (start_bucket < 0)
+    {
+      start_bucket = 0;
+      end_bucket = hash_n_buckets (m->vhash);
+    }
+
+  msg (D_MULTI_DEBUG, "MULTI: REAP range %d -> %d", start_bucket, end_bucket);
+  hash_iterator_init_range (m->vhash, &hi, true, start_bucket, end_bucket);
+  while ((he = hash_iterator_next (&hi)) != NULL)
+    {
+      struct multi_route *r = (struct multi_route *) he->value;
+      if (!multi_route_defined (m, r))
+	{
+	  msg (D_MULTI_DEBUG, "MULTI: REAP DEL %s",
+	       mroute_addr_print (&r->addr, &gc));
+	  multi_route_del (r);
+	  hash_iterator_delete_element (&hi);
+	}
+    }
+  hash_iterator_free (&hi);
+  gc_free (&gc);
+}
+
+static void
+multi_reap_all (const struct multi_context *m)
+{
+  multi_reap_range (m, -1, 0);
+}
+
+static struct multi_reap *
+multi_reap_new (int buckets_per_pass)
+{
+  struct multi_reap *mr;
+  ALLOC_OBJ (mr, struct multi_reap);
+  mr->bucket_base = 0;
+  mr->buckets_per_pass = buckets_per_pass;
+  mr->last_call = now;
+  return mr;
+}
+
+static void
+multi_reap_process_dowork (const struct multi_context *m)
+{
+  struct multi_reap *mr = m->reaper;
+  if (mr->bucket_base >= hash_n_buckets (m->vhash))
+    mr->bucket_base = 0;
+  multi_reap_range (m, mr->bucket_base, mr->bucket_base + mr->buckets_per_pass); 
+  mr->bucket_base += mr->buckets_per_pass;
+  mr->last_call = now;
+}
+
+static inline void
+multi_reap_process (const struct multi_context *m)
+{
+  if (m->reaper->last_call != now)
+    multi_reap_process_dowork (m);
+}
+
+static void
+multi_reap_free (struct multi_reap *mr)
+{
+  free (mr);
+}
+
+/*
+ * How many buckets in vhash to reap per pass.
+ */
+static int
+reap_buckets_per_pass (int n_buckets)
+{
+  return constrain_int (n_buckets / REAP_DIVISOR, REAP_MIN, REAP_MAX);
+}
+
+/*
+ * Main initialization function, init multi_context object.
+ */
 static void
 multi_init (struct multi_context *m, struct context *t)
 {
@@ -134,6 +236,23 @@ multi_init (struct multi_context *m, struct context *t)
     }
 
   /*
+   * Help us keep track of routing table.
+   */
+  m->route_helper = mroute_helper_init (MULTI_CACHE_ROUTE_TTL);
+
+  /*
+   * Initialize route and instance reaper.
+   */
+  m->reaper = multi_reap_new (reap_buckets_per_pass (t->options.virtual_hash_size));
+
+  /*
+   * Get local ifconfig address
+   */
+  CLEAR (m->local);
+  ASSERT (t->c1.tuntap);
+  mroute_extract_in_addr_t (&m->local, t->c1.tuntap->local);
+
+  /*
    * Allow client <-> client communication, without going through
    * tun/tap interface and network stack?
    */
@@ -158,6 +277,10 @@ multi_instance_string (struct multi_instance *mi, bool null, struct gc_arena *gc
   else
     return "UNDEF";
 }
+
+/*
+ * Set a msg() function prefix with our current client instance ID.
+ */
 
 static inline void
 set_prefix (struct multi_instance *mi)
@@ -186,23 +309,17 @@ ungenerate_prefix (struct multi_instance *mi)
 }
 
 /*
- * Get client instance based on virtual address.
+ * Tell the route helper about deleted iroutes so
+ * that it can update its mask of currently used
+ * CIDR netlengths.
  */
-static inline struct multi_instance *
-multi_get_instance_by_virtual_addr (struct multi_context *m, const struct mroute_addr *addr)
+static void
+multi_del_iroutes (struct multi_context *m,
+		   struct multi_instance *mi)
 {
-  struct multi_instance *ret = (struct multi_instance *) hash_lookup (m->vhash, addr);
-#ifdef MULTI_DEBUG
-  if (check_debug_level (D_MULTI_DEBUG))
-    {
-      struct gc_arena gc = gc_new ();
-      msg (D_MULTI_DEBUG, "GET INST BY VIRT: %s %s",
-	   mroute_addr_print (addr, &gc),
-	   ret ? "[succeeded]" : "[failed]");
-      gc_free (&gc);
-    }
-#endif
-  return ret;
+  const struct iroute *ir;
+  for (ir = mi->context.options.iroutes; ir != NULL; ir = ir->next)
+    mroute_helper_del_iroute (m->route_helper, ir);
 }
 
 static void
@@ -225,12 +342,11 @@ multi_close_instance (struct multi_context *m,
 	  ASSERT (hash_remove (m->iter, &mi->real));
 	}
 
-      /* free all virtual addresses tied to instance here */
-      hash_remove_by_value (m->vhash, mi, true);
-
       schedule_remove_entry (m->schedule, (struct schedule_entry *) mi);
 
       ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle);
+
+      multi_del_iroutes (m, mi);
     }
 
   if (mi->context.options.client_disconnect_script)
@@ -246,7 +362,7 @@ multi_close_instance (struct multi_context *m,
       setenv_str ("common_name", tls_common_name (mi->context.c2.tls_multi, false));
 
       /* setenv client real IP address */
-      setenv_trusted (mi->context.c2.link_socket_info);
+      setenv_trusted (get_link_socket_info (&mi->context));
 
       buf_printf (&cmd, "%s", mi->context.options.client_disconnect_script);
 
@@ -264,11 +380,17 @@ multi_close_instance (struct multi_context *m,
 
   ungenerate_prefix (mi);
 
-  gc_free (&mi->gc);
-
-  free (mi);
+  /*
+   * Don't actually delete the instance memory allocation yet,
+   * because virtual routes may still point to it.  Let the
+   * vhash reaper deal with it.
+   */
+  multi_instance_dec_refcount (mi);
 }
 
+/*
+ * Called on shutdown or restart.
+ */
 static void
 multi_uninit (struct multi_context *m)
 {
@@ -286,6 +408,8 @@ multi_uninit (struct multi_context *m)
 	}
       hash_iterator_free (&hi);
 
+      multi_reap_all (m);
+
       hash_free (m->hash);
       hash_free (m->vhash);
       hash_free (m->iter);
@@ -295,9 +419,14 @@ multi_uninit (struct multi_context *m)
       mbuf_free (m->mbuf);
       ifconfig_pool_free (m->ifconfig_pool);
       frequency_limit_free (m->new_connection_limiter);
+      multi_reap_free (m->reaper);
+      mroute_helper_free (m->route_helper);
     }
 }
 
+/*
+ * Create a client instance object for a newly connected client.
+ */
 static struct multi_instance *
 multi_create_instance (struct multi_thread *mt, const struct mroute_addr *real)
 {
@@ -309,6 +438,7 @@ multi_create_instance (struct multi_thread *mt, const struct mroute_addr *real)
   msg (D_MULTI_LOW, "MULTI: multi_create_instance called");
 
   mi->gc = gc_new ();
+  multi_instance_inc_refcount (mi);
   mroute_addr_init (&mi->real);
   mi->vaddr_handle = -1;
   mi->created = now;
@@ -412,45 +542,61 @@ multi_get_create_instance (struct multi_thread *mt)
   return mi;
 }
 
+/*
+ * Dump tables -- triggered by SIGUSR2.
+ */
 static void
 multi_print_status (struct multi_context *m)
 {
   if (m->hash)
     {
       struct hash_iterator hi;
-      struct multi_instance *mi;
-      struct hash_element *he;
-      const struct mroute_addr *ma;
+      const struct hash_element *he;
 
       msg (M_INFO, "CLIENT LIST");
-      msg (M_INFO, "Common Name,Real Address,Connected Since,Bytes Received,Bytes Sent");
+      msg (M_INFO, "Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since");
       hash_iterator_init (m->hash, &hi, true);
       while ((he = hash_iterator_next (&hi)))
 	{
 	  struct gc_arena gc = gc_new ();
-	  mi = (struct multi_instance *) he->value;
-	  msg (M_INFO, "%s,%s,%s," counter_format_simple "," counter_format_simple,
-	       tls_common_name (mi->context.c2.tls_multi, false),
-	       mroute_addr_print (&mi->real, &gc),
-	       time_string (mi->created, 0, false, &gc),
-	       mi->context.c2.link_read_bytes,
-	       mi->context.c2.link_write_bytes);
+	  const struct multi_instance *mi = (struct multi_instance *) he->value;
+
+	  if (!mi->halt)
+	    {
+	      msg (M_INFO, "%s,%s," counter_format_simple "," counter_format_simple ",%s",
+		   tls_common_name (mi->context.c2.tls_multi, false),
+		   mroute_addr_print (&mi->real, &gc),
+		   mi->context.c2.link_read_bytes,
+		   mi->context.c2.link_write_bytes,
+		   time_string (mi->created, 0, false, &gc));
+	    }
 	  gc_free (&gc);
 	}
       hash_iterator_free (&hi);
 
       msg (M_INFO, "ROUTING TABLE");
-      msg (M_INFO, "Virtual Address,Common Name,Real Address");
+      msg (M_INFO, "Virtual Address,Common Name,Real Address,Last Ref");
       hash_iterator_init (m->vhash, &hi, true);
       while ((he = hash_iterator_next (&hi)))
 	{
 	  struct gc_arena gc = gc_new ();
-	  mi = (struct multi_instance *) he->value;
-	  ma = (const struct mroute_addr *) he->key;
-	  msg (M_INFO, "%s,%s,%s",
-	       mroute_addr_print (ma, &gc),
-	       tls_common_name (mi->context.c2.tls_multi, false),
-	       mroute_addr_print (&mi->real, &gc));
+	  const struct multi_route *route = (struct multi_route *) he->value;
+
+	  if (multi_route_defined (m, route))
+	    {
+	      const struct multi_instance *mi = route->instance;
+	      const struct mroute_addr *ma = &route->addr;
+	      char flags[2] = {0, 0};
+
+	      if (route->flags & MULTI_ROUTE_CACHE)
+		flags[0] = 'C';
+	      msg (M_INFO, "%s%s,%s,%s,%s",
+		   mroute_addr_print (ma, &gc),
+		   flags,
+		   tls_common_name (mi->context.c2.tls_multi, false),
+		   mroute_addr_print (&mi->real, &gc),
+		   time_string (route->last_reference, 0, false, &gc));
+	    }
 	  gc_free (&gc);
 	}
       hash_iterator_free (&hi);
@@ -461,40 +607,66 @@ multi_print_status (struct multi_context *m)
     }
 }
 
+/*
+ * Learn a virtual address or route.
+ */
 static void
 multi_learn_addr (struct multi_context *m,
 		  struct multi_instance *mi,
-		  const struct mroute_addr *addr)
+		  const struct mroute_addr *addr,
+		  const unsigned int flags)
 {
   struct hash_element *he;
-
   const uint32_t hv = hash_value (m->vhash, addr);
   struct hash_bucket *bucket = hash_bucket (m->vhash, hv);
+  struct multi_route *oldroute = NULL;
   
   hash_bucket_lock (bucket);
   he = hash_lookup_fast (m->vhash, bucket, addr, hv);
 
-  if ((!he || (struct multi_instance *)he->value != mi) && mroute_learnable_address (addr)) /* add it if valid address */
+  if (he)
+    oldroute = (struct multi_route *) he->value;
+
+  /* do we need to add address to hash table? */
+  if ((!oldroute
+       || oldroute->instance != mi
+       || !multi_route_defined (m, oldroute))
+      && mroute_learnable_address (addr)
+      && !mroute_addr_equal (addr, &m->local))
     {
       struct gc_arena gc = gc_new ();
-      struct mroute_addr *newaddr;
-      ALLOC_OBJ_GC (newaddr, struct mroute_addr, &mi->gc);
-      *newaddr = *addr;
+      struct multi_route *newroute;
 
-      if (he)
+      ALLOC_OBJ (newroute, struct multi_route);
+      newroute->addr = *addr;
+      newroute->instance = mi;
+      newroute->flags = flags;
+      newroute->last_reference = now;
+      newroute->cache_generation = 0;
+
+      /* The cache is invalidated when cache_generation is incremented */
+      if (flags & MULTI_ROUTE_CACHE)
+	newroute->cache_generation = m->route_helper->cache_generation;
+
+      multi_instance_inc_refcount (mi);
+
+      if (oldroute) /* route already exists? */
 	{
-	  /* we are taking an existing virtual address and pointing
-	     it to a new instance */
-	  he->key = newaddr;
-	  he->value = mi;
+	  /* delete old route */
+	  multi_route_del (oldroute);
+
+	  /* modify hash table entry, replacing old route */
+	  he->key = &newroute->addr;
+	  he->value = newroute;
 	}
       else
 	{
-	  hash_add_fast (m->vhash, bucket, newaddr, hv, mi);
+	  /* add new route */
+	  hash_add_fast (m->vhash, bucket, &newroute->addr, hv, newroute);
 	}
 
       msg (D_MULTI_LOW, "MULTI: Learn: %s -> %s",
-	   mroute_addr_print (newaddr, &gc),
+	   mroute_addr_print (&newroute->addr, &gc),
 	   multi_instance_string (mi, false, &gc));
 
       gc_free (&gc);
@@ -503,20 +675,142 @@ multi_learn_addr (struct multi_context *m,
   hash_bucket_unlock (bucket);
 }
 
+/*
+ * Get client instance based on virtual address.
+ */
+static struct multi_instance *
+multi_get_instance_by_virtual_addr (struct multi_context *m,
+				    const struct mroute_addr *addr,
+				    bool cidr_routing)
+{
+  struct multi_route *route;
+  struct multi_instance *ret = NULL;
+
+  /* check for local address */
+  if (mroute_addr_equal (addr, &m->local))
+    return NULL;
+
+  route = (struct multi_route *) hash_lookup (m->vhash, addr);
+
+  /* does host route (possible cached) exist? */
+  if (route && multi_route_defined (m, route))
+    {
+      struct multi_instance *mi = route->instance;
+      route->last_reference = now;
+      ret = mi;
+    }
+  else if (cidr_routing) /* do we need to regenerate a host route cache entry? */
+    {
+      struct mroute_helper *rh = m->route_helper;
+      struct mroute_addr tryaddr;
+      int i;
+
+      mroute_helper_lock (rh);
+
+      /* cycle through each CIDR length */
+      for (i = 0; i < rh->n_net_len; ++i)
+	{
+	  tryaddr = *addr;
+	  tryaddr.type |= MR_WITH_NETBITS;
+	  tryaddr.netbits = rh->net_len[i];
+	  mroute_addr_mask_host_bits (&tryaddr);
+
+	  /* look up a possible route with netbits netmask */
+	  route = (struct multi_route *) hash_lookup (m->vhash, &tryaddr);
+
+	  if (route && multi_route_defined (m, route))
+	    {
+	      /* found an applicable route, cache host route */
+	      struct multi_instance *mi = route->instance;
+	      multi_learn_addr (m, mi, addr, MULTI_ROUTE_CACHE|MULTI_ROUTE_AGEABLE);
+	      ret = mi;
+	      break;
+	    }
+	}
+      
+      mroute_helper_unlock (rh);
+    }
+  
+#ifdef MULTI_DEBUG
+  if (check_debug_level (D_MULTI_DEBUG))
+    {
+      struct gc_arena gc = gc_new ();
+      const char *addr_text = mroute_addr_print (addr, &gc);
+      if (ret)
+	{
+	  msg (D_MULTI_DEBUG, "GET INST BY VIRT: %s -> %s via %s",
+	       addr_text,
+	       multi_instance_string (ret, false, &gc),
+	       mroute_addr_print (&route->addr, &gc));
+	}
+      else
+	{
+	  msg (D_MULTI_DEBUG, "GET INST BY VIRT: %s [failed]",
+	       addr_text);
+	}
+      gc_free (&gc);
+    }
+#endif
+
+  return ret;
+}
+
+/*
+ * Helper function to multi_learn_addr().
+ */
 static void
 multi_learn_in_addr_t (struct multi_context *m,
 		       struct multi_instance *mi,
-		       in_addr_t a)
+		       in_addr_t a,
+		       int netbits) /* -1 if host route, otherwise # of network bits in address */
 {
   struct sockaddr_in remote_si;
   struct mroute_addr addr;
+
   CLEAR (remote_si);
   remote_si.sin_family = AF_INET;
   remote_si.sin_addr.s_addr = htonl (a);
   ASSERT (mroute_extract_sockaddr_in (&addr, &remote_si, false));
-  multi_learn_addr (m, mi, &addr);
+
+  if (netbits >= 0)
+    {
+      addr.type |= MR_WITH_NETBITS;
+      addr.netbits = (uint8_t) netbits;
+    }
+  multi_learn_addr (m, mi, &addr, 0);
 }
 
+/*
+ * A new client has connected, add routes (server -> client)
+ * to internal routing table.
+ */
+static void
+multi_add_iroutes (struct multi_context *m,
+		   struct multi_instance *mi)
+{
+  struct gc_arena gc = gc_new ();
+  const struct iroute *ir;
+  for (ir = mi->context.options.iroutes; ir != NULL; ir = ir->next)
+    {
+      if (ir->netbits >= 0)
+	msg (D_MULTI_LOW, "MULTI: internal route %s/%d -> %s",
+	     print_in_addr_t (ir->network, false, &gc),
+	     ir->netbits,
+	     multi_instance_string (mi, false, &gc));
+      else
+	msg (D_MULTI_LOW, "MULTI: internal route %s -> %s",
+	     print_in_addr_t (ir->network, false, &gc),
+	     multi_instance_string (mi, false, &gc));
+
+      mroute_helper_add_iroute (m->route_helper, ir);
+      multi_learn_in_addr_t (m, mi, ir->network, ir->netbits);
+    }
+  gc_free (&gc);
+}
+
+/*
+ * Called as soon as the SSL/TLS connection authenticates.
+ */
 static void
 multi_connection_established (struct multi_context *m, struct multi_instance *mi)
 {
@@ -555,7 +849,7 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
   setenv_str ("common_name", tls_common_name (mi->context.c2.tls_multi, false));
 
   /* setenv client real IP address */
-  setenv_trusted (mi->context.c2.link_socket_info);
+  setenv_trusted (get_link_socket_info (&mi->context));
 
   /*
    * instance-specific directives to be processed:
@@ -683,26 +977,17 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
    */
   if (TUNNEL_TYPE (mi->context.c1.tuntap) == DEV_TYPE_TUN)
     {
-      const struct iroute *ir;
-
       if (mi->context.c2.push_ifconfig_defined)
 	{
-	  multi_learn_in_addr_t (m, mi, mi->context.c2.push_ifconfig_local);
+	  multi_learn_in_addr_t (m, mi, mi->context.c2.push_ifconfig_local, -1);
 	  msg (D_MULTI_LOW, "MULTI: primary virtual IP for %s: %s",
 	       multi_instance_string (mi, false, &gc),
 	       print_in_addr_t (mi->context.c2.push_ifconfig_local, false, &gc));
 	}
 
-      for (ir = mi->context.options.iroutes; ir != NULL; ir = ir->next)
-	{
-	  in_addr_t addr;
-	  msg (D_MULTI_LOW, "MULTI: internal route [%s-%s] -> %s",
-	       print_in_addr_t (ir->start, false, &gc),
-	       print_in_addr_t (ir->end, false, &gc),
-	       multi_instance_string (mi, false, &gc));
-	  for (addr = ir->start; addr <= ir->end; ++addr)
-	    multi_learn_in_addr_t (m, mi, addr);
-	}
+      /* add routes locally, pointing to new client, if
+	 --iroute options have been specified */
+      multi_add_iroutes (m, mi);
     }
   else if (mi->context.options.iroutes)
     {
@@ -732,14 +1017,23 @@ multi_get_timeout (struct multi_thread *mt, struct timeval *dest)
     {
       ASSERT (!gettimeofday (&current, NULL));
       tv_delta (dest, &current, &tv);
+      if (dest->tv_sec >= REAP_MAX_WAKEUP)
+	{
+	  mt->earliest_wakeup = NULL;
+	  dest->tv_sec = REAP_MAX_WAKEUP;
+	  dest->tv_usec = 0;
+	}
     }
   else
     {
-      dest->tv_sec = BIG_TIMEOUT;
+      dest->tv_sec = REAP_MAX_WAKEUP;
       dest->tv_usec = 0;
     }
 }
 
+/*
+ * Wait for an event.
+ */
 static void
 multi_select (struct multi_thread *mt)
 {
@@ -810,6 +1104,9 @@ multi_select (struct multi_thread *mt)
   SELECT_SIGNAL_RECEIVED (&mt->top.c2.event_wait, mt->top.sig->signal_received);
 }
 
+/*
+ * Add a packet to a client instance output queue.
+ */
 static inline void
 multi_unicast (struct multi_context *m,
 	       const struct buffer *buf,
@@ -825,6 +1122,9 @@ multi_unicast (struct multi_context *m,
     }
 }
 
+/*
+ * Broadcast a packet to all clients.
+ */
 void
 multi_bcast (struct multi_context *m,
 	     const struct buffer *buf,
@@ -955,6 +1255,10 @@ multi_process_post (struct multi_thread *mt, struct multi_instance *mi)
     }
 }
 
+/*
+ * Process packets in the TCP/UDP socket -> TUN/TAP interface direction,
+ * i.e. client -> server direction.
+ */
 static void
 multi_process_incoming_link (struct multi_thread *mt)
 {
@@ -988,35 +1292,44 @@ multi_process_incoming_link (struct multi_thread *mt)
 
       if (TUNNEL_TYPE (mt->top.c1.tuntap) == DEV_TYPE_TUN)
 	{
-	  /* client-to-client communication enabled? */
-	  if (m->enable_c2c)
+	  /* extract packet source and dest addresses */
+	  mroute_flags = mroute_extract_addr_from_packet (&src,
+							  &dest,
+							  &c->c2.to_tun,
+							  DEV_TYPE_TUN);
+
+	  /* drop packet if extract failed */
+	  if (!(mroute_flags & MROUTE_EXTRACT_SUCCEEDED))
 	    {
-	      /* extract packet source and dest addresses */
-	      mroute_flags = mroute_extract_addr_from_packet (&src,
-							      &dest,
-							      &c->c2.to_tun,
-							      DEV_TYPE_TUN);
-
-	      if (mroute_flags & MROUTE_EXTRACT_SUCCEEDED)
+	      msg (D_MULTI_DEBUG, "MULTI: badly formed packet from client, packet dropped");
+	      c->c2.to_tun.len = 0;
+	    }
+	  /* make sure that source address is associated with this client */
+	  else if (multi_get_instance_by_virtual_addr (m, &src, true) != mt->tun_out)
+	    {
+	      msg (D_MULTI_DEBUG, "MULTI: bad source address from client, packet dropped");
+	      c->c2.to_tun.len = 0;
+	    }
+	  /* client-to-client communication enabled? */
+	  else if (m->enable_c2c)
+	    {
+	      /* multicast? */
+	      if (mroute_flags & MROUTE_EXTRACT_MCAST)
 		{
-		  /* multicast? */
-		  if (mroute_flags & MROUTE_EXTRACT_MCAST)
+		  /* for now, treat multicast as broadcast */
+		  multi_bcast (m, &c->c2.to_tun, mt->tun_out);
+		}
+	      else /* possible client to client routing */
+		{
+		  ASSERT (!(mroute_flags & MROUTE_EXTRACT_BCAST));
+		  mi = multi_get_instance_by_virtual_addr (m, &dest, true);
+		  
+		  /* if dest addr is a known client, route to it */
+		  if (mi)
 		    {
-		      /* for now, treat multicast as broadcast */
-		      multi_bcast (m, &c->c2.to_tun, mt->tun_out);
-		    }
-		  else /* possible client to client routing */
-		    {
-		      ASSERT (!(mroute_flags & MROUTE_EXTRACT_BCAST));
-		      mi = multi_get_instance_by_virtual_addr (m, &dest);
-
-		      /* if dest addr is a known client, route to it */
-		      if (mi)
-			{
-			  multi_unicast (m, &c->c2.to_tun, mi);
-			  register_activity (c);
-			  c->c2.to_tun.len = 0;
-			}
+		      multi_unicast (m, &c->c2.to_tun, mi);
+		      register_activity (c);
+		      c->c2.to_tun.len = 0;
 		    }
 		}
 	    }
@@ -1040,7 +1353,7 @@ multi_process_incoming_link (struct multi_thread *mt)
 		    }
 		  else /* try client-to-client routing */
 		    {
-		      mi = multi_get_instance_by_virtual_addr (m, &dest);
+		      mi = multi_get_instance_by_virtual_addr (m, &dest, false);
 
 		      /* if dest addr is a known client, route to it */
 		      if (mi)
@@ -1053,7 +1366,7 @@ multi_process_incoming_link (struct multi_thread *mt)
 		}
 		  
 	      /* learn source address */
-	      multi_learn_addr (m, mt->tun_out, &src);
+	      multi_learn_addr (m, mt->tun_out, &src, 0);
 	    }
 	}
       
@@ -1064,6 +1377,10 @@ multi_process_incoming_link (struct multi_thread *mt)
     }
 }
 
+/*
+ * Process packets in the TUN/TAP interface -> TCP/UDP socket direction,
+ * i.e. server -> client direction.
+ */
 static void
 multi_process_incoming_tun (struct multi_thread *mt)
 {
@@ -1072,6 +1389,7 @@ multi_process_incoming_tun (struct multi_thread *mt)
     {
       unsigned int mroute_flags;
       struct mroute_addr src, dest;
+      const int dev_type = TUNNEL_TYPE (mt->top.c1.tuntap);
 
       ASSERT (!mt->link_out);
 
@@ -1083,7 +1401,7 @@ multi_process_incoming_tun (struct multi_thread *mt)
       mroute_flags = mroute_extract_addr_from_packet (&src,
 						      &dest,
 						      &mt->top.c2.buf,
-						      TUNNEL_TYPE (mt->top.c1.tuntap));
+						      dev_type);
 
       if (mroute_flags & MROUTE_EXTRACT_SUCCEEDED)
 	{
@@ -1097,7 +1415,7 @@ multi_process_incoming_tun (struct multi_thread *mt)
 	    }
 	  else
 	    {
-	      mt->link_out = multi_get_instance_by_virtual_addr (m, &dest);
+	      mt->link_out = multi_get_instance_by_virtual_addr (m, &dest, dev_type == DEV_TYPE_TUN);
 	      if (mt->link_out)
 		{
 		  set_prefix (mt->link_out);
@@ -1122,7 +1440,7 @@ multi_process_incoming_tun (struct multi_thread *mt)
 }
 
 /*
- * Process a possible bcast/mcast message in the
+ * Process a possible client-to-client/bcast/mcast message in the
  * queue.
  */
 static inline struct multi_instance *
@@ -1139,7 +1457,7 @@ multi_bcast_instance (struct multi_context *m)
       mbuf_extract_item_unlock (m->mbuf);
 
 #ifdef MULTI_DEBUG
-      msg (D_MULTI_DEBUG, "MULTI: BCAST INSTANCE");
+      msg (D_MULTI_DEBUG, "MULTI: C2C/MCAST/BCAST");
 #endif
       clear_prefix ();
       return item.instance;
@@ -1150,6 +1468,9 @@ multi_bcast_instance (struct multi_context *m)
     }
 }
 
+/*
+ * Send a packet to TCP/UDP socket.
+ */
 static inline void
 multi_process_outgoing_link (struct multi_thread *mt)
 {
@@ -1172,6 +1493,9 @@ multi_process_outgoing_link (struct multi_thread *mt)
     }
 }
 
+/*
+ * Send a packet to TUN/TAP interface.
+ */
 static inline void
 multi_process_outgoing_tun (struct multi_thread *mt)
 {
@@ -1184,6 +1508,9 @@ multi_process_outgoing_tun (struct multi_thread *mt)
   clear_prefix ();
 }
 
+/*
+ * Process an I/O event.
+ */
 void
 multi_process_io (struct multi_thread *mt)
 {
@@ -1217,6 +1544,10 @@ multi_process_io (struct multi_thread *mt)
     }
 }
 
+/*
+ * Called when an I/O wait times out.  Usually means that a particular
+ * client instance object needs timer-based service.
+ */
 static inline void
 multi_process_timeout (struct multi_thread *mt)
 {
@@ -1245,6 +1576,11 @@ multi_process_timeout (struct multi_thread *mt)
     break; \
   }
 
+/*
+ * The idea of struct multi_thread is that multiple threads could handle
+ * the event loop simultaneously.
+ */
+
 static struct multi_thread *
 multi_thread_init (struct multi_context *multi, const struct context *top)
 {
@@ -1264,23 +1600,29 @@ multi_thread_free (struct multi_thread *thread)
   free (thread);
 }
 
+/*
+ * Top level event loop for single-threaded operation.
+ */
 void
 tunnel_server_single_threaded (struct context *top)
 {
   struct multi_context multi;
   struct multi_thread *thread;
 
-  ASSERT (top->options.proto == PROTO_UDPv4);
+  ASSERT (top->options.proto == PROTO_UDPv4
+	  || top->options.proto == PROTO_TCPv4_SERVER);
   ASSERT (top->options.mode == MODE_SERVER);
 
   top->mode = CM_TOP;
-  multi_init (&multi, top);
   context_clear_2 (top);
 
   /* initialize top-tunnel instance */
   init_instance (top);
   if (IS_SIG (top))
     return;
+  
+  /* initialize global multi_context object */
+  multi_init (&multi, top);
 
   /* initialize a single multi_thread object */
   thread = multi_thread_init (&multi, top);
@@ -1291,6 +1633,9 @@ tunnel_server_single_threaded (struct context *top)
       /* set up and do the select() */
       multi_select (thread);
       TNUS_SIG ();
+
+      /* possibly reap instances/routes in vhash */
+      multi_reap_process (&multi);
 
       /* timeout? */
       if (!thread->top.c2.select_status)

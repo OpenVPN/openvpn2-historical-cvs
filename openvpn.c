@@ -613,6 +613,7 @@ openvpn (const struct options *options,
    */
   frame_fragment = frame;
   frame_subtract_extra (&frame_fragment, &frame_fragment_omit);
+  frame_dynamic_finalize (&frame_fragment);
 
   max_rw_size_udp = MAX_RW_SIZE_UDP (&frame);
   frame_print (&frame, D_SHOW_PARMS, "Data Channel MTU parms");

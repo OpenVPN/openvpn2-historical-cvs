@@ -228,6 +228,7 @@ static inline void
 frame_adjust_path_mtu (struct frame *frame, int pmtu)
 {
   frame_set_mtu_dynamic (frame, pmtu - IPv4_UDP_HEADER_SIZE);
+  frame_dynamic_finalize (frame);
 }
 
 #endif

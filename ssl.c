@@ -1137,7 +1137,7 @@ static bool transmit_rate_limiter(struct tls_session* session, time_t* wakeup, t
   const int estimated_bytes = 20000;
 
   /* worst-case estimated finish at this rate */
-  time_t finish = current + ((freq * estimated_bytes) / PAYLOAD_SIZE (&session->opt->frame));
+  time_t finish = current + ((freq * estimated_bytes) / PAYLOAD_SIZE_DYNAMIC (&session->opt->frame));
 
   if (check_debug_level (D_TLS_DEBUG))
     {
@@ -1455,7 +1455,7 @@ tls_process (struct tls_multi *multi,
 	      int status;
 
 	      ASSERT (buf_init (buf, EXTRA_FRAME (&multi->opt.frame)));
-	      status = key_state_read_plaintext (ks, buf, PAYLOAD_SIZE (&multi->opt.frame));
+	      status = key_state_read_plaintext (ks, buf, PAYLOAD_SIZE_DYNAMIC (&multi->opt.frame));
 	      current = time (NULL);
 	      if (status == -1)
 		{
@@ -1564,7 +1564,7 @@ tls_process (struct tls_multi *multi,
 	      buf = reliable_get_buf (&ks->send_reliable);
 	      if (buf)
 		{
-		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE (&multi->opt.frame));
+		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE_DYNAMIC (&multi->opt.frame));
 		  if (status == -1)
 		    {
 		      msg (D_TLS_ERRORS,

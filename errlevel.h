@@ -68,7 +68,9 @@
 #define D_REL_LOW            LOGLEV(8, 29, M_DEBUG)  /* show low frequency info from reliable layer */
 #define D_PID_DEBUG          LOGLEV(8, 30, M_DEBUG)  /* show packet-id debugging info */
 #define D_PID_PERSIST_DEBUG  LOGLEV(8, 31, M_DEBUG)  /* show packet-id persist debugging info */
-#define D_FRAG_DEBUG         LOGLEV(8, 32, M_DEBUG)  /* show fragment debugging info */
+
+#define D_FRAG_DEBUG         LOGLEV(4, 8, M_DEBUG)  /* show fragment debugging info */
+#warning D_FRAG_DEBUG
 
 #define D_SHAPER             LOGLEV(9, 40, M_DEBUG)  /* show traffic shaper info */
 

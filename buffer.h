@@ -288,7 +288,7 @@ buf_copy_range (struct buffer *dest,
       || dest_index < 0
       || dest->offset + dest_index + src_len > dest->capacity)
     return false;
-  memcpy (dest->data + dest->offset + dest_index, src->data + src->offset + src_len, src_len);
+  memcpy (dest->data + dest->offset + dest_index, src->data + src->offset + src_index, src_len);
   if (dest_index + src_len > dest->len)
     dest->len = dest_index + src_len;
   return true;

@@ -423,9 +423,9 @@ options_string (const struct options *o)
 #warning backward incompatibility
   buf_printf (&out, " --dev-type %s", dev_type_string (o->dev, o->dev_type));
   if (o->udp_mtu_defined)
-    buf_printf (&out, " --udp-mtu %s", o->udp_mtu);
+    buf_printf (&out, " --udp-mtu %d", o->udp_mtu);
   if (o->tun_mtu_defined)
-    buf_printf (&out, " --tun-mtu %s", o->tun_mtu);
+    buf_printf (&out, " --tun-mtu %d", o->tun_mtu);
   if (o->tun_ipv6)
     buf_printf (&out, " --tun-ipv6");
 #endif

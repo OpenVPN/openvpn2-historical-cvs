@@ -114,11 +114,11 @@ typedef uint32_t fragment_header_type;
 #define FRAG_TEST             3    /* control packet for establishing MTU size */
 
 /* FRAG_SEQ_ID 10 bits */
-#define FRAG_SEQ_ID_MASK      0x00001ff8
+#define FRAG_SEQ_ID_MASK      0x000003ff
 #define FRAG_SEQ_ID_SHIFT     3
 
 /* FRAG_ID 5 bits */
-#define FRAG_ID_MASK          0x0003e000
+#define FRAG_ID_MASK          0x0000001f
 #define FRAG_ID_SHIFT         13
 
 /*
@@ -135,7 +135,7 @@ typedef uint32_t fragment_header_type;
  *   will reset its stored version of this value after each send.
  */
 
-#define FRAG_SIZE_MASK        0xfffc0000
+#define FRAG_SIZE_MASK        0x00003fff
 #define FRAG_SIZE_SHIFT       18
 #define FRAG_SIZE_ROUND_SHIFT 2  /* fragment/datagram sizes represented as multiple of 4 */
 

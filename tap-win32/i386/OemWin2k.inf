@@ -17,7 +17,7 @@
    ClassGUID = {4d36e972-e325-11ce-bfc1-08002be10318}
    Provider = %l_Provider%
    Class = Net
-   DriverVer=09/27/2003,3.00.00.0007
+   DriverVer=10/01/2003,3.00.00.0010
 
 [Strings]
    l_DeviceDescription = "TAP-Win32 Adapter"
@@ -62,13 +62,19 @@
    HKR, ,               ProductName,  0, "TAP"
 
 [TAP.params.reg]
-   HKR, Ndi\params\MTU,      ParamDesc, 0, "MTU"
-   HKR, Ndi\params\MTU,      Type,      0, "int"
-   HKR, Ndi\params\MTU,      Default,   0, "1500"
-   HKR, Ndi\params\MTU,      Optional,  0, "0"
-   HKR, Ndi\params\MTU,      Min,       0, "100"
-   HKR, Ndi\params\MTU,      Max,       0, "1500"
-   HKR, Ndi\params\MTU,      Step,      0, "1"
+   HKR, Ndi\params\MTU,                ParamDesc, 0, "MTU"
+   HKR, Ndi\params\MTU,                Type,      0, "int"
+   HKR, Ndi\params\MTU,                Default,   0, "1500"
+   HKR, Ndi\params\MTU,                Optional,  0, "0"
+   HKR, Ndi\params\MTU,                Min,       0, "100"
+   HKR, Ndi\params\MTU,                Max,       0, "1500"
+   HKR, Ndi\params\MTU,                Step,      0, "1"
+   HKR, Ndi\params\MediaStatus,        ParamDesc, 0, "Media Status"
+   HKR, Ndi\params\MediaStatus,        Type,      0, "enum"
+   HKR, Ndi\params\MediaStatus,        Default,   0, "0"
+   HKR, Ndi\params\MediaStatus,        Optional,  0, "0"
+   HKR, Ndi\params\MediaStatus\enum,   "0",       0, "Application Controlled"
+   HKR, Ndi\params\MediaStatus\enum,   "1",       0, "Always Connected"
 
 ;----------------------------------------------------------------
 ;                             Service Section

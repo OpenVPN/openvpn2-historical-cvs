@@ -117,6 +117,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-group\fR\ \fIgroup\fR\ ]
 [\ \fB\-\-hand\-window\fR\ \fIn\fR\ ]
 [\ \fB\-\-ifconfig\fR\ \fIl\ r\fR\ ]
+[\ \fB\-\-ifconfig\-noexec\fR\ ]
 [\ \fB\-\-inactive\fR\ \fIn\fR\ ]
 [\ \fB\-\-inetd\fR\ ]
 [\ \fB\-\-ipchange\fR\ \fIcmd\fR\ ]
@@ -157,7 +158,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-route\fR\ \fInetwork\ [netmask]\ [gateway]\ [metric]\fR\ ]
 [\ \fB\-\-route\-delay\fR\ \fIn\fR\ ]
 [\ \fB\-\-route\-gateway\fR\ \fIgw\fR\ ]
-[\ \fB\-\-route\-noauto\fR\ ]
+[\ \fB\-\-route\-noexec\fR\ ]
 [\ \fB\-\-route\-up\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-rport\fR\ \fIport\fR\ ]
 [\ \fB\-\-secret\fR\ \fIfile\fR\ ]
@@ -669,6 +670,12 @@ parameters which are IP addresses can
 also be specified as a DNS or /etc/hosts
 file resolvable name.
 .TP
+.B --ifconfig-noexec
+Don't actually execute ifconfig/netsh commands, instead
+pass
+.B --ifconfig
+parameters to scripts using environmental variables.
+.TP
 .B --route network [netmask] [gateway] [metric]
 Add route to routing table after connection is established.
 Multiple routes can be specified.  Routes will be
@@ -753,7 +760,7 @@ Note that
 .B cmd
 can be a shell command with multiple arguments.
 .TP
-.B --route-noauto
+.B --route-noexec
 Don't add or remove routes automatically.  Instead pass routes to
 .B --route-up
 script using environmental variables.

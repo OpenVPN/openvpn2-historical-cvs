@@ -113,7 +113,7 @@ static const char usage_message[] =
   "                  Specify default by leaving blank or setting to \"nil\".\n"
   "--route-gateway gw : Specify a default gateway for use with --route.\n"
   "--route-delay n : Delay n seconds after connection initiation before\n"
-  "                  adding routes (may be 0).  If not specified, routes will"
+  "                  adding routes (may be 0).  If not specified, routes will\n"
   "                  be added immediately after tun/tap open.\n"
   "--route-up cmd  : Execute shell cmd after routes are added.\n"
   "--route-noexec  : Don't add routes automatically.  Instead pass routes to\n"
@@ -1339,7 +1339,7 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       options->route_script = p[1];
     }
-  else if (streq (p[0], "route_noexec"))
+  else if (streq (p[0], "route-noexec"))
     {
       options->route_noexec = true;
     }

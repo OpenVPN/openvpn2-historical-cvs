@@ -89,6 +89,11 @@ typedef struct _TapAdapter
   ULONG m_TapOpens;
   ULONG m_MTU;
 
+  // TRUE if device should always be
+  // "connected" even when device node
+  // is not open by a userspace process.
+  BOOLEAN m_MediaStateAlwaysConnected;
+
   // TRUE if device is "connected"
   BOOLEAN m_MediaState;
 

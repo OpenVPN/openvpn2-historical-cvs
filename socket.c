@@ -1133,8 +1133,7 @@ socket_recv_queue (struct link_socket *sock, int maxsize)
 
       if (!status) /* operation completed immediately? */
 	{
-	  ASSERT (sock->reads.addr_defined);
-	  if (sock->reads.addrlen != sizeof (sock->reads.addr))
+	  if (sock->reads.addr_defined && sock->reads.addrlen != sizeof (sock->reads.addr))
 	    bad_address_length (sock->reads.addrlen, sizeof (sock->reads.addr));
 
 	  sock->reads.iostate = IOSTATE_IMMEDIATE_RETURN;

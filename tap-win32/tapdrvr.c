@@ -367,39 +367,63 @@ NDIS_STATUS AdapterCreate
       l_Adapter->m_MAC_Broadcast[i] = 0xFF;
   }
 
-  //====================================
-  // Get MTU from registry -- Can be set
-  // in the adapter advanced properties
-  // dialog.
-  //====================================
+  //============================================
+  // Get parameters from registry which were set
+  // in the adapter advanced properties dialog.
+  //============================================
   {
     NDIS_STATUS status;
     NDIS_HANDLE configHandle;
     NDIS_CONFIGURATION_PARAMETER *parm;
-    NDIS_STRING mtuKey = NDIS_STRING_CONST("MTU");
 
-    // set default in case our registry query fails
+    // set defaults in case our registry query fails
     l_Adapter->m_MTU = DEFAULT_PACKET_LOOKAHEAD;
+    l_Adapter->m_MediaStateAlwaysConnected = FALSE;
+    l_Adapter->m_MediaState = FALSE;
 
     NdisOpenConfiguration (&status, &configHandle, p_ConfigurationHandle);
     if (status == NDIS_STATUS_SUCCESS)
       {
-	NdisReadConfiguration (&status, &parm, configHandle,
-			       &mtuKey, NdisParameterInteger);
-	if (status == NDIS_STATUS_SUCCESS)
-	  {
-	    if (parm->ParameterType == NdisParameterInteger)
-	      {
-		int mtu = parm->ParameterData.IntegerData;
-		if (mtu < MINIMUM_MTU)
-		  mtu = MINIMUM_MTU;
-		if (mtu > MAXIMUM_MTU)
-		  mtu = MAXIMUM_MTU;
-		l_Adapter->m_MTU = mtu;
-	      }
-	  }
+	/* Read MTU setting from registry */
+	{
+	  NDIS_STRING key = NDIS_STRING_CONST("MTU");
+	  NdisReadConfiguration (&status, &parm, configHandle,
+				 &key, NdisParameterInteger);
+	  if (status == NDIS_STATUS_SUCCESS)
+	    {
+	      if (parm->ParameterType == NdisParameterInteger)
+		{
+		  int mtu = parm->ParameterData.IntegerData;
+		  if (mtu < MINIMUM_MTU)
+		    mtu = MINIMUM_MTU;
+		  if (mtu > MAXIMUM_MTU)
+		    mtu = MAXIMUM_MTU;
+		  l_Adapter->m_MTU = mtu;
+		}
+	    }
+	}
+
+	/* Read Media Status setting from registry */
+	{
+	  NDIS_STRING key = NDIS_STRING_CONST("MediaStatus");
+	  NdisReadConfiguration (&status, &parm, configHandle,
+				 &key, NdisParameterInteger);
+	  if (status == NDIS_STATUS_SUCCESS)
+	    {
+	      if (parm->ParameterType == NdisParameterInteger)
+		{
+		  if (parm->ParameterData.IntegerData)
+		    {
+		      l_Adapter->m_MediaStateAlwaysConnected = TRUE;
+		      l_Adapter->m_MediaState = TRUE;
+		    }
+		}
+	    }
+	}
+
 	NdisCloseConfiguration (configHandle);
       }
+
     DEBUGP (("[%s] MTU=%d\n", l_Adapter->m_Name, l_Adapter->m_MTU));
   }
 
@@ -887,9 +911,8 @@ NDIS_STATUS AdapterQuery
       //                            Device Info
       //==================================================================
     case OID_GEN_MEDIA_CONNECT_STATUS:
-      l_Query.m_Long =
-	(l_Adapter->m_TapOpens >
-	 0) ? NdisMediaStateConnected : NdisMediaStateDisconnected;
+      l_Query.m_Long = l_Adapter->m_MediaState
+	? NdisMediaStateConnected : NdisMediaStateDisconnected;
       break;
 
     case OID_GEN_HARDWARE_STATUS:
@@ -1213,10 +1236,10 @@ AdapterTransmit (IN NDIS_HANDLE p_AdapterContext, IN PNDIS_PACKET p_Packet,
     return NDIS_STATUS_FAILURE;
   else if (l_PacketLength < ETHERNET_HEADER_SIZE)
     return NDIS_STATUS_FAILURE;
-  else if (l_PacketLength > 65535)	// Cap packet size to TCP/IP maximum
+  else if (l_PacketLength > 65535)  // Cap packet size to TCP/IP maximum
     return NDIS_STATUS_FAILURE;
-  else if (!l_Adapter->m_TapOpens)	// Nothing is bound to the TAP device
-    return NDIS_STATUS_SUCCESS;
+  else if (!l_Adapter->m_TapOpens || !l_Adapter->m_MediaState)
+    return NDIS_STATUS_SUCCESS;     // Nothing is bound to the TAP device
 
   if (NdisAllocateMemoryWithTag (&l_PacketBuffer,
 				 TAP_PACKET_SIZE (l_PacketLength),
@@ -1477,7 +1500,7 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 	    }
 	  case TAP_IOCTL_GET_INFO:
 	    {
-	      char state[4];
+	      char state[16];
 	      if (l_Adapter->m_InterfaceIsRunning)
 		state[0] = 'A';
 	      else
@@ -1487,7 +1510,11 @@ TapDeviceHook (IN PDEVICE_OBJECT p_DeviceObject, IN PIRP p_IRP)
 	      else
 		state[1] = 't';
 	      state[2] = l_Adapter->m_DeviceState;
-	      state[3] = '\0';
+	      if (l_Adapter->m_MediaStateAlwaysConnected)
+		state[3] = 'C';
+	      else
+		state[3] = 'c';
+	      state[4] = '\0';
 
 	      p_IRP->IoStatus.Status = l_Status = RtlStringCchPrintfExA (
 	        ((LPTSTR) (p_IRP->AssociatedIrp.SystemBuffer)),
@@ -2146,12 +2173,14 @@ FlushQueues (TapAdapterPointer p_Adapter)
 VOID
 SetMediaStatus (TapAdapterPointer p_Adapter, BOOLEAN state)
 {
-  if (p_Adapter->m_MediaState != state)
+  if (p_Adapter->m_MediaState != state && !p_Adapter->m_MediaStateAlwaysConnected)
     {
       if (state)
-	NdisMIndicateStatus (p_Adapter->m_MiniportAdapterHandle, NDIS_STATUS_MEDIA_CONNECT, NULL, 0);
+	NdisMIndicateStatus (p_Adapter->m_MiniportAdapterHandle,
+			     NDIS_STATUS_MEDIA_CONNECT, NULL, 0);
       else
-	NdisMIndicateStatus (p_Adapter->m_MiniportAdapterHandle, NDIS_STATUS_MEDIA_DISCONNECT, NULL, 0);
+	NdisMIndicateStatus (p_Adapter->m_MiniportAdapterHandle,
+			     NDIS_STATUS_MEDIA_DISCONNECT, NULL, 0);
 
       NdisMIndicateStatusComplete (p_Adapter->m_MiniportAdapterHandle);
       p_Adapter->m_MediaState = state;

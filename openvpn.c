@@ -610,6 +610,11 @@ openvpn (const struct options *options,
   /* route stuff */
   struct event_timeout route_wakeup = event_timeout_clear_ret ();
 
+  /* did we open tun/tap dev during this cycle? */
+  bool did_tun_open = false;
+
+  /* ------------- */
+
 #ifdef HAVE_SIGNAL_H
   /*
    * Special handling if signal arrives before
@@ -1065,7 +1070,9 @@ openvpn (const struct options *options,
 
       /* possibly add routes */
       if (!options->route_delay_defined)
-	do_route (options, route_list);
+	  do_route (options, route_list);
+
+      did_tun_open = true;
     }
   else
     {
@@ -1327,13 +1334,16 @@ openvpn (const struct options *options,
 	    {
 	      if (CONNECTION_ESTABLISHED (&link_socket))
 		{
-		  /* perform connection-establishment config steps
-		     on tun/tap device */
-		  open_tun_connection_establishment (tuntap, options->tuntap_flags);
+		  if (did_tun_open)
+		    {
+		      /* perform connection-establishment config steps
+			 on tun/tap device */
+		      open_tun_connection_establishment (tuntap, options->tuntap_flags);
 
-		  /* if --route-delay was specified, start timer */
-		  if (options->route_delay_defined)
-		    event_timeout_init (&route_wakeup, current, options->route_delay);
+		      /* if --route-delay was specified, start timer */
+		      if (options->route_delay_defined)
+			event_timeout_init (&route_wakeup, current, options->route_delay);
+		    }
 
 		  event_timeout_clear (&wait_for_connect);
 		}
@@ -2477,6 +2487,8 @@ main (int argc, char *argv[])
    */
   do {
     struct options options;
+    int dev = DEV_TYPE_UNDEF;
+
     init_options (&options);
 
     /*
@@ -2580,6 +2592,11 @@ main (int argc, char *argv[])
 	notnull (options.dev, "TUN/TAP device (--dev)");
 
       /*
+       * Get tun/tap/null device type
+       */
+      dev = dev_type_enum (options.dev, options.dev_type);
+
+      /*
        * Sanity check on daemon/inetd modes
        */
 
@@ -2614,10 +2631,9 @@ main (int argc, char *argv[])
        * Set MTU defaults
        */
       {
-	const bool is_tap = is_dev_type (options.dev, options.dev_type, "tap");
 	if (!options.tun_mtu_defined && !options.link_mtu_defined)
 	  {
-	    if (is_tap || WIN32_0_1)
+	    if ((dev == DEV_TYPE_TAP) || WIN32_0_1)
 	      {
 		options.tun_mtu_defined = true;
 		options.tun_mtu = TAP_MTU_DEFAULT;
@@ -2630,7 +2646,7 @@ main (int argc, char *argv[])
 		  options.tun_mtu_defined = true;
 	      }
 	  }
-	if (is_tap && !options.tun_mtu_extra_defined)
+	if ((dev == DEV_TYPE_TAP) && !options.tun_mtu_extra_defined)
 	  {
 	    options.tun_mtu_extra_defined = true;
 	    options.tun_mtu_extra = TAP_MTU_EXTRA_DEFAULT;
@@ -2661,6 +2677,14 @@ main (int argc, char *argv[])
 	  msg (M_WARN, "Options error: local and remote/netmask --ifconfig addresses must be different");
 	  usage_small ();
 	}
+
+#ifdef WIN32
+      if (dev == DEV_TYPE_TUN && !(options.ifconfig_local && options.ifconfig_remote_netmask))
+	{
+	  msg (M_WARN, "Options error: On Windows, --ifconfig is required when --dev tun is used");
+	  usage_small ();
+	}
+#endif
 
       /*
        * Check that protocol options make sense.
@@ -2765,9 +2789,8 @@ main (int argc, char *argv[])
 	/* init route list */
 	{
 	  const char *gw = NULL;
-	  const bool is_tun = is_dev_type (options.dev, options.dev_type, "tun");
 
-	  if (is_tun)
+	  if (dev == DEV_TYPE_TUN)
 	    gw = options.ifconfig_remote_netmask;
 	  if (options.route_default_gateway)
 	    gw = options.route_default_gateway;

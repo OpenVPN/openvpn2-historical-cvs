@@ -2,7 +2,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.14 2003/09/30 08:50:42 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.15 2003/10/01 15:20:53 jimyonan Exp $
 	
 Upcoming version 1.5.0
 
@@ -148,6 +148,19 @@ Upcoming version 1.5.0
   can be set to 0) (beta8).
 * Made TCP framing error into a non-fatal error that triggers a
   connection reset (beta8).
+* Fixed --route-noexec bug where option was not parsed correctly
+  (beta9).
+* Complain if --dev tap is specified without --ifconfig on Windows
+  (beta9).
+* Fixed bug where TCP connections on windows would sometimes cause
+  an assertion failure (beta9).
+* Added a new flag to TAP-Win32 advanced properties that allows one
+  to set the adapter to be always "connected" even when an OpenVPN
+  process doesn't have it open.  The default behavior is to report
+  a media status of connected only when an OpenVPN process has the
+  adapter open (beta9).
+* Rebuilt the Windows self-install distribution with OpenSSL 0.9.7c
+  DLLs in response to a security advisory (beta9).
 
 2003.08.04 -- Version 1.4.3
 

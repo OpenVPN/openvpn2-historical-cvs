@@ -215,12 +215,12 @@ ifconfig_sanity_check (bool tun, in_addr_t addr)
   if (tun)
     {
       if (looks_like_netmask)
-	msg (M_FATAL, "Since you are using --dev tun, the second argument to --ifconfig must be an IP address.  You are using something (%s) that looks more like a netmask.", print_in_addr_t (addr, false));
+	msg (M_WARN, "WARNING: Since you are using --dev tun, the second argument to --ifconfig must be an IP address.  You are using something (%s) that looks more like a netmask.", print_in_addr_t (addr, false));
     }
   else /* tap */
     {
       if (!looks_like_netmask)
-	msg (M_FATAL, "Since you are using --dev tap, the second argument to --ifconfig must be a netmask, for example something like 255.255.255.0.");
+	msg (M_WARN, "WARNING: Since you are using --dev tap, the second argument to --ifconfig must be a netmask, for example something like 255.255.255.0.");
     }
 }
 
@@ -263,8 +263,8 @@ check_addr_clash (const char *name,
 	  const in_addr_t remote_net = remote_netmask & test_netmask;
 
 	  if (public == local || public == remote_netmask)
-	    msg (M_FATAL,
-		 "ERROR: --%s address [%s] conflicts with --ifconfig address pair [%s, %s]",
+	    msg (M_WARN,
+		 "WARNING: --%s address [%s] conflicts with --ifconfig address pair [%s, %s]",
 		 name,
 		 print_in_addr_t (public, false),
 		 print_in_addr_t (local, false),
@@ -283,8 +283,8 @@ check_addr_clash (const char *name,
 	  const in_addr_t public_network = public & remote_netmask;
 	  const in_addr_t virtual_network = local & remote_netmask;
 	  if (public_network == virtual_network)
-	    msg (M_FATAL,
-		 "ERROR: --%s address [%s] conflicts with --ifconfig subnet [%s, %s] -- local and remote addresses cannot be inside of the --ifconfig subnet",
+	    msg (M_WARN,
+		 "WARNING: --%s address [%s] conflicts with --ifconfig subnet [%s, %s] -- local and remote addresses cannot be inside of the --ifconfig subnet",
 		 name,
 		 print_in_addr_t (public, false),
 		 print_in_addr_t (local, false),
@@ -1839,10 +1839,14 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
       in_addr_t ep[2];
       ep[0] = htonl (tt->local);
       ep[1] = htonl (tt->remote_netmask);
+      if (!tt->did_ifconfig_setup)
+	{
+	  msg (M_FATAL, "ERROR: --dev tun also requires --ifconfig");
+	}
       if (!DeviceIoControl (tt->hand, TAP_IOCTL_CONFIG_POINT_TO_POINT,
 			    ep, sizeof (ep),
 			    ep, sizeof (ep), &len, NULL))
-	msg (M_FATAL, "The TAP-Win32 driver rejected a DeviceIoControl call to set Point-to-Point mode, which is required for --dev tun");
+	msg (M_FATAL, "ERROR: The TAP-Win32 driver rejected a DeviceIoControl call to set Point-to-Point mode, which is required for --dev tun");
     }
 }
 

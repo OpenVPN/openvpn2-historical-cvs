@@ -93,12 +93,14 @@ HEADERS = \
 	occ-inline.h \
 	occ.h \
         openvpn.h \
+	openvpn-plugin.h \
 	options.h \
 	otime.h \
 	packet_id.h \
 	perf.h \
 	ping-inline.h \
 	ping.h \
+	plugin.h \
 	pool.h \
         proto.h \
 	proxy.h \
@@ -150,6 +152,7 @@ OBJS =  base64.o \
 	packet_id.o \
 	perf.o \
 	ping.o \
+	plugin.o \
         pool.o \
 	proxy.o \
 	push.o \

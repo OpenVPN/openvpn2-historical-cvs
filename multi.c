@@ -63,31 +63,48 @@ learn_address_script (const struct multi_context *m,
 		      const char *op,
 		      const struct mroute_addr *addr)
 {
-  if (m->learn_address_script)
+  struct gc_arena gc = gc_new ();
+  struct env_set *es;
+
+  /* get environmental variable source */
+  if (mi && mi->context.c2.es)
+    es = mi->context.c2.es;
+  else
+    es = env_set_create (&gc);
+
+  if (plugin_defined (m->top.c1.plugins, PLUGIN_LEARN_ADDRESS))
     {
-      struct gc_arena gc = gc_new ();
       struct buffer cmd = alloc_buf_gc (256, &gc);
-      struct env_set *es;
 
-      /* get environmental variable source */
-      if (mi && mi->context.c2.es)
-	es = mi->context.c2.es;
-      else
-	es = env_set_create (&gc);
-
-      setenv_str (es, "script_type", "learn-address");
-
-      buf_printf (&cmd, "%s \"%s\" \"%s\"",
-		  m->learn_address_script,
+      buf_printf (&cmd, "\"%s\" \"%s\"",
 		  op,
 		  mroute_addr_print (addr, &gc));
       if (mi)
 	buf_printf (&cmd, " \"%s\"", tls_common_name (mi->context.c2.tls_multi, false));
 
-      system_check (BSTR (&cmd), es, S_SCRIPT, "learn-address command failed");
+      if (plugin_call (m->top.c1.plugins, PLUGIN_LEARN_ADDRESS, BSTR (&cmd), es))
+	msg (M_WARN, "WARNING: learn-address plugin call failed");
 
-      gc_free (&gc);
     }
+
+  if (m->top.options.learn_address_script)
+    {
+      struct buffer cmd = alloc_buf_gc (256, &gc);
+
+      setenv_str (es, "script_type", "learn-address");
+
+      buf_printf (&cmd, "%s \"%s\" \"%s\"",
+		  m->top.options.learn_address_script,
+		  op,
+		  mroute_addr_print (addr, &gc));
+      if (mi)
+	buf_printf (&cmd, " \"%s\"", tls_common_name (mi->context.c2.tls_multi, false));
+
+      system_check (BSTR (&cmd), es, S_SCRIPT, "WARNING: learn-address command failed");
+
+    }
+
+  gc_free (&gc);
 }
 
 void
@@ -299,11 +316,6 @@ multi_init (struct multi_context *m, struct context *t, bool tcp_mode, int threa
   mroute_extract_in_addr_t (&m->local, t->c1.tuntap->local);
 
   /*
-   * Remember possible learn_address_script
-   */
-  m->learn_address_script = t->options.learn_address_script;
-  
-  /*
    * Limit total number of clients
    */
   m->max_clients = t->options.max_clients;
@@ -370,14 +382,9 @@ multi_del_iroutes (struct multi_context *m,
 }
 
 static void
-multi_client_disconnect_script (struct multi_context *m,
+multi_client_disconnect_setenv (struct multi_context *m,
 				struct multi_instance *mi)
 {
-  struct gc_arena gc = gc_new ();
-  struct buffer cmd = alloc_buf_gc (256, &gc);
-
-  setenv_str (mi->context.c2.es, "script_type", "client-disconnect");
-
   /* setenv client real IP address */
   setenv_trusted (mi->context.c2.es, get_link_socket_info (&mi->context));
 
@@ -385,11 +392,33 @@ multi_client_disconnect_script (struct multi_context *m,
   setenv_int (mi->context.c2.es, "bytes_received", mi->context.c2.link_read_bytes);
   setenv_int (mi->context.c2.es, "bytes_sent", mi->context.c2.link_write_bytes);
 
-  buf_printf (&cmd, "%s", mi->context.options.client_disconnect_script);
+}
 
-  system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "client-disconnect command failed");
+static void
+multi_client_disconnect_script (struct multi_context *m,
+				struct multi_instance *mi)
+{
+  multi_client_disconnect_setenv (m, mi);
 
-  gc_free (&gc);
+  if (plugin_defined (m->top.c1.plugins, PLUGIN_CLIENT_DISCONNECT))
+    {
+      if (plugin_call (m->top.c1.plugins, PLUGIN_CLIENT_DISCONNECT, NULL, mi->context.c2.es))
+	msg (M_WARN, "WARNING: client-disconnect plugin call failed");
+    }
+
+  if (mi->context.options.client_disconnect_script)
+    {
+      struct gc_arena gc = gc_new ();
+      struct buffer cmd = alloc_buf_gc (256, &gc);
+
+      setenv_str (mi->context.c2.es, "script_type", "client-disconnect");
+
+      buf_printf (&cmd, "%s", mi->context.options.client_disconnect_script);
+
+      system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "client-disconnect command failed");
+
+      gc_free (&gc);
+    }
 }
 
 void
@@ -433,8 +462,7 @@ multi_close_instance (struct multi_context *m,
       mbuf_dereference_instance (m->mbuf, mi);
     }
 
-  if (mi->context.options.client_disconnect_script)
-    multi_client_disconnect_script (m, mi);
+  multi_client_disconnect_script (m, mi);
 
   if (mi->did_open_context)
     close_context (&mi->context, SIGTERM, CC_GC_FREE);
@@ -1064,6 +1092,41 @@ multi_set_virtual_addr_env (struct multi_context *m, struct multi_instance *mi)
 }
 
 /*
+ * Called after client-connect script or plug-in is called
+ */
+static void
+multi_client_connect_post (struct multi_context *m,
+			   struct multi_instance *mi,
+			   const char *dc_file,
+			   unsigned int option_permissions_mask,
+			   unsigned int *option_types_found)
+{
+  /* Did script generate a dynamic config file? */
+  if (test_file (dc_file))
+    {
+      options_server_import (&mi->context.options,
+			     dc_file,
+			     D_IMPORT_ERRORS,
+			     option_permissions_mask,
+			     option_types_found,
+			     mi->context.c2.es);
+
+      if (!delete_file (dc_file))
+	msg (D_MULTI_ERRORS, "MULTI: problem deleting temporary file: %s",
+	     dc_file);
+
+      /*
+       * If the --client-connect script generates a config file
+       * with an --ifconfig-push directive, it will override any
+       * --ifconfig-push directive from the --client-config-dir
+       * directory or any --ifconfig-pool dynamic address.
+       */
+      multi_select_virtual_addr (m, mi);
+      multi_set_virtual_addr_env (m, mi);
+    }
+}
+
+/*
  * Called as soon as the SSL/TLS connection authenticates.
  *
  * Instance-specific directives to be processed:
@@ -1100,20 +1163,21 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
        * Try to source a dynamic config file from the
        * --client-config-dir directory.
        */
-      {
-	const char *ccd_file = gen_path (mi->context.options.client_config_dir,
-					 tls_common_name (mi->context.c2.tls_multi, false),
-					 &gc);
-	if (test_file (ccd_file))
-	  {
-	    options_server_import (&mi->context.options,
-				   ccd_file,
-				   D_IMPORT_ERRORS,
-				   option_permissions_mask,
-				   &option_types_found,
-				   mi->context.c2.es);
-	  }
-      }
+      if (mi->context.options.client_config_dir)
+	{
+	  const char *ccd_file = gen_path (mi->context.options.client_config_dir,
+					   tls_common_name (mi->context.c2.tls_multi, false),
+					   &gc);
+	  if (test_file (ccd_file))
+	    {
+	      options_server_import (&mi->context.options,
+				     ccd_file,
+				     D_IMPORT_ERRORS,
+				     option_permissions_mask,
+				     &option_types_found,
+				     mi->context.c2.es);
+	    }
+	}
 
       /*
        * Select a virtual address from either --ifconfig-push in --client-config-dir file
@@ -1129,6 +1193,21 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
 
       /* setenv client virtual IP address */
       multi_set_virtual_addr_env (m, mi);
+
+      /*
+       * Call client-connect plug-in.
+       */
+      if (plugin_defined (m->top.c1.plugins, PLUGIN_CLIENT_CONNECT))
+	{
+	  const char *dc_file = create_temp_filename (mi->context.options.tmp_dir, &gc);
+
+	  delete_file (dc_file);
+
+	  if (plugin_call (m->top.c1.plugins, PLUGIN_CLIENT_CONNECT, dc_file, mi->context.c2.es))
+	    msg (M_WARN, "WARNING: client-connect plugin call failed");
+
+	  multi_client_connect_post (m, mi, dc_file, option_permissions_mask, &option_types_found);
+	}
 
       /*
        * Run --client-connect script.
@@ -1150,29 +1229,7 @@ multi_connection_established (struct multi_context *m, struct multi_instance *mi
 
 	  system_check (BSTR (&cmd), mi->context.c2.es, S_SCRIPT, "client-connect command failed");
 
-	  /* Did script generate a dynamic config file? */
-	  if (test_file (dc_file))
-	    {
-	      options_server_import (&mi->context.options,
-				     dc_file,
-				     D_IMPORT_ERRORS,
-				     option_permissions_mask,
-				     &option_types_found,
-				     mi->context.c2.es);
-
-	      if (!delete_file (dc_file))
-		msg (D_MULTI_ERRORS, "MULTI: problem deleting temporary file: %s",
-		     dc_file);
-
-	      /*
-	       * If the --client-connect script generates a config file
-	       * with an --ifconfig-push directive, it will override any
-	       * --ifconfig-push directive from the --client-config-dir
-	       * directory or any --ifconfig-pool dynamic address.
-	       */
-	      multi_select_virtual_addr (m, mi);
-	      multi_set_virtual_addr_env (m, mi);
-	    }
+	  multi_client_connect_post (m, mi, dc_file, option_permissions_mask, &option_types_found);
 	}
 
       /*

@@ -1,7 +1,21 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.44 2004/11/07 10:27:22 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.45 2004/11/11 15:02:02 jimyonan Exp $
+
+2004.11.11 -- Version 2.0-beta17
+
+* Changed default port number to 1194 per IANA official
+  port number assignment.
+* Added --plugin directive which allows compiled
+  modules to intercept script callbacks.  See
+  plugin folder in tarball for more info.
+* Fixed bug introduced in beta12 where --key-method 1
+  authentications which should have succeeded would fail.
+* Ignore SIGUSR1 during DNS resolution.
+* Added SuSE support to openvpn.spec (Umberto Nicoletti).
+* Fixed --cryptoapicert SUBJ: parsing bug (Peter 'Luna'
+  Runestig).
 
 2004.11.07 -- Version 2.0-beta16
 

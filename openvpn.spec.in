@@ -21,6 +21,12 @@ of the OpenSSL library to securely tunnel IP networks over a single
 UDP port. It can use the Marcus Franz Xaver Johannes Oberhumer's LZO
 library for compression.
 
+%if "%{_vendor}" == "suse" || "%{_vendor}" == "pc"
+%define VENDOR SuSE
+%else
+%define VENDOR %_vendor
+%endif
+
 %define debug_package %{nil}
 
 %prep
@@ -37,8 +43,15 @@ library for compression.
 %__install -c -m 755 %{name}.8 %{buildroot}%{_mandir}/man8
 %__install -c -d -m 755 %{buildroot}%{_sbindir}
 %__install -c -m 755 %{name} %{buildroot}%{_sbindir}
+
+%if "%{VENDOR}" == "SuSE"
+%__install -c -d -m 755 %{buildroot}/etc/init.d
+%__install -c -m 755 suse/%{name}.init %{buildroot}/etc/init.d/%{name}
+%else
 %__install -c -d -m 755 %{buildroot}/etc/rc.d/init.d
 %__install -c -m 755 sample-scripts/%{name}.init %{buildroot}/etc/rc.d/init.d/%{name}
+%endif
+
 %__install -c -d -m 755 %{buildroot}/etc/%{name}
 
 %__mkdir_p %{buildroot}%{_datadir}/%{name}
@@ -55,12 +68,19 @@ case "`uname -r`" in
 	;;
 esac
 /sbin/chkconfig --add %{name}
+%if "%{VENDOR}" == "SuSE"
+/etc/init.d/openvpn restart
+%else
 /sbin/service %{name} condrestart
-
+%endif
 %preun
 if [ "$1" = 0 ]
 then
+	%if "%{VENDOR}" == "SuSE"
+	/etc/init.d/openvpn stop
+	%else
 	/sbin/service %{name} stop
+	%endif
 	/sbin/chkconfig --del %{name}
 fi
 
@@ -73,6 +93,9 @@ fi
 /etc
 
 %changelog
+* Sun Nov 7 2004 Umberto Nicoletti
+- SuSE support
+
 * Sun Feb 23 2003 Matthias Andree <matthias.andree@gmx.de> 1.3.2.14-1.
 - Have the version number filled in by autoconf.
 

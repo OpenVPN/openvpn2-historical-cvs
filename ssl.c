@@ -426,19 +426,19 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
   /* export subject name string as environmental variable */
   session->verify_maxlevel = max_int (session->verify_maxlevel, ctx->error_depth);
   openvpn_snprintf (envname, sizeof(envname), "tls_id_%d", ctx->error_depth);
-  setenv_str (session->opt->es, envname, subject);
+  setenv_str (opt->es, envname, subject);
 
 #if 0
   /* export common name string as environmental variable */
   openvpn_snprintf (envname, sizeof(envname), "tls_common_name_%d", ctx->error_depth);
-  setenv_str (session->opt->es, envname, common_name);
+  setenv_str (opt->es, envname, common_name);
 #endif
 
   /* export serial number as environmental variable */
   {
     const int serial = (int) ASN1_INTEGER_get (X509_get_serialNumber (ctx->current_cert));
     openvpn_snprintf (envname, sizeof(envname), "tls_serial_%d", ctx->error_depth);
-    setenv_int (session->opt->es, envname, serial);
+    setenv_int (opt->es, envname, serial);
   }
 
   /* export current untrusted IP */
@@ -458,14 +458,41 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 	}
     }
 
-  /* run --tls-verify script */
-  if (opt->verify_command)
+  /* call --tls-verify plug-in(s) */
+  if (plugin_defined (opt->plugins, PLUGIN_TLS_VERIFY))
     {
-      char command[512];
+      char command[256];
       struct buffer out;
       int ret;
 
-      setenv_str (session->opt->es, "script_type", "tls-verify");
+      buf_set_write (&out, (uint8_t*)command, sizeof (command));
+      buf_printf (&out, "%d %s",
+		  ctx->error_depth,
+		  subject);
+
+      ret = plugin_call (opt->plugins, PLUGIN_TLS_VERIFY, command, opt->es);
+
+      if (!ret)
+	{
+	  msg (D_HANDSHAKE, "VERIFY PLUGIN OK: depth=%d, %s",
+	       ctx->error_depth, subject);
+	}
+      else
+	{
+	  msg (D_HANDSHAKE, "VERIFY PLUGIN ERROR: depth=%d, %s",
+	       ctx->error_depth, subject);
+	  goto err;		/* Reject connection */
+	}
+    }
+
+  /* run --tls-verify script */
+  if (opt->verify_command)
+    {
+      char command[256];
+      struct buffer out;
+      int ret;
+
+      setenv_str (opt->es, "script_type", "tls-verify");
 
       buf_set_write (&out, (uint8_t*)command, sizeof (command));
       buf_printf (&out, "%s %d %s",
@@ -473,7 +500,7 @@ verify_callback (int preverify_ok, X509_STORE_CTX * ctx)
 		  ctx->error_depth,
 		  subject);
       msg (D_TLS_DEBUG, "TLS: executing verify command: %s", command);
-      ret = openvpn_system (command, session->opt->es, S_SCRIPT);
+      ret = openvpn_system (command, opt->es, S_SCRIPT);
 
       if (system_ok (ret))
 	{
@@ -2165,8 +2192,9 @@ read_string (struct buffer *buf, char *str, const unsigned int capacity)
  * If you want to add new authentication methods,
  * this is the place to start.
  */
+
 static bool
-verify_user_pass (struct tls_session *session, const struct user_pass *up)
+verify_user_pass_script (struct tls_session *session, const struct user_pass *up)
 {
   struct gc_arena gc = gc_new ();
   struct buffer cmd = alloc_buf_gc (256, &gc);
@@ -2232,6 +2260,41 @@ verify_user_pass (struct tls_session *session, const struct user_pass *up)
     delete_file (tmp_file);
 
   gc_free (&gc);
+  return ret;
+}
+
+static bool
+verify_user_pass_plugin (struct tls_session *session, const struct user_pass *up)
+{
+  int retval;
+  bool ret = false;
+
+  /* Is username defined? */
+  if (strlen (up->username))
+    {
+      /* set username/password in private env space */
+      setenv_str (session->opt->es, "username", up->username);
+      setenv_str (session->opt->es, "password", up->password);
+
+      /* setenv incoming cert common name for script */
+      setenv_str (session->opt->es, "common_name", session->common_name);
+
+      /* setenv client real IP address */
+      setenv_untrusted (session);
+
+      /* call command */
+      retval = plugin_call (session->opt->plugins, PLUGIN_AUTH_USER_PASS_VERIFY, NULL, session->opt->es);
+
+      if (!retval)
+	ret = true;
+
+      setenv_del (session->opt->es, "password");
+    }
+  else
+    {
+      msg (D_TLS_ERRORS, "TLS Auth Error: peer provided a blank username");
+    }
+
   return ret;
 }
 
@@ -2377,6 +2440,7 @@ key_method_1_read (struct buffer *buf, struct tls_session *session)
   init_key_ctx (&ks->key.decrypt, &key, &session->opt->key_type,
 		DO_DECRYPT, "Data Channel Decrypt");
   CLEAR (key);
+  ks->authenticated = true;
   return true;
 
  error:
@@ -2427,8 +2491,12 @@ key_method_2_read (struct buffer *buf, struct tls_multi *multi, struct tls_sessi
 
   /* should we check username/password? */
   ks->authenticated = false;
-  if (session->opt->auth_user_pass_verify_script)
+  if (session->opt->auth_user_pass_verify_script
+      || plugin_defined (session->opt->plugins, PLUGIN_AUTH_USER_PASS_VERIFY))
     {
+      bool s1 = true;
+      bool s2 = true;
+
       /* get username/password from plaintext buffer */
       ALLOC_OBJ_CLEAR_GC (up, struct user_pass, &gc);
       if (!read_string (buf, up->username, USER_PASS_LEN)
@@ -2442,9 +2510,15 @@ key_method_2_read (struct buffer *buf, struct tls_multi *multi, struct tls_sessi
       /* enforce character class restrictions in username/password */
       string_mod (up->username, COMMON_NAME_CHAR_CLASS, 0, '_');
       string_mod (up->password, CC_PRINT, CC_CRLF, '_');
+
+      /* call plugin(s) and/or script */
+      if (plugin_defined (session->opt->plugins, PLUGIN_AUTH_USER_PASS_VERIFY))
+	s1 = verify_user_pass_plugin (session, up);
+      if (session->opt->auth_user_pass_verify_script)
+	s2 = verify_user_pass_script (session, up);
       
-      /* verify it */
-      if (verify_user_pass (session, up))
+      /* auth succeeded? */
+      if (s1 && s2)
 	{
 	  ks->authenticated = true;
 	  if (session->opt->username_as_common_name)
@@ -3131,6 +3205,18 @@ tls_pre_decrypt (struct tls_multi *multi,
 		  gc_free (&gc);
 		  return ret;
 		}
+#if 0 /* keys out of sync? */
+	      else
+		{
+		  msg (D_TLS_DEBUG, "TLS_PRE_DECRYPT: [%d] dken=%d rkid=%d lkid=%d auth=%d match=%d",
+		       i,
+		       DECRYPT_KEY_ENABLED (multi, ks),
+		       key_id,
+		       ks->key_id,
+		       ks->authenticated,
+		       addr_port_match (from, &ks->remote_addr));
+		}
+#endif
 	    }
 
 	  msg (D_TLS_ERRORS,

@@ -100,16 +100,9 @@ init_remote_list (struct context *c)
 void
 context_init_1 (struct context *c)
 {
-  CLEAR (c->c1.link_socket_addr);
-  CLEAR (c->c1.ks);
+  context_clear_1 (c);
 
   packet_id_persist_init (&c->c1.pid_persist);
-  c->c1.tuntap = NULL;
-  c->c1.tuntap_owned = false;
-  c->c1.route_list = NULL;
-  c->c1.http_proxy = NULL;
-  c->c1.socks_proxy = NULL;
-
   init_remote_list (c);
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
@@ -597,10 +590,17 @@ void
 do_route (const struct options *options,
 	  struct route_list *route_list,
 	  const struct tuntap *tt,
+	  const struct plugin_list *plugins,
 	  struct env_set *es)
 {
   if (!options->route_noexec && route_list)
     add_routes (route_list, tt, ROUTE_OPTION_FLAGS (options), es);
+
+  if (plugin_defined (plugins, PLUGIN_ROUTE_UP))
+    {
+      if (plugin_call (plugins, PLUGIN_ROUTE_UP, NULL, es))
+	msg (M_WARN, "WARNING: route-up plugin call failed");
+    }
 
   if (options->route_script)
     {
@@ -712,20 +712,22 @@ do_open_tun (struct context *c)
 	}
 
       /* run the up script */
-      run_script (c->options.up_script,
-		  c->c1.tuntap->actual_name,
-		  TUN_MTU_SIZE (&c->c2.frame),
-		  EXPANDED_SIZE (&c->c2.frame),
-		  print_in_addr_t (c->c1.tuntap->local, IA_EMPTY_IF_UNDEF, &gc),
-		  print_in_addr_t (c->c1.tuntap->remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
-		  "init",
-		  NULL,
-		  "up",
-		  c->c2.es);
+      run_up_down (c->options.up_script,
+		   c->c1.plugins,
+		   PLUGIN_UP,
+		   c->c1.tuntap->actual_name,
+		   TUN_MTU_SIZE (&c->c2.frame),
+		   EXPANDED_SIZE (&c->c2.frame),
+		   print_in_addr_t (c->c1.tuntap->local, IA_EMPTY_IF_UNDEF, &gc),
+		   print_in_addr_t (c->c1.tuntap->remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
+		   "init",
+		   NULL,
+		   "up",
+		   c->c2.es);
 
       /* possibly add routes */
       if (!c->options.route_delay_defined)
-	do_route (&c->options, c->c1.route_list, c->c1.tuntap, c->c2.es);
+	do_route (&c->options, c->c1.route_list, c->c1.tuntap, c->c1.plugins, c->c2.es);
 
       /*
        * Did tun/tap driver give us an MTU?
@@ -744,16 +746,18 @@ do_open_tun (struct context *c)
 
       /* run the up script if user specified --up-restart */
       if (c->options.up_restart)
-	run_script (c->options.up_script,
-		    c->c1.tuntap->actual_name,
-		    TUN_MTU_SIZE (&c->c2.frame),
-		    EXPANDED_SIZE (&c->c2.frame),
-		    print_in_addr_t (c->c1.tuntap->local, IA_EMPTY_IF_UNDEF, &gc),
-		    print_in_addr_t (c->c1.tuntap->remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
-		    "restart",
-		    NULL,
-		    "up",
-		    c->c2.es);
+	run_up_down (c->options.up_script,
+		     c->c1.plugins,
+		     PLUGIN_UP,
+		     c->c1.tuntap->actual_name,
+		     TUN_MTU_SIZE (&c->c2.frame),
+		     EXPANDED_SIZE (&c->c2.frame),
+		     print_in_addr_t (c->c1.tuntap->local, IA_EMPTY_IF_UNDEF, &gc),
+		     print_in_addr_t (c->c1.tuntap->remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
+		     "restart",
+		     NULL,
+		     "up",
+		     c->c2.es);
     }
   gc_free (&gc);
   return ret;
@@ -797,17 +801,19 @@ do_close_tun (struct context *c, bool force)
 
 	  /* Run the down script -- note that it will run at reduced
 	     privilege if, for example, "--user nobody" was used. */
-	  run_script (c->options.down_script,
-		      tuntap_actual,
-		      TUN_MTU_SIZE (&c->c2.frame),
-		      EXPANDED_SIZE (&c->c2.frame),
-		      print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
-		      print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
-		      "init",
-		      signal_description (c->sig->signal_received,
-					  c->sig->signal_text),
-		      "down",
-		      c->c2.es);
+	  run_up_down (c->options.down_script,
+		       c->c1.plugins,
+		       PLUGIN_DOWN,
+		       tuntap_actual,
+		       TUN_MTU_SIZE (&c->c2.frame),
+		       EXPANDED_SIZE (&c->c2.frame),
+		       print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
+		       print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
+		       "init",
+		       signal_description (c->sig->signal_received,
+					   c->sig->signal_text),
+		       "down",
+		       c->c2.es);
 
 	  /* actually close tun/tap device based on --down-pre flag */
 	  if (c->options.down_pre)
@@ -817,17 +823,19 @@ do_close_tun (struct context *c, bool force)
 	{
 	  /* run the down script on this restart if --up-restart was specified */
 	  if (c->options.up_restart)
-	    run_script (c->options.down_script,
-			tuntap_actual,
-			TUN_MTU_SIZE (&c->c2.frame),
-			EXPANDED_SIZE (&c->c2.frame),
-			print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
-			print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
-			"restart",
-			signal_description (c->sig->signal_received,
-					    c->sig->signal_text),
-			"down",
-			c->c2.es);
+	    run_up_down (c->options.down_script,
+			 c->c1.plugins,
+			 PLUGIN_DOWN,
+			 tuntap_actual,
+			 TUN_MTU_SIZE (&c->c2.frame),
+			 EXPANDED_SIZE (&c->c2.frame),
+			 print_in_addr_t (local, IA_EMPTY_IF_UNDEF, &gc),
+			 print_in_addr_t (remote_netmask, IA_EMPTY_IF_UNDEF, &gc),
+			 "restart",
+			 signal_description (c->sig->signal_received,
+					     c->sig->signal_text),
+			 "down",
+			 c->c2.es);
 	}
     }
   gc_free (&gc);
@@ -1208,6 +1216,7 @@ do_init_crypto_tls (struct context *c, const unsigned int flags)
   to.crl_file = options->crl_file;
   to.es = c->c2.es;
   to.gremlin = c->options.gremlin;
+  to.plugins = c->c1.plugins;
 
 #if P2MP
   to.auth_user_pass_verify_script = options->auth_user_pass_verify_script;
@@ -1364,6 +1373,12 @@ do_option_warnings (struct context *c)
 {
   const struct options *o = &c->options;
 
+#if 1 // JYFIXME -- port warning
+  if (!o->port_option_used && (o->local_port == OPENVPN_PORT && o->remote_port == OPENVPN_PORT))
+    msg (M_WARN, "IMPORTANT: OpenVPN's default port number is now %d, based on an official port number assignment by IANA.  OpenVPN 2.0-beta16 and earlier used 5000 as the default port.",
+	 OPENVPN_PORT);
+#endif
+
   if (o->ping_send_timeout && !o->ping_rec_timeout)
     msg (M_WARN, "WARNING: --ping should normally be used with --ping-restart or --ping-exit");
 
@@ -1514,6 +1529,7 @@ do_init_socket_1 (struct context *c, int mode)
 			   c->options.inetd,
 			   &c->c1.link_socket_addr,
 			   c->options.ipchange,
+			   c->c1.plugins,
 			   c->options.resolve_retry_seconds,
 			   c->options.connect_retry_seconds,
 			   c->options.mtu_discover_type,
@@ -1882,6 +1898,32 @@ do_signal_on_tls_errors (struct context *c)
 #endif
 }
 
+
+void
+do_open_plugins (struct context *c)
+{
+#ifdef ENABLE_PLUGIN
+  if (c->options.plugin_list && !c->c1.plugins)
+    {
+      c->c1.plugins = plugin_list_open (c->options.plugin_list, c->c2.es);
+      c->c1.plugins_owned = true;
+    }
+#endif
+}
+
+void
+do_close_plugins (struct context *c)
+{
+#ifdef ENABLE_PLUGIN
+  if (c->c1.plugins && c->c1.plugins_owned && !(c->sig->signal_received == SIGUSR1))
+    {
+      plugin_list_close (c->c1.plugins);
+      c->c1.plugins = NULL;
+      c->c1.plugins_owned = false;
+    }
+#endif
+}
+
 /*
  * Initialize a tunnel instance.
  */
@@ -1937,6 +1979,10 @@ init_instance (struct context *c, const struct env_set *env, unsigned int flags)
   /* inherit environmental variables */
   if (env)
     do_inherit_env (c, env);
+
+  /* initialize plugins */
+  if (c->mode == CM_P2P || c->mode == CM_TOP)
+    do_open_plugins (c);
 
   /* should we enable fast I/O? */
   if (c->mode == CM_P2P || c->mode == CM_TOP)
@@ -2092,6 +2138,9 @@ close_instance (struct context *c)
 	/* close TUN/TAP device */
 	do_close_tun (c, false);
 
+	/* call plugin close functions and unload */
+	do_close_plugins (c);
+
 	/* close packet-id persistance file */
 	do_close_packet_id (c);
 
@@ -2161,6 +2210,9 @@ inherit_context_child (struct context *dest,
        */
       dest->c2.accept_from = src->c2.link_socket;
     }
+
+  /* inherit plugins */
+  dest->c1.plugins = src->c1.plugins;
 
   /* context init */
   init_instance (dest, src->c2.es, CC_USR1_TO_HUP | CC_GC_FREE);

@@ -34,6 +34,9 @@
 /* socket descriptor passed by inetd/xinetd server to us */
 #define INETD_SOCKET_DESCRIPTOR 0
 
+/* forward declarations */
+struct plugin_list;
+
 /*
  * Handle environmental variable lists
  */
@@ -79,16 +82,18 @@ void set_group (const struct group_state *state);
 void set_nice (int niceval);
 void do_chroot (const char *path);
 
-void run_script (const char *command,
-		 const char *arg,
-		 int tun_mtu,
-		 int link_mtu,
-		 const char *ifconfig_local,
-		 const char* ifconfig_remote,
-		 const char *context,
-		 const char *signal_text,
-		 const char *script_type,
-		 struct env_set *es);
+void run_up_down (const char *command,
+		  const struct plugin_list *plugins,
+		  int plugin_type,
+		  const char *arg,
+		  int tun_mtu,
+		  int link_mtu,
+		  const char *ifconfig_local,
+		  const char* ifconfig_remote,
+		  const char *context,
+		  const char *signal_text,
+		  const char *script_type,
+		  struct env_set *es);
 
 /* workspace for get_pid_file/write_pid */
 struct pid_state {
@@ -170,6 +175,11 @@ void env_set_inherit (struct env_set *es, const struct env_set *src);
 
 void env_set_add_to_environment (const struct env_set *es);
 void env_set_remove_from_environment (const struct env_set *es);
+
+/* Make arrays of strings */
+
+const char **make_env_array (const struct env_set *es, struct gc_arena *gc);
+const char **make_arg_array (const char *first, const char *parms, struct gc_arena *gc);
 
 /* convert netmasks for iproute2 */
 int count_netmask_bits(const char *);

@@ -37,6 +37,8 @@
 #include "error.h"
 #include "thread.h"
 #include "otime.h"
+#include "plugin.h"
+#include "options.h"
 
 #include "memdbg.h"
 
@@ -157,18 +159,23 @@ set_nice (int niceval)
     }
 }
 
-/* Pass tunnel endpoint and MTU parms to a user-supplied script */
+/*
+ * Pass tunnel endpoint and MTU parms to a user-supplied script.
+ * Used to execute the up/down script/plugins.
+ */
 void
-run_script (const char *command,
-	    const char *arg,
-	    int tun_mtu,
-	    int link_mtu,
-	    const char *ifconfig_local,
-	    const char* ifconfig_remote,
-	    const char *context,
-	    const char *signal_text,
-	    const char *script_type,
-	    struct env_set *es)
+run_up_down (const char *command,
+	     const struct plugin_list *plugins,
+	     int plugin_type,
+	     const char *arg,
+	     int tun_mtu,
+	     int link_mtu,
+	     const char *ifconfig_local,
+	     const char* ifconfig_remote,
+	     const char *context,
+	     const char *signal_text,
+	     const char *script_type,
+	     struct env_set *es)
 {
   struct gc_arena gc = gc_new ();
 
@@ -179,18 +186,35 @@ run_script (const char *command,
   setenv_int (es, "link_mtu", link_mtu);
   setenv_str (es, "dev", arg);
 
-  if (command)
+  if (!ifconfig_local)
+    ifconfig_local = "";
+  if (!ifconfig_remote)
+    ifconfig_remote = "";
+  if (!context)
+    context = "";
+
+  if (plugin_defined (plugins, plugin_type))
     {
-      struct buffer cmd = alloc_buf_gc (512, &gc);
+      struct buffer cmd = alloc_buf_gc (256, &gc);
 
       ASSERT (arg);
 
-      if (!ifconfig_local)
-	ifconfig_local = "";
-      if (!ifconfig_remote)
-	ifconfig_remote = "";
-      if (!context)
-	context = "";
+      buf_printf (&cmd,
+		  "%s %d %d %s %s %s",
+		  arg,
+		  tun_mtu, link_mtu,
+		  ifconfig_local, ifconfig_remote,
+		  context);
+
+      if (plugin_call (plugins, plugin_type, BSTR (&cmd), es))
+	msg (M_FATAL, "ERROR: up/down plugin call failed");
+    }
+
+  if (command)
+    {
+      struct buffer cmd = alloc_buf_gc (256, &gc);
+
+      ASSERT (arg);
 
       setenv_str (es, "script_type", script_type);
 
@@ -454,7 +478,7 @@ system_executed (int stat)
 const char *
 system_error_message (int stat, struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (512, gc);
+  struct buffer out = alloc_buf_gc (256, gc);
 #ifdef WIN32
   if (stat == -1)
     buf_printf (&out, "shell command did not execute -- ");
@@ -629,6 +653,7 @@ remove_env_item (const char *str, const bool do_free, struct env_item **list)
 	    *list = current->next;
 	  if (do_free)
 	    {
+	      memset (current->string, 0, strlen (current->string));
 	      free (current->string);
 	      free (current);
 	    }
@@ -674,7 +699,7 @@ env_set_create (struct gc_arena *gc)
   struct env_set *es;
   ASSERT (gc);
   mutex_lock_static (L_ENV_SET);
-  ALLOC_OBJ_GC (es, struct env_set, gc);
+  ALLOC_OBJ_CLEAR_GC (es, struct env_set, gc);
   es->list = NULL;
   es->gc = gc;
   mutex_unlock_static (L_ENV_SET);
@@ -1204,4 +1229,66 @@ const char *
 safe_print (const char *str, struct gc_arena *gc)
 {
   return string_mod_const (str, CC_PRINT, CC_CRLF, '.', gc);
+}
+
+/* Make arrays of strings */
+
+const char **
+make_env_array (const struct env_set *es, struct gc_arena *gc)
+{
+  char **ret = NULL;
+  struct env_item *e = NULL;
+  int i = 0, n = 0;
+
+  /* figure length of es */
+  if (es)
+    {
+      for (e = es->list; e != NULL; e = e->next)
+	++n;
+    }
+
+  /* alloc return array */
+  ALLOC_ARRAY_CLEAR_GC (ret, char *, n+1, gc);
+
+  /* fill return array */
+  if (es)
+    {
+      e = es->list;
+      for (i = 0; i < n; ++i)
+	{
+	  ASSERT (e);
+	  ret[i] = e->string;
+	  e = e->next;
+	}
+    }
+
+  ret[i] = NULL;
+  return (const char **)ret;
+}
+
+const char **
+make_arg_array (const char *first, const char *parms, struct gc_arena *gc)
+{
+  char **ret = NULL;
+  int base = 0;
+  const int max_parms = MAX_PARMS + 2;
+  int n = 0;
+
+  /* alloc return array */
+  ALLOC_ARRAY_CLEAR_GC (ret, char *, max_parms, gc);
+
+  /* process first parameter, if provided */
+  if (first)
+    {
+      ret[base++] = string_alloc (first, gc);
+    }
+
+  if (parms)
+    {
+      n = parse_line (parms, &ret[base], max_parms - base - 1, "make_arg_array", 0, M_WARN, gc);
+      ASSERT (n >= 0 && n + base + 1 <= max_parms);
+    }
+  ret[base + n] = NULL;
+
+  return (const char **)ret;
 }

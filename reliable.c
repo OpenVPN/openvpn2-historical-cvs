@@ -300,7 +300,7 @@ reliable_send_purge (struct reliable *rel, struct reliable_ack *ack)
 static const char *
 reliable_print_ids (const struct reliable *rel, struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (512, gc);
+  struct buffer out = alloc_buf_gc (256, gc);
   int i;
 
   buf_printf (&out, "[" packet_id_format "]", (packet_id_print_type)rel->packet_id);

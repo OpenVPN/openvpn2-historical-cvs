@@ -118,6 +118,10 @@
 #include <grp.h>
 #endif
 
+#ifdef USE_LIBDL
+#include <dlfcn.h>
+#endif
+
 #ifdef HAVE_NETDB_H
 #include <netdb.h>
 #endif
@@ -346,6 +350,13 @@ typedef int socket_descriptor_t;
 #define P2MP 1
 #else
 #define P2MP 0
+#endif
+
+/*
+ * Do we have a plug-in capability?
+ */
+#if defined(USE_LIBDL) || defined(USE_LOAD_LIBRARY)
+#define ENABLE_PLUGIN
 #endif
 
 /*

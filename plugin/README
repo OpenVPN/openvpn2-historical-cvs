@@ -1,0 +1,57 @@
+Starting with OpenVPN 2.0-beta17, compiled plugin modules are
+supported any *nix OS which includes libdl or on Windows.
+One or more modules may be loaded into OpenVPN using
+the --plugin directive, and each plugin module is capable of
+intercepting any of the script callbacks which OpenVPN supports:
+
+(1) up
+(2) down
+(3) route-up
+(4) ipchange
+(5) tls-verify
+(6) auth-user-pass-verify
+(7) client-connect
+(8) client-disconnect
+(9) learn-address
+
+See the openvpn-plugin.h file in the top-level directory of the
+OpenVPN source distribution for more detailed information
+on the plugin interface.
+
+Each module must define three functions:
+
+int plugin_open_v1 (unsigned int *type_mask, const char *argv[], const char *envp[]);
+int plugin_func_v1 (const int type, const char *argv[], const char *envp[]);
+void plugin_close_v1 (void);
+
+In a nutshell, the open function is called on initial module
+load and is passed an initialization string parameter from
+the OpenVPN config file.  The open function decides which
+script callbacks it wants to intercept, and should return
+the chosen set in the type_mask bitmap.
+
+The func function is called for all script types for which the
+open function indicated interest by setting the appropriate
+bits in type_mask.
+
+The close function is called prior to module unload.
+
+The open and func functions should return 0 on success and
+1 on error.
+
+OpenVPN-set environmental variables are passed through the envp
+string array rather than the actual process environment.  This
+is to avoid any security issues on OSes which consider process
+environmental variables to be public information.
+
+Multiple modules can be cascaded, and modules can be used
+in tandem with scripts.  The order of operation is that
+the module func functions are called in the order that
+the modules were specified in the config file.  If a script
+was specified as well, it will be called last.  If the
+return code of the module/script controls an authentication
+function (such as tls-verify or auth-user-pass-verify), then
+every module and script must return success (0) in order for
+the connection to be authenticated.
+
+See the plugin/example folder for sample modules.

@@ -44,6 +44,7 @@
 #include "misc.h"
 #include "mbuf.h"
 #include "pool.h"
+#include "plugin.h"
 
 /*
  * Our global key schedules, packaged thusly
@@ -149,10 +150,11 @@ struct context_1
 
   /* SOCKS proxy object */
   struct socks_proxy_info *socks_proxy;
-  
-  /* work thread object */
-  struct work_thread *work_thread;
 
+  /* shared object plugins */
+  struct plugin_list *plugins;
+  bool plugins_owned;
+  
 #if P2MP
   /* if client mode, option strings we pulled from server */
   char *pulled_options_string_save;

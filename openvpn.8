@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "15 October 2004"
+.TH openvpn 8 "10 November 2004"
 .\"*********************************************************
 .SH NAME
 openvpn \- secure IP tunnel daemon.
@@ -193,6 +193,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-ping\-timer\-rem\fR\ ]
 [\ \fB\-\-ping\fR\ \fIn\fR\ ]
 [\ \fB\-\-pkcs12\fR\ \fIfile\fR\ ]
+[\ \fB\-\-plugin\fR\ \fImodule\-pathname\ init\-string\fR\ ]
 [\ \fB\-\-port\fR\ \fIport\fR\ ]
 [\ \fB\-\-proto\fR\ \fIp\fR\ ]
 [\ \fB\-\-pull\fR\ ]
@@ -650,15 +651,18 @@ peer on its new IP address.
 .\"*********************************************************
 .TP
 .B --port port
-TCP/UDP port number for both local and remote.
+TCP/UDP port number for both local and remote.  The current
+default of 1194 represents the official IANA port number
+assignment for OpenVPN and has been used since version 2.0-beta17.
+Previous versions used port 5000 as the default.
 .\"*********************************************************
 .TP
 .B --lport port
-TCP/UDP port number for local (default=5000).
+TCP/UDP port number for local.
 .\"*********************************************************
 .TP
 .B --rport port
-TCP/UDP port number for remote (default=5000).
+TCP/UDP port number for remote.
 .\"*********************************************************
 .TP
 .B --nobind
@@ -1947,6 +1951,22 @@ efficiency.  If the data being sent over the tunnel is already compressed,
 the compression efficiency will be very low, triggering openvpn to disable
 compression for a period of time until the next re-sample test.
 .\"*********************************************************
+.TP
+.B --plugin module-pathname [init-string]
+Load plug-in module from the file
+.B module-pathname,
+passing
+.B init-string
+as an argument
+to the module initialization function.  Multiple
+plugin modules may be loaded into one OpenVPN
+process.
+
+For more information and examples on how to build OpenVPN
+plug-in modules, see the
+.B plugin
+folder in the OpenVPN source distribution.
+.\"*********************************************************
 .SS Server Mode
 Starting with OpenVPN 2.0, a multi-client TCP/UDP server mode
 is supported, and can be enabled with the
@@ -2457,6 +2477,11 @@ the script returns.  The location of the temporary file is
 controlled by the
 .B --tmp-dir
 option, and will default to the current directory if unspecified.
+For security, consider setting 
+.B --tmp-dir
+to a volatile storage medium such as
+.B /dev/shm
+(if available) to prevent the username/password file from touching the hard drive.
 
 The script should examine the username
 and password,
@@ -4337,7 +4362,7 @@ for more information.
 .\"*********************************************************
 .SS Firewall Setup:
 If firewalls exist between
-the two machines, they should be set to forward UDP port 5000
+the two machines, they should be set to forward UDP port 1194
 in both directions.  If you do not have control over the firewalls
 between the two machines, you may still be able to use OpenVPN by adding
 .B --ping 15
@@ -4562,9 +4587,9 @@ OpenVPN's usage of a single UDP port makes it fairly firewall-friendly.
 You should add an entry to your firewall rules to allow incoming OpenVPN
 packets.  On Linux 2.4+:
 .IP
-.B iptables -A INPUT -p udp -s 1.2.3.4 --dport 5000 -j ACCEPT
+.B iptables -A INPUT -p udp -s 1.2.3.4 --dport 1194 -j ACCEPT
 .LP
-This will allow incoming packets on UDP port 5000 (OpenVPN's default UDP port)
+This will allow incoming packets on UDP port 1194 (OpenVPN's default UDP port)
 from an OpenVPN peer at 1.2.3.4.
 
 If you are using HMAC-based packet authentication (the default in any of
@@ -4573,7 +4598,7 @@ address can be considered optional, since HMAC packet authentication
 is a much more secure method of verifying the authenticity of
 a packet source.  In that case:
 .IP
-.B iptables -A INPUT -p udp --dport 5000 -j ACCEPT
+.B iptables -A INPUT -p udp --dport 1194 -j ACCEPT
 .LP
 would be adequate and would not render the host inflexible with
 respect to its peer having a dynamic IP address.

@@ -670,9 +670,9 @@ tunnel_server_tcp (struct context *top)
   multi_ifconfig_pool_persist (&multi, true);
 
   /* tear down tunnel instance (unless --persist-tun) */
+  multi_uninit (&multi);
   multi_top_free (&multi);
   close_instance (top);
-  multi_uninit (&multi);
 }
 
 #endif

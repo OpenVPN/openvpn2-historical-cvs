@@ -37,6 +37,11 @@
 #include "socks.h"
 
 /*
+ * OpenVPN's default port number as assigned by IANA.
+ */
+#define OPENVPN_PORT 1194
+
+/*
  * Number of seconds that "resolv-retry infinite"
  * represents.
  */
@@ -84,6 +89,7 @@ struct link_socket_info
   struct link_socket_addr *lsa;
   bool connection_established;
   const char *ipchange_command;
+  const struct plugin_list *plugins;
   bool remote_float;  
   int proto;                    /* Protocol (PROTO_x defined below) */
   int mtu_changed;              /* Set to true when mtu value is changed */
@@ -248,6 +254,7 @@ link_socket_init_phase1 (struct link_socket *sock,
 			 int inetd,
 			 struct link_socket_addr *lsa,
 			 const char *ipchange_command,
+			 const struct plugin_list *plugins,
 			 int resolve_retry_seconds,
 			 int connect_retry_seconds,
 			 int mtu_discover_type,

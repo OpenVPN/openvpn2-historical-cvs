@@ -36,6 +36,7 @@
 #include "route.h"
 #include "tun.h"
 #include "socket.h"
+#include "plugin.h"
 
 /*
  * Maximum number of parameters associated with an option,
@@ -103,6 +104,7 @@ struct options
   int local_port;
   bool local_port_defined;
   int remote_port;
+  bool port_option_used;
   bool remote_float;
   struct remote_list *remote_list;
   bool remote_random;
@@ -233,6 +235,10 @@ struct options
 
   /* Enable options consistency check between peers */
   bool occ;
+
+#ifdef ENABLE_PLUGIN
+  struct plugin_option_list *plugin_list;
+#endif
 
 #ifdef USE_PTHREAD
   int n_threads;
@@ -414,6 +420,12 @@ struct options
 #define SHAPER_DEFINED(opt) (false)
 #endif
 
+#ifdef ENABLE_PLUGIN
+#define PLUGIN_OPTION_LIST(opt) ((opt)->plugin_list)
+#else
+#define PLUGIN_OPTION_LIST(opt) (NULL)
+#endif
+
 void parse_argv (struct options* options,
 		 int argc,
 		 char *argv[],
@@ -474,6 +486,6 @@ void pre_pull_default (struct options *o);
 
 void rol_check_alloc (struct options *options);
 
-int parse_line (char *line, char *p[], int n, const char *file, int line_num, int msglevel, struct gc_arena *gc);
+int parse_line (const char *line, char *p[], int n, const char *file, int line_num, int msglevel, struct gc_arena *gc);
 
 #endif

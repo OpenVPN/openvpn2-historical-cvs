@@ -63,11 +63,13 @@ openvpn_SOURCES = \
         ntlm.c ntlm.h \
 	occ.c occ.h occ-inline.h \
 	openvpn.c openvpn.h \
+	openvpn-plugin.h \
 	options.c options.h \
 	otime.c otime.h \
 	packet_id.c packet_id.h \
 	perf.c perf.h \
 	ping.c ping.h ping-inline.h \
+	plugin.c plugin.h \
 	pool.c pool.h \
 	proto.h \
 	proxy.c proxy.h \
@@ -115,7 +117,8 @@ EXTRA_DIST = \
 	install-win32 \
 	service-win32 \
 	contrib \
-	debug
+	debug \
+	plugin
 
 dist-hook:
 	cd $(distdir) && for i in $(EXTRA_DIST) ; do find $$i -name CVS -type d -prune -exec rm -r '{}' ';' ; rm -f `find $$i -type f | grep -E '(^|\/)\.?\#|\~$$'` ; done

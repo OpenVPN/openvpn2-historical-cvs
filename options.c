@@ -249,6 +249,10 @@ static const char usage_message[] =
   "--comp-noadapt  : Don't use adaptive compression when --comp-lzo\n"
   "                  is specified.\n"
 #endif
+#ifdef ENABLE_PLUGIN
+  "--plugin m [str]: Load plug-in module m passing str as an argument\n"
+  "                  to its initialization function.\n"
+#endif
 #if P2MP
   "\n"
   "Multi-Client Server options (when --mode server is used):\n"
@@ -477,7 +481,7 @@ init_options (struct options *o)
   o->mode = MODE_POINT_TO_POINT;
   o->proto = PROTO_UDPv4;
   o->connect_retry_seconds = 5;
-  o->local_port = o->remote_port = 5000;
+  o->local_port = o->remote_port = OPENVPN_PORT;
   o->verbosity = 1;
   o->status_file_update_freq = 60;
   o->status_file_version = 1;
@@ -950,6 +954,11 @@ show_settings (const struct options *o)
   if (o->routes)
     print_route_options (o->routes, D_SHOW_PARMS);
 
+#ifdef ENABLE_PLUGIN
+  if (o->plugin_list)
+    plugin_option_list_print (o->plugin_list, D_SHOW_PARMS);
+#endif
+
 #ifdef USE_CRYPTO
   SHOW_STR (shared_secret_file);
   SHOW_INT (key_direction);
@@ -1265,14 +1274,18 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --up-delay cannot be used with --mode server");
       if (!options->ifconfig_pool_defined && options->ifconfig_pool_persist_filename)
 	msg (M_USAGE, "Options error: --ifconfig-pool-persist must be used with --ifconfig-pool");
-      if (options->client_cert_not_required && !options->auth_user_pass_verify_script)
-	msg (M_USAGE, "Options error: --client-cert-not-required must be used with an --auth-user-pass-verify script");
-      if (options->username_as_common_name && !options->auth_user_pass_verify_script)
-	msg (M_USAGE, "Options error: --username-as-common-name must be used with an --auth-user-pass-verify script");
       if (options->auth_user_pass_file)
 	msg (M_USAGE, "Options error: --auth-user-pass cannot be used with --mode server (it should be used on the client side only)");
       if (options->ccd_exclusive && !options->client_config_dir)
 	msg (M_USAGE, "Options error: --ccd-exclusive must be used with --client-config-dir");
+
+      if (PLUGIN_OPTION_LIST (options) == NULL)
+	{
+	  if (options->client_cert_not_required && !options->auth_user_pass_verify_script)
+	    msg (M_USAGE, "Options error: --client-cert-not-required must be used with an --auth-user-pass-verify script");
+	  if (options->username_as_common_name && !options->auth_user_pass_verify_script)
+	    msg (M_USAGE, "Options error: --username-as-common-name must be used with an --auth-user-pass-verify script");
+	}
 
 #ifdef WIN32
       /*
@@ -1892,7 +1905,7 @@ space (char c)
 }
 
 int
-parse_line (char *line, char *p[], int n, const char *file, int line_num, int msglevel, struct gc_arena *gc)
+parse_line (const char *line, char *p[], int n, const char *file, int line_num, int msglevel, struct gc_arena *gc)
 {
   const int STATE_INITIAL = 0;
   const int STATE_READING_QUOTED_PARM = 1;
@@ -1900,7 +1913,7 @@ parse_line (char *line, char *p[], int n, const char *file, int line_num, int ms
   const int STATE_DONE = 3;
 
   int ret = 0;
-  char *c = line;
+  const char *c = line;
   int state = STATE_INITIAL;
   bool backslash = false;
   char in, out;
@@ -2238,6 +2251,22 @@ add_option (struct options *options,
 	}
       msg (M_INFO, "ECHO:%s", BSTR (&string));
     }
+#ifdef ENABLE_PLUGIN
+  else if (streq (p[0], "plugin") && p[1])
+    {
+      VERIFY_PERMISSION (OPT_P_SCRIPT);
+      ++i;
+      if (p[2])
+	++i;
+      if (!options->plugin_list)
+	options->plugin_list = plugin_option_list_new (&options->gc);
+      if (!plugin_option_list_add (options->plugin_list, p[1], p[2]))
+	{
+	  msg (msglevel, "Options error: plugin add failed: %s", p[1]);
+	  goto err;
+	}
+    }
+#endif
   else if (streq (p[0], "mode") && p[1])
     {
       ++i;
@@ -2677,6 +2706,7 @@ add_option (struct options *options,
       ++i;
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->local_port = options->remote_port = atoi (p[1]);
+      options->port_option_used = true;
       if (!legal_ipv4_port (options->local_port))
 	{
 	  msg (msglevel, "Options error: Bad port number: %s", p[1]);
@@ -2689,6 +2719,7 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->local_port = atoi (p[1]);
       options->local_port_defined = true;
+      options->port_option_used = true;
       if (!legal_ipv4_port (options->local_port))
 	{
 	  msg (msglevel, "Options error: Bad local port number: %s", p[1]);
@@ -2700,6 +2731,7 @@ add_option (struct options *options,
       ++i;
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->remote_port = atoi (p[1]);
+      options->port_option_used = true;
       if (!legal_ipv4_port (options->remote_port))
 	{
 	  msg (msglevel, "Options error: Bad remote port number: %s", p[1]);

@@ -662,7 +662,7 @@ configs:
   iptables -A INPUT -i tap+ -j ACCEPT
 
 * Make sure that both boxes can talk to each other
-  over UDP port 5000.  It is a good idea to
+  over UDP port 1194.  It is a good idea to
   ping the "remote" address in the config
   file before actually starting OpenVPN
   to confirm that it is reachable.
@@ -1166,7 +1166,7 @@ on a Windows system running OpenVPN are:
 (3) If you are running OpenVPN as a server on a Windows
     machine, you will need to configure your firewall
     to allow incoming clients to connect to OpenVPN's
-    port number which is UDP 5000 by default.
+    port number which is UDP 1194 by default.
 (4) In general, running OpenVPN as a client doesn't
     require any special firewall configuration,
     provided you use the --ping option to preserve

@@ -124,7 +124,6 @@ struct multi_context {
   struct mroute_helper *route_helper;
   struct multi_reap *reaper;
   struct mroute_addr local;
-  const char *learn_address_script;
   bool enable_c2c;
   int max_clients;
   int tcp_queue_limit;

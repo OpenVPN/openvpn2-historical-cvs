@@ -63,6 +63,7 @@ void init_instance (struct context *c, const struct env_set *env, unsigned int f
 void do_route (const struct options *options,
 	       struct route_list *route_list,
 	       const struct tuntap *tt,
+	       const struct plugin_list *plugins,
 	       struct env_set *es);
 
 void close_instance (struct context *c);

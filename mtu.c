@@ -203,8 +203,8 @@ format_extended_socket_error (int fd, int *mtu, struct gc_arena *gc)
   struct cmsghdr *cmsg;
   struct sock_extended_err *e;
   struct sockaddr_in addr;
-  struct buffer out = alloc_buf_gc (512, gc);
-  char *cbuf = (char *) gc_malloc (512, false, gc);
+  struct buffer out = alloc_buf_gc (256, gc);
+  char *cbuf = (char *) gc_malloc (256, false, gc);
 
   *mtu = 0;
 
@@ -219,7 +219,7 @@ format_extended_socket_error (int fd, int *mtu, struct gc_arena *gc)
       msg.msg_iovlen = 1;
       msg.msg_flags = 0;
       msg.msg_control = cbuf;
-      msg.msg_controllen = 512; /* size of cbuf */
+      msg.msg_controllen = 256; /* size of cbuf */
 
       res = recvmsg (fd, &msg, MSG_ERRQUEUE);
       if (res < 0)

@@ -308,6 +308,8 @@ int tun_read_queue (struct tuntap *tt, int maxsize);
 int tun_write_queue (struct tuntap *tt, struct buffer *buf);
 int tun_finalize (HANDLE h, struct overlapped_io *io, struct buffer *buf);
 
+const char *get_netsh_id (const char *dev_node, struct gc_arena *gc);
+
 static inline bool
 tuntap_stop (int status)
 {

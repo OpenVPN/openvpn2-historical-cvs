@@ -36,6 +36,7 @@
 #include "thread.h"
 #include "misc.h"
 #include "gremlin.h"
+#include "plugin.h"
 
 #include "memdbg.h"
 
@@ -85,9 +86,9 @@ getaddr (unsigned int flags,
       && !signal_received)
     signal_received = &sigrec;
 
-  status = inet_aton (hostname, &ia);
+  status = inet_aton (hostname, &ia); /* parse ascii IP address */
 
-  if (!status)
+  if (!status) /* parse as IP address failed? */
     {
       const int fail_wait_interval = 5; /* seconds */
       int resolve_retries = resolve_retry_seconds / fail_wait_interval;
@@ -119,8 +120,17 @@ getaddr (unsigned int flags,
 	  if (signal_received)
 	    {
 	      get_signal (signal_received);
-	      if (*signal_received)
-	        goto done;
+	      if (*signal_received) /* were we interrupted by a signal? */
+		{
+		  h = NULL;
+		  if (*signal_received == SIGUSR1) /* ignore SIGUSR1 */
+		    {
+		      msg (level, "RESOLVE: Ignored SIGUSR1 signal received during DNS resolution attempt");
+		      *signal_received = 0;
+		    }
+		  else
+		    goto done;
+		}
 	    }
 
 	  /* success? */
@@ -807,6 +817,7 @@ link_socket_init_phase1 (struct link_socket *sock,
 			 int inetd,
 			 struct link_socket_addr *lsa,
 			 const char *ipchange_command,
+			 const struct plugin_list *plugins,
 			 int resolve_retry_seconds,
 			 int connect_retry_seconds,
 			 int mtu_discover_type,
@@ -842,6 +853,7 @@ link_socket_init_phase1 (struct link_socket *sock,
   sock->info.remote_float = remote_float;
   sock->info.lsa = lsa;
   sock->info.ipchange_command = ipchange_command;
+  sock->info.plugins = plugins;
 
   sock->mode = mode;
   if (mode == LS_MODE_TCP_ACCEPT_FROM)
@@ -1192,16 +1204,25 @@ link_socket_connection_initiated (const struct buffer *buf,
     msg (M_INFO, "%s", BSTR (&out));
   }
 
+  /* set environmental vars */
+  setenv_str (es, "common_name", common_name);
+
+  /* Process --ipchange plugin */
+  if (plugin_defined (info->plugins, PLUGIN_IPCHANGE))
+    {
+      const char *addr_ascii = print_sockaddr_ex (&info->lsa->actual, true, " ", &gc);
+      if (plugin_call (info->plugins, PLUGIN_IPCHANGE, addr_ascii, es))
+	msg (M_WARN, "WARNING: ipchange plugin call failed");
+    }
+
   /* Process --ipchange option */
   if (info->ipchange_command)
     {
-      struct buffer out = alloc_buf_gc (512, &gc);
+      struct buffer out = alloc_buf_gc (256, &gc);
       setenv_str (es, "script_type", "ipchange");
-      setenv_str (es, "common_name", common_name);
       buf_printf (&out, "%s %s",
 		  info->ipchange_command,
 		  print_sockaddr_ex (&info->lsa->actual, true, " ", &gc));
-      msg (D_TLS_DEBUG, "executing ip-change command: %s", BSTR (&out));
       system_check (BSTR (&out), es, S_SCRIPT, "ip-change command failed");
     }
 

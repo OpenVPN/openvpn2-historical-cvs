@@ -147,6 +147,7 @@
 #define D_REGISTRY           LOGLEV(11, 70, M_DEBUG) /* win32 registry debugging info */
 #define D_OPENSSL_LOCK       LOGLEV(11, 70, M_DEBUG) /* show OpenSSL locks */
 
+#define D_PLUGIN             LOGLEV(4, 70, M_DEBUG)  /* JYFIXME -- show plugin calls */
 #define D_THREAD_DEBUG       LOGLEV(4, 70, M_DEBUG)  /* JYFIXME -- show pthread debug information */
 
 

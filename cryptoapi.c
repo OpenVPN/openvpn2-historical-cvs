@@ -285,13 +285,10 @@ static const CERT_CONTEXT *find_certificate_in_store(const char *cert_prop, HCER
     const CERT_CONTEXT *rv = NULL;
 
     if (!strncmp(cert_prop, "SUBJ:", 5)) {
-        unsigned short wbuf[255];
-
 	/* skip the tag */
 	cert_prop += 5;
-	MultiByteToWideChar(CP_ACP, 0, cert_prop, -1, wbuf, sizeof(wbuf));
 	rv = CertFindCertificateInStore(cert_store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-		0, CERT_FIND_SUBJECT_STR, wbuf, NULL);
+		0, CERT_FIND_SUBJECT_STR_A, cert_prop, NULL);
 
     } else if (!strncmp(cert_prop, "THUMB:", 6)) {
 	unsigned char hash[255];

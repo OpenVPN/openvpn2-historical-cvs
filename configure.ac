@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [2.0_beta16], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [2.0_beta17], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -51,6 +51,12 @@ AC_ARG_ENABLE(pthread,
    [  --enable-pthread        Compile pthread support],
    [PTHREAD="$enableval"],
    [PTHREAD="no"]
+)
+
+AC_ARG_ENABLE(plugins,
+   [  --disable-plugins       Disable plug-in support],
+   [PLUGINS="$enableval"],
+   [PLUGINS="yes"]
 )
 
 AC_ARG_ENABLE(multi,
@@ -375,6 +381,23 @@ if test "$MEMCHECK" = "dmalloc"; then
 	    [AC_MSG_ERROR([dmalloc library not found.])]
 	)],
         [AC_MSG_ERROR([dmalloc headers not found.])]
+   )
+fi
+
+dnl
+dnl Check for libdl library
+dnl
+if test "$PLUGINS" = "yes"; then
+   AC_CHECKING([for libdl Library and Header files])
+   AC_CHECK_HEADER(dlfcn.h, 
+        [AC_CHECK_LIB(dl, dlopen,
+	    [
+               OPENVPN_ADD_LIBS(-ldl)
+	       AC_DEFINE(USE_LIBDL, 1, [Use libdl for dynamic library loading])
+	    ],
+	    [AC_MSG_RESULT([libdl library not found.])]
+	)],
+        [AC_MSG_RESULT([libdl headers not found.])]
    )
 fi
 

@@ -43,7 +43,8 @@
 #define L_ENV_SET      8
 #define L_SYSTEM       9
 #define L_CREATE_TEMP  10
-#define N_MUTEXES      11
+#define L_PLUGIN       11
+#define N_MUTEXES      12
 
 #ifdef USE_PTHREAD
 
@@ -163,8 +164,17 @@ void openvpn_thread_join (openvpn_thread_t id);
 
 typedef int openvpn_thread_t;
 
+#ifdef _MSC_VER
+
+#define MUTEX_DEFINE(lock) int eat_semicolon
+#define MUTEX_PTR_DEFINE(lock) int eat_semicolon
+
+#else
+
 #define MUTEX_DEFINE(lock)
 #define MUTEX_PTR_DEFINE(lock)
+
+#endif
 
 #define mutex_init(m)
 #define mutex_destroy(m)

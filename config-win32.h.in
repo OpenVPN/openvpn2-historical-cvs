@@ -66,6 +66,9 @@ typedef unsigned long in_addr_t;
 /* Enable multiclient server capability */
 #define MULTICLIENT_SERVER_ENABLED 1
 
+/* if defined, will allow usage of the --plugin directive */
+#define USE_LOAD_LIBRARY
+
 /* Dimension size to use for empty array declaration */
 #define EMPTY_ARRAY_SIZE 0
 

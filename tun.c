@@ -121,7 +121,6 @@ guess_tuntap_dev (const char *dev,
   const int dt = dev_type_enum (dev, dev_type);
   if (dt == DEV_TYPE_TUN || dt == DEV_TYPE_TAP)
     {
-      static const char *get_netsh_id (const char *dev_node, struct gc_arena *gc);
       return get_netsh_id (dev_node, gc);
     }
 #endif
@@ -503,7 +502,7 @@ do_ifconfig (struct tuntap *tt,
       const char *ifconfig_local = NULL;
       const char *ifconfig_remote_netmask = NULL;
       const char *ifconfig_broadcast = NULL;
-      char command_line[512];
+      char command_line[256];
 
       /*
        * We only handle TUN/TAP devices here, not --dev null devices.
@@ -2250,7 +2249,7 @@ get_device_guid (const char *name,
 /*
  * Return a TAP name for netsh commands.
  */
-static const char *
+const char *
 get_netsh_id (const char *dev_node, struct gc_arena *gc)
 {
   const struct tap_reg *tap_reg = get_tap_reg (gc);
@@ -2659,7 +2658,7 @@ get_interface_index (const char *guid)
 static const char *
 format_ip_addr_string (const IP_ADDR_STRING *ip, struct gc_arena *gc)
 {
-  struct buffer out = alloc_buf_gc (512, gc);
+  struct buffer out = alloc_buf_gc (256, gc);
   while (ip)
     {
       buf_printf (&out, "%s", ip->IpAddress.String);

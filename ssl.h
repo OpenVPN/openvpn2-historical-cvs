@@ -43,6 +43,7 @@
 #include "mtu.h"
 #include "thread.h"
 #include "options.h"
+#include "plugin.h"
 
 /*
  * OpenVPN TLS-over-UDP Protocol.
@@ -336,6 +337,7 @@ struct tls_options
 
   /* instance-wide environment variable set */
   struct env_set *es;
+  const struct plugin_list *plugins;
 
   /* --gremlin bits */
   int gremlin;

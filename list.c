@@ -413,8 +413,8 @@ list_test (void)
     /* parse words from stdin */
     while (true)
       {
-	char buf[512];
-	char wordbuf[512];
+	char buf[256];
+	char wordbuf[256];
 	int wbi;
 	int bi;
 	char c;

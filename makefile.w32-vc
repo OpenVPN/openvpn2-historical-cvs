@@ -24,7 +24,7 @@ LZO = \src\lzo-1.08.vc
 
 INCLUDE_DIRS = -I$(OPENSSL)/include -I$(LZO)/include
 
-LIBS = lzo.lib ws2_32.lib iphlpapi.lib winmm.lib gdi32.lib advapi32.lib
+LIBS = lzo.lib ws2_32.lib crypt32.lib iphlpapi.lib winmm.lib gdi32.lib advapi32.lib
 
 LIB_DIRS = -LIBPATH:$(OPENSSL)\out -LIBPATH:$(LZO)
 
@@ -81,12 +81,14 @@ HEADERS = \
 	occ-inline.h \
 	occ.h \
         openvpn.h \
+	openvpn-plugin.h \
 	options.h \
 	otime.h \
 	packet_id.h \
 	perf.h \
 	ping-inline.h \
 	ping.h \
+	plugin.h \
 	pool.h \
         proto.h \
 	proxy.h \
@@ -138,6 +140,7 @@ OBJS =  base64.obj \
 	packet_id.obj \
 	perf.obj \
 	ping.obj \
+	plugin.obj \
         pool.obj \
 	proxy.obj \
 	push.obj \

@@ -36,6 +36,7 @@
 #include "thread.h"
 #include "misc.h"
 #include "openvpn.h"
+#include "win32.h"
 
 #ifdef USE_CRYPTO
 #include <openssl/err.h>
@@ -81,7 +82,7 @@ error_reset ()
 #ifdef OPENVPN_DEBUG_COMMAND_LINE
   msgfp = fopen (OPENVPN_DEBUG_FILE, "w");
   if (!msgfp)
-    exit (OPENVPN_EXIT_STATUS_CANNOT_OPEN_DEBUG_FILE); /* exit point */
+    openvpn_exit (OPENVPN_EXIT_STATUS_CANNOT_OPEN_DEBUG_FILE); /* exit point */
 #else
   msgfp = NULL;
 #endif
@@ -97,7 +98,7 @@ msg_fp()
   if (!fp)
     fp = OPENVPN_MSG_FP;
   if (!fp)
-    exit (OPENVPN_EXIT_STATUS_CANNOT_OPEN_DEBUG_FILE); /* exit point */
+    openvpn_exit (OPENVPN_EXIT_STATUS_CANNOT_OPEN_DEBUG_FILE); /* exit point */
   return fp;
 }
 
@@ -215,18 +216,25 @@ void x_msg (unsigned int flags, const char *format, ...)
     {
       FILE *fp = msg_fp();
       const bool show_usec = check_debug_level (DEBUG_LEVEL_USEC_TIME);
+      if (flags & M_NOPREFIX)
+	{
+	  fprintf (fp, "%s\n", m1);
+	}
+      else
+	{
 #ifdef USE_PTHREAD
-      fprintf (fp, "%s %d[%d]: %s\n",
-	       time_string (0, show_usec),
-	       msg_line_num,
-	       thread_number (),
-	       m1);
+	  fprintf (fp, "%s %d[%d]: %s\n",
+		   time_string (0, show_usec),
+		   msg_line_num,
+		   thread_number (),
+		   m1);
 #else
-      fprintf (fp, "%s %d: %s\n",
-	       time_string (0, show_usec),
-	       msg_line_num,
-	       m1);
+	  fprintf (fp, "%s %d: %s\n",
+		   time_string (0, show_usec),
+		   msg_line_num,
+		   m1);
 #endif
+	}
       fflush(fp);
       ++msg_line_num;
     }
@@ -238,7 +246,7 @@ void x_msg (unsigned int flags, const char *format, ...)
     mutex_unlock (L_MSG);
   
   if (flags & M_FATAL)
-    exit (OPENVPN_EXIT_STATUS_ERROR); /* exit point */
+    openvpn_exit (OPENVPN_EXIT_STATUS_ERROR); /* exit point */
 }
 
 void
@@ -277,6 +285,15 @@ close_syslog ()
       use_syslog = false;
     }
 #endif
+}
+
+void
+openvpn_exit (int status)
+{
+#ifdef WIN32
+  uninit_win32 ();
+#endif
+  exit (status);
 }
 
 #ifdef WIN32

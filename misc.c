@@ -238,7 +238,7 @@ daemon(int nochdir, int noclose)
     case 0:
       break;
     default:
-      _exit (OPENVPN_EXIT_STATUS_GOOD); /* exit point */
+      openvpn_exit (OPENVPN_EXIT_STATUS_GOOD); /* exit point */
     }
 
   if (setsid() == -1)

@@ -62,6 +62,7 @@ extern int msg_line_num;
 #define M_SSL             (1<<10)	 /* show SSL error */
 #define M_NOLOCK          (1<<11)        /* don't lock/unlock mutex */      
 #define M_NOMUTE          (1<<12)        /* don't do mute processing */
+#define M_NOPREFIX        (1<<13)        /* don't show date/time prefix */
 
 /* flag combinations which are frequently used */
 #define M_ERR     (M_FATAL | M_ERRNO)
@@ -141,6 +142,9 @@ check_debug_level (unsigned int level)
 
 void open_syslog (const char *pgmname);
 void close_syslog ();
+
+/* exit program */
+void openvpn_exit (int status);
 
 #include "errlevel.h"
 

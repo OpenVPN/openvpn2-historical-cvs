@@ -201,7 +201,7 @@ keyboard_input_to_signal (struct keyboard *kb)
 
 /* window functions */
 
-static char old_window_title [256];
+static char old_window_title [256] = { 0 };
 
 void
 save_window_title ()
@@ -221,7 +221,7 @@ void
 generate_window_title (const char *title)
 {
   struct buffer out = alloc_buf_gc (256);
-  buf_printf (&out, "[%s] OpenVPN " VERSION " F1:USR1 F2:USR2 F3:HUP F4:TERM", title);
+  buf_printf (&out, "[%s] OpenVPN " VERSION " F1:USR1 F2:USR2 F3:HUP F4:EXIT", title);
   SetConsoleTitle (BSTR (&out));
 }
 

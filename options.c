@@ -564,22 +564,22 @@ usage (void)
 #endif
   fflush(fp);
   
-  exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
+  openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
 }
 
 void
 usage_small (void)
 {
-  msg (M_WARN, "Use --help for more information");
-  exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
+  msg (M_WARN|M_NOPREFIX, "Use --help for more information");
+  openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
 }
 
 static void
 usage_version (void)
 {
-  msg (M_INFO, "%s", title_string);
-  msg (M_INFO, "Copyright (C) 2002-2003 James Yonan <jim@yonan.net>");
-  exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
+  msg (M_INFO|M_NOPREFIX, "%s", title_string);
+  msg (M_INFO|M_NOPREFIX, "Copyright (C) 2002-2003 James Yonan <jim@yonan.net>");
+  openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
 }
 
 void
@@ -587,7 +587,7 @@ notnull (const char *arg, const char *description)
 {
   if (!arg)
     {
-      msg (M_WARN, "Options error: You must define %s", description);
+      msg (M_WARN|M_NOPREFIX, "Options error: You must define %s", description);
       usage_small ();
     }
 }
@@ -604,7 +604,7 @@ string_defined_equal (const char *s1, const char *s2)
 static void
 ping_rec_err (void)
 {
-  msg (M_WARN, "Options error: only one of --ping-exit or --ping-restart options may be specified");
+  msg (M_WARN|M_NOPREFIX, "Options error: only one of --ping-exit or --ping-restart options may be specified");
   usage_small ();
 }
 
@@ -1057,7 +1057,7 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
   else if (streq (p1, "show-adapters"))
     {
       show_tap_win32_adapters ();
-      exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
+      openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
     }
 #endif
 #if PASSTOS_CAPABILITY
@@ -1260,9 +1260,9 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
   else
     {
       if (file)
-	msg (M_WARN, "Unrecognized option or missing parameter(s) in %s:%d: %s", file, line, p1);
+	msg (M_WARN|M_NOPREFIX, "Unrecognized option or missing parameter(s) in %s:%d: %s", file, line, p1);
       else
-	msg (M_WARN, "Unrecognized option or missing parameter(s): --%s", p1);
+	msg (M_WARN|M_NOPREFIX, "Unrecognized option or missing parameter(s): --%s", p1);
       usage_small ();
     }
   return i;
@@ -1286,7 +1286,7 @@ parse_argv (struct options* options, int argc, char *argv[])
 
       if (strncmp(p1, "--", 2))
 	{
-	  msg (M_WARN, "I'm trying to parse \"%s\" as an --option parameter but I don't see a leading '--'", p1);
+	  msg (M_WARN|M_NOPREFIX, "I'm trying to parse \"%s\" as an --option parameter but I don't see a leading '--'", p1);
 	  usage_small ();
 	}
       p1 += 2;

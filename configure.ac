@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [1.5-beta2], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [1.5-beta3], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -109,9 +109,6 @@ dnl Guess host type.
 AC_CANONICAL_HOST
 AC_CANONICAL_SYSTEM
 AM_INIT_AUTOMAKE(openvpn, [$PACKAGE_VERSION])
-
-dnl Generate RPM spec file version number
-AC_SUBST([RPMVERSION], [${PACKAGE_VERSION//5-beta/4.99.}])
 
 dnl fix search path, to allow compilers to find syshead.h
 CPPFLAGS="$CPPFLAGS -I${srcdir}"
@@ -431,4 +428,4 @@ if test "$DYNAMIC_MTU" = "yes"; then
    AC_DEFINE(FRAGMENT_ENABLE, 1, [Enable dynamic MTU capability])
 fi
 
-AC_OUTPUT(Makefile openvpn.spec config-win32.h)
+AC_OUTPUT(Makefile openvpn.spec config-win32.h install-win32/openvpn.nsi)

@@ -2,7 +2,7 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.86.2.6 2003/07/31 08:16:21 jimyonan Exp $
+$Id: ChangeLog,v 1.86.2.7 2003/08/05 07:42:05 jimyonan Exp $
 	
 Upcoming version 1.5.0
 
@@ -68,12 +68,32 @@ Upcoming version 1.5.0
   signals in the Windows version, see
   the window title bar for
   descriptions (beta2).
+* Added md5.h include to crypto.c
+  to fix build problem on OpenBSD
+  (beta3).
+* Created a Win32 installer using
+  NSIS (beta3).
+* Removed DelService command from
+  TAP-Win32 INF file.  It appears
+  to be not necessary and it
+  interfered with the ability to
+  uninstall and reinstall the driver
+  without needing to reboot (beta3).
+* On Windows version, added "addtap"
+  and "deltapall" batch files to
+  add and delete TAP-Win32 adapter
+  instances (beta3).
 * Protocol compatibility is maintained
   with the 1.4.x and 1.3.x series.
   If you are connecting to a 1.3.x peer,
   you must use the --disable-occ option
   on the 1.3.x peer if you are using
   TLS mode.
+
+2003.08.04 -- Version 1.4.3
+
+* Added md5.h include to crypto.c
+  to fix build problem on OpenBSD.
 
 2003.07.15 -- Version 1.4.2
 

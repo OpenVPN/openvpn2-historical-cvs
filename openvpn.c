@@ -2151,10 +2151,6 @@ main (int argc, char *argv[])
   free_ssl_lib ();
 #endif
 
-#ifdef WIN32
-  uninit_win32 ();
-#endif
-
  exit:
 
 #if defined(MEASURE_TLS_HANDSHAKE_STATS) && defined(USE_CRYPTO) && defined(USE_SSL)
@@ -2164,7 +2160,8 @@ main (int argc, char *argv[])
   /* pop our garbage collection level */
   gc_free_level (gc_level);
 
-  return OPENVPN_EXIT_STATUS_GOOD; /* exit point */
+  openvpn_exit (OPENVPN_EXIT_STATUS_GOOD); /* exit point */
+  return 0; /* NOTREACHED */
 }
 
 /*

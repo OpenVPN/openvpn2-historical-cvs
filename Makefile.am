@@ -46,6 +46,7 @@ EXTRA_DIST = $(man_MANS) \
 	     COPYRIGHT.GPL PORTS openvpn.spec \
 	     easy-rsa sample-config-files sample-keys \
 	     sample-scripts gentoo openvpn.spec.in \
+	     install-win32 \
 	     config-win32.h \
 	     win32.h \
 	     win32.c \

@@ -1110,7 +1110,7 @@ get_device_guid (const char *name)
   int n = 0;
 
   if (!name)
-    msg (M_INFO, "Available TAP-WIN32 devices:");
+    msg (M_INFO|M_NOPREFIX, "Available TAP-WIN32 devices:");
 
   status = RegOpenKeyEx(
 			HKEY_LOCAL_MACHINE,
@@ -1182,7 +1182,7 @@ get_device_guid (const char *name)
 		  if (name == NULL)
 		    {
 		      ++n;
-		      msg (M_INFO, "[%d] '%s'", n, name_data);
+		      msg (M_INFO|M_NOPREFIX, "[%d] '%s'", n, name_data);
 		    }
 		  else if (!strcmp (name_data, name))
 		    {
@@ -1201,7 +1201,7 @@ get_device_guid (const char *name)
 
   RegCloseKey (control_net_key);
   if (name)
-    msg (M_FATAL, "TAP device '%s' not found -- run with --show-adapters to show a list of TAP-WIN32 adapters on this system", name);
+    msg (M_FATAL|M_NOPREFIX, "TAP device '%s' not found -- run with --show-adapters to show a list of TAP-WIN32 adapters on this system", name);
   return NULL;
 }
 
@@ -1234,7 +1234,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
     }
   else
     {
-      msg (M_FATAL, "Unknown virtual device type: '%s' -- Currently only TAP virtual network devices are supported under Windows, so you should run with --dev tap --dev-node <your TAP-WIN32 adapter name> -- or run with --show-adapters to show a list of TAP-WIN32 adapters on this system", dev);
+      msg (M_FATAL|M_NOPREFIX, "Unknown virtual device type: '%s' -- Currently only TAP virtual network devices are supported under Windows, so you should run with --dev tap --dev-node <your TAP-WIN32 adapter name> -- or run with --show-adapters to show a list of TAP-WIN32 adapters on this system", dev);
     }
 
   /*
@@ -1242,7 +1242,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
    */
   if (!dev_node)
     {
-      msg (M_FATAL, "--dev-node must be specified with the name of the TAP device as it appears in the network control panel or ipconfig command -- or run with --show-adapters to show a list of TAP-WIN32 adapters on this system");
+      msg (M_FATAL|M_NOPREFIX, "--dev-node must be specified with the name of the TAP device as it appears in the network control panel or ipconfig command -- or run with --show-adapters to show a list of TAP-WIN32 adapters on this system");
     }
   else
     {

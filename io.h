@@ -24,18 +24,68 @@
  */
 
 /*
- * These routines are designed to optimize the calling of a routine
- * (normally used for tls_multi_process())
- * which can be called less frequently between triggers.
+ * I/O functionality used by both the sockets and TUN/TAP I/O layers.
+ *
+ * We also try to abstract away the differences between Posix and Win32
+ * for the benefit of openvpn.c.
  */
 
-#ifndef EVENT_WAIT_H
-#define EVENT_WAIT_H
+#ifndef OPENVPN_IO_H
+#define OPENVPN_IO_H
 
 #include "common.h"
 #include "error.h"
+#include "basic.h"
+#include "mtu.h"
+#include "buffer.h"
+
+/* allocate a buffer for socket or tun layer */
+void alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tuntap_buffer);
 
 #ifdef WIN32
+
+/* 
+ * We try to do all Win32 I/O using overlapped
+ * (i.e. asynchronous) I/O for a performance win.
+ */
+struct overlapped_io {
+# define IOSTATE_INITIAL          0
+# define IOSTATE_QUEUED           1 /* overlapped I/O has been queued */
+# define IOSTATE_IMMEDIATE_RETURN 2 /* I/O function returned immediately without queueing */
+  int iostate;
+  OVERLAPPED overlapped;
+  DWORD size;
+  DWORD flags;
+  int status;
+  bool addr_defined;
+  struct sockaddr_in addr;
+  int addrlen;
+  struct buffer buf_init;
+  struct buffer buf;
+};
+
+void overlapped_io_init (struct overlapped_io *o,
+			 const struct frame *frame,
+			 BOOL event_state,
+			 bool tuntap_buffer);
+
+void overlapped_io_close (struct overlapped_io *o);
+
+static inline bool
+overlapped_io_active (struct overlapped_io *o)
+{
+  return o->iostate == IOSTATE_QUEUED || o->iostate == IOSTATE_IMMEDIATE_RETURN;
+}
+
+const char *
+overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix);
+
+/*
+ * On Win32, use WSAWaitForMultipleEvents instead of select as our main event
+ * loop I/O wait mechanism.  This is done for efficiency and also for the simple
+ * reason that Win32 select() can only wait on sockets, not on the TAP-Win32 file
+ * handle.
+ */
 
 #define MAX_EVENTS 4
 
@@ -50,7 +100,6 @@ struct event_wait {
 static inline int
 my_select (struct event_wait *ew, const struct timeval *tv)
 {
-
 #if 0
   {
     int i;
@@ -106,7 +155,7 @@ wait_trigger (const struct event_wait *ew, HANDLE h)
   return ew->trigger == h;
 }
 
-#else
+#else /* Posix stuff here */
 
 struct event_wait {
   int max_fd_plus_one;

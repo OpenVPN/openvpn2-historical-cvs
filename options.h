@@ -24,6 +24,7 @@
  */
 
 #include "basic.h"
+#include "mtu.h"
 
 extern const char title_string[];
 
@@ -111,6 +112,7 @@ struct options
   const char *writepid;
   const char *up_script;
   const char *down_script;
+  bool up_restart;
   bool daemon;
   bool inetd;
   int nice;
@@ -185,7 +187,7 @@ void usage_small (void);
 
 void init_options (struct options *o);
 void show_settings (const struct options *o);
-char *options_string (const struct options *o);
+char *options_string (const struct options *o, const struct frame *frame);
 
 void parse_argv (struct options* options, int argc, char *argv[]);
 

@@ -184,7 +184,7 @@ struct buffer buf_sub (struct buffer *buf, int size, bool prepend);
 static inline bool
 buf_safe (struct buffer *buf, int len)
 {
-  return buf->offset + buf->len + len <= buf->capacity;
+  return len >= 0 && buf->offset + buf->len + len <= buf->capacity;
 }
 
 static inline int
@@ -322,6 +322,26 @@ buf_copy_range (struct buffer *dest,
   if (dest_index + src_len > dest->len)
     dest->len = dest_index + src_len;
   return true;
+}
+
+/* truncate src to len, copy excess data beyond len to dest */
+static inline bool
+buf_copy_excess (struct buffer *dest,
+		 struct buffer *src,
+		 int len)
+{
+  if (src->len > len)
+    {
+      struct buffer b = *src;
+      src->len = len;
+      if (!buf_advance (&b, len))
+	return false;
+      return buf_copy (dest, &b);
+    }
+  else
+    {
+      return true;
+    }
 }
 
 static inline bool

@@ -36,7 +36,6 @@
 #include "openvpn.h"
 #include "common.h"
 #include "tun.h"
-#include "mtu.h"
 #include "shaper.h"
 #include "crypto.h"
 #include "options.h"
@@ -149,6 +148,8 @@ static const char usage_message[] =
   "--down cmd      : Shell cmd to run after tun device close.\n"
   "                  (post --user/--group UID/GID change and/or --chroot)\n"
   "                  (script parameters are same as --up option)\n"
+  "--up-restart    : Run up/down scripts for all restarts including those\n"
+  "                  caused by --ping-restart or SIGUSR1\n"
   "--user user     : Set UID to user after initialization.\n"
   "--group group   : Set GID to group after initialization.\n"
   "--chroot dir    : Chroot to this directory after initialization.\n"
@@ -395,6 +396,7 @@ show_settings (const struct options *o)
   SHOW_STR (writepid);
   SHOW_STR (up_script);
   SHOW_STR (down_script);
+  SHOW_BOOL (up_restart);
   SHOW_BOOL (daemon);
   SHOW_BOOL (inetd);
   SHOW_INT (nice);
@@ -459,36 +461,42 @@ show_settings (const struct options *o)
  * separately by read_key().
  */
 char *
-options_string (const struct options *o)
+options_string (const struct options *o, const struct frame *frame)
 {
   struct buffer out = alloc_buf (256);
-  buf_printf (&out, "V1");
-#ifdef STRICT_OPTIONS_CHECK
+  struct key_type kt;
+
+  init_key_type (&kt, o->ciphername, o->ciphername_defined,
+		 o->authname, o->authname_defined,
+		 o->keysize, true, false);
+
+  buf_printf (&out, "V2");
+
   buf_printf (&out, " --dev-type %s", dev_type_string (o->dev, o->dev_type));
-  if (o->link_mtu_defined)
-    buf_printf (&out, " --udp-mtu %d", o->link_mtu);
-  if (o->tun_mtu_defined)
-    buf_printf (&out, " --tun-mtu %d", o->tun_mtu);
-  if (o->tun_ipv6)
-    buf_printf (&out, " --tun-ipv6");
-#endif
-  if (o->ciphername_defined)
-    buf_printf (&out, " --cipher %s", o->ciphername);
-  if (o->authname_defined)
-    buf_printf (&out, " --auth %s", o->authname);
+  buf_printf (&out, " --link-mtu %d", MAX_RW_SIZE_LINK(frame));
+  buf_printf (&out, " --tun-mtu %d", MAX_RW_SIZE_TUN(frame));
+  buf_printf (&out, " --cipher %s", kt_cipher_name (&kt));
+  buf_printf (&out, " --auth %s", kt_digest_name (&kt));
+  buf_printf (&out, " --keysize %d", kt_key_size (&kt));
 
   if (!o->packet_id)
     buf_printf (&out, " --no-replay");
   if (!o->iv)
     buf_printf (&out, " --no-iv");
+
 #ifdef USE_LZO
   if (o->comp_lzo)
     buf_printf (&out, " --comp-lzo");
 #endif
+
 #ifdef FRAGMENT_ENABLE
   if (o->mtu_dynamic)
     buf_printf (&out, " --mtu-dynamic");
 #endif
+
+  if (o->tun_ipv6)
+    buf_printf (&out, " --tun-ipv6");
+
   return BSTR (&out);
 }
 
@@ -840,6 +848,10 @@ add_option (struct options *options, int i, char *p1, char *p2, char *p3,
     {
       ++i;
       options->down_script = p2;
+    }
+  else if (streq (p1, "up-restart"))
+    {
+      options->up_restart = true;
     }
   else if (streq (p1, "daemon"))
     {

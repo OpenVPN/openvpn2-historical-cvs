@@ -64,7 +64,8 @@ void set_nice (int niceval);
 void do_chroot (const char *path);
 
 void run_script (const char *command, const char *arg, int tun_mtu, int link_mtu,
-		 const char *ifconfig_local, const char* ifconfig_remote);
+		 const char *ifconfig_local, const char* ifconfig_remote,
+		 const char *context);
 
 /* workspace for get_pid_file/write_pid */
 struct pid_state {

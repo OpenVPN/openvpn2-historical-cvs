@@ -1275,7 +1275,10 @@ close_tun (struct tuntap *tt)
   overlapped_io_close (&tt->reads);
   overlapped_io_close (&tt->writes);
   if (tt->hand != NULL)
-    CloseHandle (tt->hand);
+    {
+      if (!CloseHandle (tt->hand))
+	msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on TAP-Win32 device");
+    }
   clear_tuntap (tt);
 }
 

@@ -1065,16 +1065,19 @@ tls_multi_init (struct tls_options *tls_options,
 }
 
 /*
- * Finalize our computation of frame sizes.
+ * Finalize our computation of frame sizes, and set options string.
  */
 void
-tls_multi_init_finalize(struct tls_multi* multi, const struct frame* frame)
+tls_multi_init_finalize(struct tls_multi* multi, const struct frame* frame, const char *options)
 {
   tls_init_control_channel_frame_parameters(frame, &multi->opt.frame);
   
   /* initialize the active and untrusted sessions */
   tls_session_init (multi, &multi->session[TM_ACTIVE]);
   tls_session_init (multi, &multi->session[TM_UNTRUSTED]);
+
+  /* initialize options string */
+  multi->opt.options = options;
 }
 
 void

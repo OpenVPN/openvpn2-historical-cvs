@@ -152,7 +152,8 @@ set_nice (int niceval)
 /* Pass tunnel endpoint and MTU parms to a user-supplied script */
 void
 run_script (const char *command, const char *arg, int tun_mtu, int link_mtu,
-	    const char *ifconfig_local, const char* ifconfig_remote)
+	    const char *ifconfig_local, const char* ifconfig_remote,
+	    const char *context)
 {
   if (command)
     {
@@ -164,11 +165,14 @@ run_script (const char *command, const char *arg, int tun_mtu, int link_mtu,
 	ifconfig_local = "";
       if (!ifconfig_remote)
 	ifconfig_remote = "";
+      if (!context)
+	context = "";
 
       openvpn_snprintf (command_line, sizeof (command_line),
-			"%s %s %d %d %s %s",
+			"%s %s %d %d %s %s %s",
 			command, arg, tun_mtu, link_mtu,
-			ifconfig_local, ifconfig_remote);
+			ifconfig_local, ifconfig_remote,
+			context);
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "script failed", true);
     }

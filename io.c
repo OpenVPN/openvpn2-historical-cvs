@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -24,36 +24,36 @@
  */
 
 /*
- * Win32-specific OpenVPN code, targetted at the mingw
- * development environment.
+ * I/O functionality used by both the sockets and TUN/TAP I/O layers.
+ *
+ * We also try to abstract away the differences between Posix and Win32
+ * for the benefit of openvpn.c.
  */
 
 #ifdef WIN32
-
 #include "config-win32.h"
+#else
+#include "config.h"
+#endif
 
 #include "syshead.h"
-#include "openvpn-win32.h"
-#include "error.h"
+
+#include "io.h"
 
 #include "memdbg.h"
 
-static struct WSAData wsa_state;
-
+/* allocate a buffer for socket or tun layer */
 void
-init_win32 (void)
+alloc_buf_sock_tun (struct buffer *buf, const struct frame *frame, bool tuntap_buffer)
 {
-  if (WSAStartup(0x0101, &wsa_state))
-    {
-      msg (M_ERR, "WSAStartup failed");
-    }
+  /* allocate buffer for overlapped I/O */
+  *buf = alloc_buf (BUF_SIZE (frame));
+  ASSERT (buf_init (buf, EXTRA_FRAME (frame)));
+  buf->len = tuntap_buffer ? MAX_RW_SIZE_TUN (frame) : MAX_RW_SIZE_LINK (frame);
+  ASSERT (buf_safe (buf, 0));
 }
 
-void
-uninit_win32 (void)
-{
-  WSACleanup ();
-}
+#ifdef WIN32
 
 void
 overlapped_io_init (struct overlapped_io *o,
@@ -69,16 +69,14 @@ overlapped_io_init (struct overlapped_io *o,
     msg (M_ERR, "CreateEvent failed");
 
   /* allocate buffer for overlapped I/O */
-  o->buf_init = alloc_buf (BUF_SIZE (frame));
-  ASSERT (buf_init (&o->buf_init, EXTRA_FRAME (frame)));
-  o->buf_init.len = tuntap_buffer ? MAX_RW_SIZE_TUN (frame) : MAX_RW_SIZE_LINK (frame);
-  ASSERT (buf_safe (&o->buf_init, 0));
+  alloc_buf_sock_tun (&o->buf_init, frame, tuntap_buffer);
 }
 
 void
 overlapped_io_close (struct overlapped_io *o)
 {
-  CloseHandle (o->overlapped.hEvent);
+  if (!CloseHandle (o->overlapped.hEvent))
+    msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on overlapped I/O event object");
   free_buf (&o->buf_init);
 }
 

@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -454,7 +454,7 @@ void
 init_key_type (struct key_type *kt, const char *ciphername,
 	       bool ciphername_defined, const char *authname,
 	       bool authname_defined, int keysize,
-	       bool cfb_ofb_allowed)
+	       bool cfb_ofb_allowed, bool warn)
 {
   CLEAR (*kt);
   if (ciphername && ciphername_defined)
@@ -474,8 +474,8 @@ init_key_type (struct key_type *kt, const char *ciphername,
     }
   else
     {
-      msg (M_WARN,
-	   "******* WARNING *******: null cipher specified, no encryption will be used");
+      if (warn)
+	msg (M_WARN, "******* WARNING *******: null cipher specified, no encryption will be used");
     }
   if (authname && authname_defined)
     {
@@ -484,9 +484,38 @@ init_key_type (struct key_type *kt, const char *ciphername,
     }
   else
     {
-      msg (M_WARN,
-	   "******* WARNING *******: null MAC specified, no authentication will be used");
+      if (warn)
+	msg (M_WARN, "******* WARNING *******: null MAC specified, no authentication will be used");
     }
+}
+
+const char *
+kt_cipher_name (const struct key_type *kt)
+{
+  if (kt->cipher)
+    return EVP_CIPHER_name (kt->cipher);
+  else
+    return "[null-cipher]";
+}
+
+const char *
+kt_digest_name (const struct key_type *kt)
+{
+  if (kt->digest)
+    return EVP_MD_name (kt->digest);
+  else
+    return "[null-digest]";
+}
+
+int
+kt_key_size (const struct key_type *kt)
+{
+  if (kt->cipher_length)
+    return kt->cipher_length * 8;
+  else if (kt->cipher)
+    return EVP_CIPHER_key_length (kt->cipher) * 8;
+  else
+    return 0;
 }
 
 /* given a key and key_type, build a key_ctx */

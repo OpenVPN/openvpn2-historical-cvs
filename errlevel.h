@@ -57,6 +57,7 @@
 #define D_COMP_LOW           LOGLEV(3, 31, 0)        /* show adaptive compression state changes */
 
 #define D_SHOW_PARMS         LOGLEV(4, 40, 0)        /* show all parameters on program initiation */
+#define D_SHOW_DC_OPT        LOGLEV(4, 40, 0)        /* show data channel options string */
 
 #define D_LOG_RW             LOGLEV(5, 0, 0)         /* Print 'R' or 'W' to stdout for read/write */
 
@@ -68,7 +69,7 @@
 #define D_FRAG_DEBUG         LOGLEV(7, 70, M_DEBUG)  /* show fragment debugging info */
 
 #define D_HANDSHAKE_VERBOSE  LOGLEV(8, 70, M_DEBUG)  /* show detailed description of each handshake */
-#define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* medium frequency info from tls_session routines */
+#define D_TLS_DEBUG_MED      LOGLEV(8, 70, M_DEBUG)  /* limited info from tls_session routines */
 #define D_INTERVAL           LOGLEV(8, 70, M_DEBUG)  /* show interval.h debugging info */
 #define D_GREMLIN_VERBOSE    LOGLEV(8, 70, M_DEBUG)  /* show verbose info from gremlin module */
 #define D_REL_DEBUG          LOGLEV(8, 70, M_DEBUG)  /* show detailed info from reliable routines */
@@ -76,7 +77,7 @@
 #define D_TLS_DEBUG          LOGLEV(9, 70, M_DEBUG)  /* show detailed info from TLS routines */
 #define D_CRYPTO_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show detailed info from crypto.c routines */
 #define D_COMP               LOGLEV(9, 70, M_DEBUG)  /* show compression info */
-#define D_READ_WRITE         LOGLEV(9, 70, M_DEBUG)  /* verbose account of all tun/link reads/writes/opens */
+#define D_READ_WRITE         LOGLEV(9, 70, M_DEBUG)  /* show all tun/tcp/udp reads/writes/opens */
 #define D_PACKET_CONTENT     LOGLEV(9, 70, M_DEBUG)  /* show before/after encryption packet content */
 #define D_TLS_NO_SEND_KEY    LOGLEV(9, 70, M_DEBUG)  /* show when no data channel send-key exists */
 #define D_THREAD_DEBUG       LOGLEV(9, 70, M_DEBUG)  /* show pthread debug information */

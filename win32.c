@@ -23,53 +23,36 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifdef WIN32
-#ifndef OPENVPN_WIN32_H
-#define OPENVPN_WIN32_H
-
-#include "basic.h"
-#include "mtu.h"
-#include "buffer.h"
-
 /*
  * Win32-specific OpenVPN code, targetted at the mingw
  * development environment.
  */
 
-void init_win32 (void);
-void uninit_win32 (void);
+#ifdef WIN32
 
-struct overlapped_io {
-# define IOSTATE_INITIAL          0
-# define IOSTATE_QUEUED           1
-# define IOSTATE_IMMEDIATE_RETURN 2
-  int iostate;
-  OVERLAPPED overlapped;
-  DWORD size;
-  DWORD flags;
-  int status;
-  bool addr_defined;
-  struct sockaddr_in addr;
-  int addrlen;
-  struct buffer buf_init;
-  struct buffer buf;
-};
+#include "config-win32.h"
 
-void overlapped_io_init (struct overlapped_io *o,
-			 const struct frame *frame,
-			 BOOL event_state,
-			 bool tuntap_buffer);
+#include "syshead.h"
+#include "win32.h"
+#include "error.h"
 
-void overlapped_io_close (struct overlapped_io *o);
+#include "memdbg.h"
 
-static inline bool
-overlapped_io_active (struct overlapped_io *o)
+static struct WSAData wsa_state;
+
+void
+init_win32 (void)
 {
-  return o->iostate == IOSTATE_QUEUED || o->iostate == IOSTATE_IMMEDIATE_RETURN;
+  if (WSAStartup(0x0101, &wsa_state))
+    {
+      msg (M_ERR, "WSAStartup failed");
+    }
 }
 
-const char *
-overlapped_io_state_ascii (const struct overlapped_io *o, const char* prefix);
+void
+uninit_win32 (void)
+{
+  WSACleanup ();
+}
 
-#endif
 #endif

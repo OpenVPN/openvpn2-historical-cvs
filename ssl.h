@@ -225,7 +225,7 @@ struct tls_options
   bool server;
 
   /* an options string that must match between client and server */
-  char *options;
+  const char *options;
 
   /* from command line */
   bool packet_id;
@@ -350,7 +350,9 @@ SSL_CTX *init_ssl (bool server,
 struct tls_multi *tls_multi_init (struct tls_options *tls_options,
 				  struct link_socket *link_socket);
 
-void tls_multi_init_finalize(struct tls_multi* multi, const struct frame* frame);
+void tls_multi_init_finalize(struct tls_multi *multi,
+			     const struct frame *frame,
+			     const char *options);
 
 bool tls_multi_process (struct tls_multi *multi,
 			struct buffer *to_link,

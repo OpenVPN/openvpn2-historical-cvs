@@ -35,10 +35,14 @@
 #include "fdmisc.h"
 #include "thread.h"
 #include "misc.h"
+#include "io.h"
 
 #include "memdbg.h"
 
-/* begin check status */
+/*
+ * Functions used to check return status
+ * of I/O operations.
+ */
 
 unsigned int x_cs_info_level;
 unsigned int x_cs_verbose_level;
@@ -102,7 +106,9 @@ x_check_status (int status, const char *description, struct link_socket *sock)
     }
 }
 
-/* end check status */
+/*
+ * Functions releated to the translation of DNS names to IP addresses.
+ */
 
 static const char*
 h_errno_msg(int h_errno_err)
@@ -161,6 +167,10 @@ getaddr (const char *hostname, int resolve_retry_seconds)
     }
   return ia.s_addr;
 }
+
+/*
+ * Functions used for establishing a TCP stream connection.
+ */
 
 static int
 socket_listen_accept (int sd,
@@ -221,7 +231,10 @@ socket_connect (int sd,
        print_sockaddr (remote));
 }
 
-/* Create a TCP/UDP socket */
+/*
+ * SOCKET INITALIZATION CODE.
+ * Create a TCP/UDP socket
+ */
 void
 link_socket_init (struct link_socket *sock,
 		  const char *local_host,
@@ -375,15 +388,283 @@ socket_frame_init (struct frame *frame, struct link_socket *sock)
 
   if (link_socket_connection_oriented (sock))
     {
-      sock->stream_buf_init = alloc_buf (BUF_SIZE (frame));
-      ASSERT (buf_init (&sock->stream_buf_init, EXTRA_FRAME (frame)));
-      sock->stream_buf = sock->stream_buf_init;
-      sock->stream_len_max = MAX_RW_SIZE_LINK (frame) - sizeof (packet_size_type);
-      sock->stream_len = 0;
-      sock->stream_len_size = 0;
-      msg (D_CO_DEBUG, "CO: INIT maxlen=%d", sock->stream_len_max);
+#ifdef WIN32
+      stream_buf_init (&sock->stream_buf, &sock->reads.buf_init);
+#else
+      alloc_buf_sock_tun (&sock->stream_buf_data, frame, false);
+      stream_buf_init (&sock->stream_buf, &sock->stream_buf_data);
+#endif
     }
 }
+
+void
+link_socket_set_outgoing_addr (const struct buffer *buf,
+			      struct link_socket *sock,
+			      const struct sockaddr_in *addr)
+{
+  mutex_lock (L_SOCK);
+  if (!buf || buf->len > 0)
+    {
+      struct link_socket_addr *lsa = sock->addr;
+      ASSERT (addr_defined (addr));
+      if ((sock->remote_float
+	   || !addr_defined (&lsa->remote)
+	   || addr_port_match (addr, &lsa->remote))
+	  && (!addr_port_match (addr, &lsa->actual)
+	      || !sock->set_outgoing_initial))
+	{
+	  lsa->actual = *addr;
+	  sock->set_outgoing_initial = true;
+	  mutex_unlock (L_SOCK);
+	  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual));
+	  if (sock->ipchange_command)
+	    {
+	      char command[512];
+	      struct buffer out;
+	      buf_set_write (&out, (uint8_t *)command, sizeof (command));
+	      buf_printf (&out, "%s %s",
+			  sock->ipchange_command,
+			  print_sockaddr_ex (&lsa->actual, true, " "));
+	      msg (D_TLS_DEBUG, "executing ip-change command: %s", command);
+	      system_check (command, "ip-change command failed", false);
+	    }
+	  mutex_lock (L_SOCK);
+	}
+    }
+  mutex_unlock (L_SOCK);
+}
+
+void
+link_socket_incoming_addr (struct buffer *buf,
+			   const struct link_socket *sock,
+			   const struct sockaddr_in *from_addr)
+{
+  mutex_lock (L_SOCK);
+  if (buf->len > 0)
+    {
+      if (from_addr->sin_family != AF_INET)
+	goto bad;
+      if (!addr_defined (from_addr))
+	goto bad;
+      if (sock->remote_float || !addr_defined (&sock->addr->remote))
+	goto good;
+
+      if (link_socket_connection_oriented (sock))
+	{
+	  if (addr_match (from_addr, &sock->addr->remote))
+	    goto good;
+	}
+      else
+	{
+	  if (addr_port_match (from_addr, &sock->addr->remote))
+	    goto good;
+	}
+    }
+
+bad:
+  msg (D_LINK_ERRORS,
+       "Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
+       print_sockaddr (from_addr),
+       (int)from_addr->sin_family,
+       print_sockaddr (&sock->addr->remote));
+  buf->len = 0;
+  mutex_unlock (L_SOCK);
+  return;
+
+good:
+  msg (D_READ_WRITE, "IP Address OK from %s",
+       print_sockaddr (from_addr));
+  mutex_unlock (L_SOCK);
+  return;
+}
+
+void
+link_socket_get_outgoing_addr (struct buffer *buf,
+			      const struct link_socket *sock,
+			      struct sockaddr_in *addr)
+{
+  mutex_lock (L_SOCK);
+  if (buf->len > 0)
+    {
+      struct link_socket_addr *lsa = sock->addr;
+      if (addr_defined (&lsa->actual))
+	{
+	  *addr = lsa->actual;
+	}
+      else
+	{
+	  msg (D_READ_WRITE, "No outgoing address to send packet");
+	  buf->len = 0;
+	}
+    }
+  mutex_unlock (L_SOCK);
+}
+
+void
+link_socket_close (struct link_socket *sock)
+{
+  if (sock->sd >= 0 && sock->sd != INETD_SOCKET_DESCRIPTOR)
+    {
+#ifdef WIN32
+      overlapped_io_close (&sock->reads);
+      overlapped_io_close (&sock->writes);
+#endif
+      if (openvpn_close_socket (sock->sd))
+	msg (M_WARN | M_ERRNO_SOCK, "Warning: Close Socket failed");
+      sock->sd = -1;
+    }
+  stream_buf_close (&sock->stream_buf);
+  free_buf (&sock->stream_buf_data);
+}
+
+/*
+ * Stream buffer functions, used to packetize a TCP
+ * stream connection.
+ */
+
+void
+stream_buf_init (struct stream_buf *sb,
+		 struct buffer *buf)
+{
+  sb->buf_init = *buf;
+  sb->maxlen = sb->buf_init.len;
+  sb->buf_init.len = 0;
+  sb->residual = alloc_buf (sb->maxlen);
+  stream_buf_reset (sb);
+
+  msg (D_CO_DEBUG, "CO: INIT maxlen=%d", sb->maxlen);
+}
+
+void
+stream_buf_close (struct stream_buf* sb)
+{
+  free_buf (&sb->residual);
+}
+
+bool
+stream_buf_added (struct stream_buf *sb,
+		  int length_added)
+{
+  msg (D_CO_DEBUG, "CO: ADD length_added=%d", length_added);
+  if (length_added > 1)
+    sb->buf.len += length_added;
+
+  /* if length unknown, see if we can get the length prefix from
+     the head of the buffer */
+  if (sb->len < 0 && sb->buf.len >= (int) sizeof (packet_size_type))
+    {
+      packet_size_type net_size;
+      ASSERT (buf_read (&sb->buf, &net_size, sizeof (net_size)));
+      sb->len = ntohps (net_size);
+      if (sb->len < 1 || sb->len > sb->maxlen)
+	msg (M_FATAL, "Bad encapsulated packet length from peer (%d), which must be > 0 and <= %d -- please ensure that --link-mtu is equal on both peers -- this condition could also indicate a possible active attack on the TCP link", sb->len, sb->maxlen); /* it might be better behaviour to restart than crash at this point */
+    }
+
+  /* is our incoming packet fully read? */
+  if (sb->len > 0 && sb->buf.len >= sb->len)
+    {
+      /* save any residual data that's part of the next packet */
+      ASSERT (buf_init (&sb->residual, 0));
+      if (sb->buf.len > sb->len)
+	  ASSERT (buf_copy_excess (&sb->residual, &sb->buf, sb->len));
+      msg (D_CO_DEBUG, "CO: ADD returned TRUE, buf_len=%d, residual_len=%d",
+	   BLEN (&sb->buf),
+	   BLEN (&sb->residual));
+      return true;
+    }
+  else
+    {
+      stream_buf_set_next (sb);
+      msg (D_CO_DEBUG, "CO: ADD returned FALSE");
+      return false;
+    }
+}
+
+/*
+ * Format IP addresses in ascii
+ */
+
+const char *
+print_sockaddr (const struct sockaddr_in *addr)
+{
+  return print_sockaddr_ex(addr, true, ":");
+}
+
+const char *
+print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* separator)
+{
+  struct buffer out = alloc_buf_gc (64);
+  const int port = ntohs (addr->sin_port);
+
+  mutex_lock (L_INET_NTOA);
+  buf_printf (&out, "%s", (addr_defined (addr) ? inet_ntoa (addr->sin_addr) : "[local]"));
+  mutex_unlock (L_INET_NTOA);
+
+  if (do_port && port)
+    {
+      if (separator)
+	buf_printf (&out, "%s", separator);
+
+      buf_printf (&out, "%d", port);
+    }
+  return BSTR (&out);
+}
+
+/*
+ * Convert protocol names between index and ascii form.
+ */
+
+struct proto_names {
+  const char *short_form;
+  const char *display_form;
+};
+
+/* Indexed by PROTO_x */
+static const struct proto_names proto_names[] = {
+  {"udp",        "UDPv4"},
+  {"tcp-server", "TCPv4_SERVER"},
+  {"tcp-client", "TCPv4_CLIENT"}
+};
+
+int
+ascii2proto (const char* proto_name)
+{
+  int i;
+  for (i = 0; i < PROTO_N; ++i)
+    if (!strcmp (proto_name, proto_names[i].short_form))
+      return i;
+  return -1;
+}
+
+const char *
+proto2ascii (int proto, bool display_form)
+{
+  if (proto < 0 || proto > PROTO_N)
+    return "[unknown protocol]";
+  else if (display_form)
+    return proto_names[proto].display_form;
+  else
+    return proto_names[proto].short_form;
+}
+
+const char *
+proto2ascii_all ()
+{
+  struct buffer out = alloc_buf_gc (256);
+  int i;
+
+  for (i = 0; i < PROTO_N; ++i)
+    {
+      if (i)
+	buf_printf(&out, " ");
+      buf_printf(&out, "[%s]", proto2ascii(i, false));
+    }
+  return BSTR (&out);
+}
+
+/*
+ * Win32 overlapped socket I/O functions.
+ */
 
 #ifdef WIN32
 
@@ -396,7 +677,18 @@ socket_recv_queue (struct link_socket *sock, int maxsize)
       int status;
 
       /* reset buf to its initial state */
-      sock->reads.buf = sock->reads.buf_init;
+      if (sock->proto == PROTO_UDPv4)
+	{
+	  sock->reads.buf = sock->reads.buf_init;
+	}
+      else if (sock->proto == PROTO_TCPv4_CLIENT || sock->proto == PROTO_TCPv4_SERVER)
+	{
+	  stream_buf_get_next (&sock->stream_buf, &sock->reads.buf);
+	}
+      else
+	{
+	  ASSERT (0);
+	}
 
       /* Win32 docs say it's okay to allocate the wsabuf on the stack */
       wsabuf[0].buf = BPTR (&sock->reads.buf);
@@ -642,205 +934,3 @@ socket_finalize (
 }
 
 #endif /* WIN32 */
-
-int
-link_socket_read_tcp (struct link_socket *sock,
-		      struct buffer *buf,
-		      int maxsize,
-		      struct sockaddr_in *from)
-{
-  ASSERT (0);
-  return -1;
-}
-
-void
-link_socket_set_outgoing_addr (const struct buffer *buf,
-			      struct link_socket *sock,
-			      const struct sockaddr_in *addr)
-{
-  mutex_lock (L_SOCK);
-  if (!buf || buf->len > 0)
-    {
-      struct link_socket_addr *lsa = sock->addr;
-      ASSERT (addr_defined (addr));
-      if ((sock->remote_float
-	   || !addr_defined (&lsa->remote)
-	   || addr_port_match (addr, &lsa->remote))
-	  && (!addr_port_match (addr, &lsa->actual)
-	      || !sock->set_outgoing_initial))
-	{
-	  lsa->actual = *addr;
-	  sock->set_outgoing_initial = true;
-	  mutex_unlock (L_SOCK);
-	  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual));
-	  if (sock->ipchange_command)
-	    {
-	      char command[512];
-	      struct buffer out;
-	      buf_set_write (&out, (uint8_t *)command, sizeof (command));
-	      buf_printf (&out, "%s %s",
-			  sock->ipchange_command,
-			  print_sockaddr_ex (&lsa->actual, true, " "));
-	      msg (D_TLS_DEBUG, "executing ip-change command: %s", command);
-	      system_check (command, "ip-change command failed", false);
-	    }
-	  mutex_lock (L_SOCK);
-	}
-    }
-  mutex_unlock (L_SOCK);
-}
-
-void
-link_socket_incoming_addr (struct buffer *buf,
-			   const struct link_socket *sock,
-			   const struct sockaddr_in *from_addr)
-{
-  mutex_lock (L_SOCK);
-  if (buf->len > 0)
-    {
-      if (from_addr->sin_family != AF_INET)
-	goto bad;
-      if (!addr_defined (from_addr))
-	goto bad;
-      if (sock->remote_float || !addr_defined (&sock->addr->remote))
-	goto good;
-
-      if (link_socket_connection_oriented (sock))
-	{
-	  if (addr_match (from_addr, &sock->addr->remote))
-	    goto good;
-	}
-      else
-	{
-	  if (addr_port_match (from_addr, &sock->addr->remote))
-	    goto good;
-	}
-    }
-
-bad:
-  msg (D_LINK_ERRORS,
-       "Incoming packet rejected from %s[%d], expected peer address: %s (allow this incoming source address/port by removing --remote or adding --float)",
-       print_sockaddr (from_addr),
-       (int)from_addr->sin_family,
-       print_sockaddr (&sock->addr->remote));
-  buf->len = 0;
-  mutex_unlock (L_SOCK);
-  return;
-
-good:
-  msg (D_READ_WRITE, "IP Address OK from %s",
-       print_sockaddr (from_addr));
-  mutex_unlock (L_SOCK);
-  return;
-}
-
-void
-link_socket_get_outgoing_addr (struct buffer *buf,
-			      const struct link_socket *sock,
-			      struct sockaddr_in *addr)
-{
-  mutex_lock (L_SOCK);
-  if (buf->len > 0)
-    {
-      struct link_socket_addr *lsa = sock->addr;
-      if (addr_defined (&lsa->actual))
-	{
-	  *addr = lsa->actual;
-	}
-      else
-	{
-	  msg (D_READ_WRITE, "No outgoing address to send packet");
-	  buf->len = 0;
-	}
-    }
-  mutex_unlock (L_SOCK);
-}
-
-void
-link_socket_close (struct link_socket *sock)
-{
-  if (sock->sd >= 0 && sock->sd != INETD_SOCKET_DESCRIPTOR)
-    {
-      openvpn_close_socket (sock->sd);
-#ifdef WIN32
-      overlapped_io_close (&sock->reads);
-      overlapped_io_close (&sock->writes);
-#endif
-      sock->sd = -1;
-    }
-  free_buf (&sock->stream_buf_init);
-}
-
-const char *
-print_sockaddr (const struct sockaddr_in *addr)
-{
-  return print_sockaddr_ex(addr, true, ":");
-}
-
-const char *
-print_sockaddr_ex (const struct sockaddr_in *addr, bool do_port, const char* separator)
-{
-  struct buffer out = alloc_buf_gc (64);
-  const int port = ntohs (addr->sin_port);
-
-  mutex_lock (L_INET_NTOA);
-  buf_printf (&out, "%s", (addr_defined (addr) ? inet_ntoa (addr->sin_addr) : "[local]"));
-  mutex_unlock (L_INET_NTOA);
-
-  if (do_port && port)
-    {
-      if (separator)
-	buf_printf (&out, "%s", separator);
-
-      buf_printf (&out, "%d", port);
-    }
-  return BSTR (&out);
-}
-
-struct proto_names {
-  const char *short_form;
-  const char *display_form;
-};
-
-/* Indexed by PROTO_x */
-static const struct proto_names proto_names[] = {
-  {"udp",        "UDPv4"},
-  {"tcp-server", "TCPv4_SERVER"},
-  {"tcp-client", "TCPv4_CLIENT"}
-};
-
-int
-ascii2proto (const char* proto_name)
-{
-  int i;
-  for (i = 0; i < PROTO_N; ++i)
-    if (!strcmp (proto_name, proto_names[i].short_form))
-      return i;
-  return -1;
-}
-
-const char *
-proto2ascii (int proto, bool display_form)
-{
-  if (proto < 0 || proto > PROTO_N)
-    return "[unknown protocol]";
-  else if (display_form)
-    return proto_names[proto].display_form;
-  else
-    return proto_names[proto].short_form;
-}
-
-const char *
-proto2ascii_all ()
-{
-  struct buffer out = alloc_buf_gc (256);
-  int i;
-
-  for (i = 0; i < PROTO_N; ++i)
-    {
-      if (i)
-	buf_printf(&out, " ");
-      buf_printf(&out, "[%s]", proto2ascii(i, false));
-    }
-  return BSTR (&out);
-}

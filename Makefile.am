@@ -31,9 +31,10 @@ sbin_PROGRAMS = openvpn
 nodist_openvpn_SOURCES = config.h
 openvpn_SOURCES = basic.h buffer.c buffer.h circ_list.h common.h \
 		  crypto.c crypto.h errlevel.h error.c error.h \
-		  event-wait.h fdmisc.c fdmisc.h fragment.c \
+		  fdmisc.c fdmisc.h fragment.c \
 		  fragment.h gremlin.c gremlin.h interval.h \
-		  lzo.c lzo.h memdbg.h misc.c misc.h mtu.c mtu.h openvpn.c \
+		  io.c io.h lzo.c lzo.h memdbg.h misc.c misc.h \
+	          mtu.c mtu.h openvpn.c \
 		  openvpn.h options.c options.h packet_id.c \
 		  packet_id.h reliable.c reliable.h session_id.c \
 		  session_id.h shaper.c shaper.h socket.c socket.h \
@@ -46,8 +47,8 @@ EXTRA_DIST = $(man_MANS) \
 	     easy-rsa sample-config-files sample-keys \
 	     sample-scripts gentoo openvpn.spec.in \
 	     config-win32.h \
-	     openvpn-win32.h \
-	     openvpn-win32.c \
+	     win32.h \
+	     win32.c \
 	     makefile.w32 \
 	     INSTALL.w32 \
 	     tap-win32

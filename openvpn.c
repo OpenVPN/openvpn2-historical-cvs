@@ -45,9 +45,10 @@
 #include "shaper.h"
 #include "thread.h"
 #include "interval.h"
-#include "event-wait.h"
+#include "io.h"
 #include "fragment.h"
 #include "openvpn.h"
+#include "win32.h"
 
 #include "memdbg.h"
 
@@ -248,7 +249,7 @@ openvpn (const struct options *options,
   /* tells us to free to_link buffer after it has been written to TCP/UDP port */
   bool free_to_link;
 
-  struct link_socket link_socket;   /* socket used for TCP/UDP connection to remote */
+  struct link_socket link_socket;  /* socket used for TCP/UDP connection to remote */
   struct sockaddr_in to_link_addr; /* IP address of remote */
 
   int max_rw_size_link = 0;        /* max size of packet we can send to remote */
@@ -465,7 +466,7 @@ openvpn (const struct options *options,
 	  init_key_type (&ks->key_type, options->ciphername,
 			 options->ciphername_defined, options->authname,
 			 options->authname_defined, options->keysize,
-			 options->test_crypto);
+			 options->test_crypto, true);
 
 	  /* Read cipher and hmac keys from shared secret file */
 	  read_key_file (&key, options->shared_secret_file);
@@ -562,8 +563,7 @@ openvpn (const struct options *options,
 	  init_key_type (&ks->key_type, options->ciphername,
 			 options->ciphername_defined, options->authname,
 			 options->authname_defined, options->keysize,
-			 true);
-
+			 true, true);
 
 	  /* TLS handshake authentication (--tls-auth) */
 	  if (options->tls_auth_file)
@@ -594,7 +594,6 @@ openvpn (const struct options *options,
       to.ssl_ctx = ks->ssl_ctx;
       to.key_type = ks->key_type;
       to.server = options->tls_server;
-      to.options = data_channel_options = options_string (options);
       to.packet_id = options->packet_id;
       to.packet_id_long_form = packet_id_long_form;
       to.transition_window = options->transition_window;
@@ -619,6 +618,10 @@ openvpn (const struct options *options,
 					 true,
 					 true);
 	}
+
+      /* If we are running over TCP, allow for
+	 length prefix */
+      socket_adjust_frame_parameters (&to.frame, &link_socket);
 
       /*
        * Initialize OpenVPN's master TLS-mode object.
@@ -700,7 +703,9 @@ openvpn (const struct options *options,
     {
       int size;
 
-      tls_multi_init_finalize (tls_multi, &frame);
+      data_channel_options = options_string (options, &frame);
+      msg (D_SHOW_DC_OPT, "Data Channel Options String: '%s'", data_channel_options);
+      tls_multi_init_finalize (tls_multi, &frame, data_channel_options);
       size = MAX_RW_SIZE_LINK (&tls_multi->opt.frame);
       if (size > max_rw_size_link)
 	max_rw_size_link = size;
@@ -758,11 +763,18 @@ openvpn (const struct options *options,
 
       /* run the up script */
       run_script (options->up_script, tuntap->actual, TUN_MTU_SIZE (&frame),
-		  max_rw_size_link, options->ifconfig_local, options->ifconfig_remote);
+		  max_rw_size_link, options->ifconfig_local, options->ifconfig_remote,
+		  "init");
     }
   else
     {
       msg (M_INFO, "Preserving previous TUN/TAP instance: %s", tuntap->actual);
+
+      /* run the up script if user specified --up-restart */
+      if (options->up_restart)
+	run_script (options->up_script, tuntap->actual, TUN_MTU_SIZE (&frame),
+		    max_rw_size_link, options->ifconfig_local, options->ifconfig_remote,
+		    "restart");
     }
 
 #ifdef HAVE_GETTIMEOFDAY
@@ -1163,7 +1175,8 @@ openvpn (const struct options *options,
       /*
        * Wait for something to happen.
        */
-      if (!signal_received) {
+      stat = 1; /* this will be our return "status" if select doesn't get called */
+      if (!signal_received && !SOCKET_READ_RESIDUAL (link_socket)) {
 	msg (D_SELECT, "SELECT %s|%s|%s|%s %d/%d",
 	     TUNTAP_READ_STAT (tuntap), 
 	     TUNTAP_WRITE_STAT (tuntap), 
@@ -1231,7 +1244,7 @@ openvpn (const struct options *options,
       if (stat > 0)
 	{
 	  /* Incoming data on TCP/UDP port */
-	  if (SOCKET_ISSET (link_socket, reads))
+	  if (SOCKET_READ_RESIDUAL (link_socket) || SOCKET_ISSET (link_socket, reads))
 	    {
 	      /*
 	       * Set up for recvfrom call to read datagram
@@ -1251,6 +1264,7 @@ openvpn (const struct options *options,
 		  /* received a disconnect from a connection-oriented protocol */
 		  signal_received = SIGUSR1;
 		  msg (M_INFO|M_ERRNO_SOCK, "Connection reset, restarting [%d]", status);
+		  sleep (2);
 		  break;		  
 		}
 
@@ -1741,9 +1755,18 @@ openvpn (const struct options *options,
       /* Run the down script -- note that it will run at reduced
 	 privilege if, for example, "--user nobody" was used. */
       run_script (options->down_script, tuntap_actual, TUN_MTU_SIZE (&frame),
-		  max_rw_size_link, options->ifconfig_local, options->ifconfig_remote);
+		  max_rw_size_link, options->ifconfig_local, options->ifconfig_remote,
+		  "init");
     }
-
+  else
+    {
+      /* run the down script on this restart if --up-restart was specified */
+      if (options->up_restart)
+	run_script (options->down_script, tuntap->actual, TUN_MTU_SIZE (&frame),
+		    max_rw_size_link, options->ifconfig_local, options->ifconfig_remote,
+		    "restart");
+    }
+  
 #ifdef USE_CRYPTO
   /*
    * Close packet-id persistance file

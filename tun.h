@@ -31,7 +31,7 @@
 #include "buffer.h"
 #include "error.h"
 #include "mtu.h"
-#include "openvpn-win32.h"
+#include "io.h"
 
 /*
  * Define a TUN/TAP dev.

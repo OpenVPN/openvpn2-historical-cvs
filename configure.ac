@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [1.5.0-pre1], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [1.4.99.1], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -428,4 +428,4 @@ if test "$DYNAMIC_MTU" = "yes"; then
    AC_DEFINE(FRAGMENT_ENABLE, 1, [Enable dynamic MTU capability])
 fi
 
-AC_OUTPUT(Makefile openvpn.spec)
+AC_OUTPUT(Makefile openvpn.spec config-win32.h)

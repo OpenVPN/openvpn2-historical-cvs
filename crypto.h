@@ -1,6 +1,6 @@
 /*
  *  OpenVPN -- An application to securely tunnel IP networks
- *             over a single UDP port, with support for SSL/TLS-based
+ *             over a single TCP/UDP port, with support for SSL/TLS-based
  *             session authentication and key exchange,
  *             packet encryption, packet authentication, and
  *             packet compression.
@@ -131,6 +131,14 @@ cipher_ok (const char* name)
 #define DES_check_key_parity(x) 1
 #endif
 
+#ifndef EVP_CIPHER_name
+#define EVP_CIPHER_name(e)		OBJ_nid2sn(EVP_CIPHER_nid(e))
+#endif
+
+#ifndef EVP_MD_name
+#define EVP_MD_name(e)			OBJ_nid2sn(EVP_MD_type(e))
+#endif
+
 /*
  * Max size in bytes of any cipher key that might conceivably be used.
  *
@@ -208,7 +216,7 @@ struct crypto_options
 void init_key_type (struct key_type *kt, const char *ciphername,
 		    bool ciphername_defined, const char *authname,
 		    bool authname_defined, int keysize,
-		    bool cfb_ofb_allowed);
+		    bool cfb_ofb_allowed, bool warn);
 
 void read_key_file (struct key *key, const char *filename);
 
@@ -230,6 +238,10 @@ void write_key (const struct key *key, const struct key_type *kt,
 int read_key (struct key *key, const struct key_type *kt, struct buffer *buf);
 
 bool cfb_ofb_mode (const struct key_type* kt);
+
+const char *kt_cipher_name (const struct key_type *kt);
+const char *kt_digest_name (const struct key_type *kt);
+int kt_key_size (const struct key_type *kt);
 
 /* enc parameter in init_key_ctx */
 #define DO_ENCRYPT 1

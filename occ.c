@@ -357,8 +357,7 @@ process_received_occ_msg (struct context *c)
 	       c->c2.max_recv_size_remote,
 	       c->c2.max_send_size_remote,
 	       c->c2.max_recv_size_local);
-	  if (!c->options.mssfix_defined
-	      && !c->options.fragment
+	  if (!c->options.fragment
 	      && c->options.proto == PROTO_UDPv4
 	      && c->c2.max_send_size_local > TUN_MTU_MIN
 	      && (c->c2.max_recv_size_remote < c->c2.max_send_size_local

@@ -106,12 +106,12 @@ tunnel_point_to_point (struct context *c)
   }
 
 static void
-tunnel_nonforking_udp_server (struct context *top)
+tunnel_server (struct context *top)
 {
   struct multi_context multi;
 
   ASSERT (top->options.proto == PROTO_UDPv4);
-  ASSERT (top->options.mode == MODE_NONFORKING_UDP_SERVER);
+  ASSERT (top->options.mode == MODE_SERVER);
 
   multi_init (&multi, top);
   context_clear_2 (top);
@@ -224,8 +224,8 @@ main (int argc, char *argv[])
 		  tunnel_point_to_point (&c);
 		  break;
 #if P2MP
-		case MODE_NONFORKING_UDP_SERVER:
-		  tunnel_nonforking_udp_server (&c);
+		case MODE_SERVER:
+		  tunnel_server (&c);
 		  break;
 #endif
 		default:
@@ -235,6 +235,10 @@ main (int argc, char *argv[])
 	      /* any signals received? */
 	      if (IS_SIG (&c))
 		print_signal (c.sig, NULL);
+
+	      /* Convert SIGUSR1 -> SIGHUP if no --persist options specified */
+	      if (!is_persist_option (&c.options) && c.sig->signal_received == SIGUSR1)
+		c.sig->signal_received = SIGHUP;
 	    }
 	  while (c.sig->signal_received == SIGUSR1);
 

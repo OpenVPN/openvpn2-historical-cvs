@@ -64,18 +64,22 @@ struct gc_arena;
 /*
  * Default MTU of network over which tunnel data will pass by TCP/UDP.
  */
-#define LINK_MTU_DEFAULT   1300
+#define LINK_MTU_DEFAULT   1500
 
 /*
  * Default MTU of tunnel device.
  */
-#define TUN_MTU_DEFAULT    1300
+#define TUN_MTU_DEFAULT    1500
 
 /*
  * MTU Defaults for TAP devices
  */
-#define TAP_MTU_DEFAULT        ETHERNET_MTU
 #define TAP_MTU_EXTRA_DEFAULT  32
+
+/*
+ * Default MSSFIX value, used for reducing TCP MTU size
+ */
+#define MSSFIX_DEFAULT     1450
 
 struct frame {
   /*

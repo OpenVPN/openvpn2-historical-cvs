@@ -81,6 +81,7 @@ static const char usage_message[] =
   "Tunnel Options:\n"
   "--local host    : Local host name or ip address.\n"
   "--remote host   : Remote host name or ip address.\n"
+  "--mode m        : Major mode, m = 'p2p' (default, point-to-point) or 'server'.\n"
   "--proto p       : Use protocol p for communicating with peer.\n"
   "                  p = udp (default), tcp-server, or tcp-client\n"
   "--connect-retry n : For --proto tcp-client, number of seconds to wait\n"
@@ -92,6 +93,18 @@ static const char usage_message[] =
   "--socks-proxy s [p]: Connect to remote host through a Socks5 proxy at address\n"
   "                  s and port p (default port = 1080).\n"
   "--socks-proxy-retry : Retry indefinitely on Socks proxy errors.\n"
+#if P2MP
+  "--push \"option\" : Push a config file option back to the peer for remote\n"
+  "                  execution.  Peer must specify --pull in its config file.\n"
+  "--pull          : Accept certain config file options from the peer as if they\n"
+  "                  were part of the local config file.  Must be specified\n"
+  "                  when connecting to a '--mode server' remote host.\n"
+  "--ifconfig-pool start-IP end-IP : Set aside a pool of /30 subnets to be\n"
+  "                  dynamically allocated to connecting clients.\n"
+  "                  Required for --mode server, not valid for --mode p2p.\n"
+  "--hash-size r v : Set the size of the real address hash table to r and the\n"
+  "                  virtual address table to v.  Only valid for --mode server.\n"
+#endif
   "--resolv-retry n: If hostname resolve fails for --remote, retry\n"
   "                  resolve for n seconds before failing (disabled by default).\n"
   "                  Set n=\"infinite\" to retry indefinitely.\n"
@@ -151,12 +164,12 @@ static const char usage_message[] =
   "--passtos       : TOS passthrough (applies to IPv4 only).\n"
 #endif
   "--tun-mtu n     : Take the TUN/TAP device MTU to be n and derive the\n"
-  "                  TCP/UDP MTU from it (default TAP=%d).\n"
+  "                  TCP/UDP MTU from it (default=%d).\n"
   "--tun-mtu-extra n : Assume that TUN/TAP device might return as many\n"
   "                  as n bytes more than the tun-mtu size on read\n"
   "                  (default TUN=0 TAP=%d).\n"
   "--link-mtu n    : Take the TCP/UDP device MTU to be n and derive the tun MTU\n"
-  "                  from it (default TUN=%d).\n"
+  "                  from it.\n"
   "--mtu-disc type : Should we do Path MTU discovery on TCP/UDP channel?\n"
   "                  'no'    -- Never send DF (Don't Fragment) frames\n"
   "                  'maybe' -- Use per-route hints\n"
@@ -374,6 +387,7 @@ init_options (struct options *o)
   o->link_mtu = LINK_MTU_DEFAULT;
   o->mtu_discover_type = -1;
   o->occ = true;
+  o->mssfix = MSSFIX_DEFAULT;
 #ifdef USE_LZO
   o->comp_lzo_adaptive = true;
 #endif
@@ -400,11 +414,7 @@ init_options (struct options *o)
   o->use_iv = true;
   o->key_direction = KEY_DIRECTION_BIDIRECTIONAL;
 #ifdef USE_SSL
-#ifdef KEY_METHOD_DEFAULT_2
   o->key_method = 2;
-#else
-  o->key_method = 1;
-#endif
   o->tls_timeout = 2;
   o->renegotiate_seconds = 3600;
   o->handshake_window = 60;
@@ -465,6 +475,15 @@ string_substitute (const char *src, int from, int to, struct gc_arena *gc)
     }
   while (c);
   return ret;
+}
+
+bool
+is_persist_option (const struct options *o)
+{
+  return o->persist_tun
+      || o->persist_key
+      || o->persist_local_ip
+      || o->persist_remote_ip;
 }
 
 #ifdef WIN32
@@ -617,7 +636,6 @@ show_settings (const struct options *o)
   SHOW_BOOL (persist_remote_ip);
   SHOW_BOOL (persist_key);
 
-  SHOW_BOOL (mssfix_defined);
   SHOW_INT (mssfix);
   
 #if PASSTOS_CAPABILITY
@@ -813,18 +831,7 @@ options_postprocess (struct options *options, bool first_time)
   {
     if (!options->tun_mtu_defined && !options->link_mtu_defined)
       {
-	if ((dev == DEV_TYPE_TAP) || WIN32_0_1)
-	  {
-	    options->tun_mtu_defined = true;
-	    options->tun_mtu = TAP_MTU_DEFAULT;
-	  }
-	else
-	  {
-	    if (pull || options->ifconfig_local || options->ifconfig_remote_netmask)
-	      options->link_mtu_defined = true;
-	    else
-	      options->tun_mtu_defined = true;
-	  }
+	options->tun_mtu_defined = true;
       }
     if ((dev == DEV_TYPE_TAP) && !options->tun_mtu_extra_defined)
       {
@@ -893,6 +900,27 @@ options_postprocess (struct options *options, bool first_time)
 
   if (options->socks_proxy_server && options->proto == PROTO_TCPv4_SERVER)
     msg (M_USAGE, "Options error: --socks-proxy can not be used in TCP Server mode");
+
+#if P2MP
+  /*
+   * Check consistency of point-to-multipoint mode options.
+   */
+  if (options->mode == MODE_SERVER)
+    {
+      if (!options->ifconfig_pool_defined)
+	msg (M_USAGE, "Options error: --mode server requires --ifconfig-pool");
+      if (options->pull)
+	msg (M_USAGE, "Options error: --pull cannot be used with --mode server");
+    }
+  else
+    {
+      if (options->ifconfig_pool_defined)
+	msg (M_USAGE, "Options error: --ifconfig-pool requires --mode server");
+      if (options->real_hash_size != defaults.real_hash_size
+	  || options->virtual_hash_size != defaults.virtual_hash_size)
+	msg (M_USAGE, "Options error: --hash-size requires --mode server");
+    }
+#endif
 
 #ifdef USE_CRYPTO
 
@@ -1185,7 +1213,7 @@ usage (void)
 	   title_string,
 	   o.connect_retry_seconds,
 	   o.local_port, o.remote_port,
-	   TAP_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT, LINK_MTU_DEFAULT,
+	   TUN_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT,
 	   o.verbosity,
 	   o.authname, o.ciphername,
            o.replay_window, o.replay_time,
@@ -1196,7 +1224,7 @@ usage (void)
 	   title_string,
 	   o.connect_retry_seconds,
 	   o.local_port, o.remote_port,
-	   TAP_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT, LINK_MTU_DEFAULT,
+	   TUN_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT,
 	   o.verbosity,
 	   o.authname, o.ciphername,
            o.replay_window, o.replay_time);
@@ -1205,7 +1233,7 @@ usage (void)
 	   title_string,
 	   o.connect_retry_seconds,
 	   o.local_port, o.remote_port,
-	   TAP_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT, LINK_MTU_DEFAULT,
+	   TUN_MTU_DEFAULT, TAP_MTU_EXTRA_DEFAULT,
 	   o.verbosity);
 #endif
   fflush(fp);
@@ -1381,7 +1409,8 @@ add_option (struct options *options,
 	    int line,
 	    int level,
 	    int msglevel,
-	    unsigned int permission_mask);
+	    unsigned int permission_mask,
+	    unsigned int *option_types_found);
 
 static void
 read_config_file (struct options *options,
@@ -1415,7 +1444,7 @@ read_config_file (struct options *options,
 	{
 	  if (strlen (p[0]) >= 3 && !strncmp (p[0], "--", 2))
 	    p[0] += 2;
-	  add_option (options, 0, p, file, line_num, level, msglevel, permission_mask);
+	  add_option (options, 0, p, file, line_num, level, msglevel, permission_mask, NULL);
 	}
     }
   fclose (fp);
@@ -1458,20 +1487,20 @@ parse_argv (struct options* options,
 		break;
 	    }
 	}
-      i = add_option (options, i, p, NULL, 0, 0, msglevel, permission_mask);
+      i = add_option (options, i, p, NULL, 0, 0, msglevel, permission_mask, NULL);
     }
 }
 
 bool
-apply_push_options (struct options *options, struct buffer *buf)
+apply_push_options (struct options *options,
+		    struct buffer *buf,
+		    unsigned int permission_mask,
+		    unsigned int *option_types_found)
 {
   char line[256];
   int line_num = 0;
   const char *file = "[PUSH-OPTIONS]";
-  const int msglevel = M_WARN;
-
-  /* the are the classes of options we will accept from the server via push/pull */
-  const unsigned int permission_mask = (OPT_P_IFCONFIG|OPT_P_ROUTE|OPT_P_IPWIN32|OPT_P_SETENV);
+  const int msglevel = D_PUSH_ERRORS;
 
   while (buf_parse (buf, ',', line, sizeof (line)))
     {
@@ -1480,16 +1509,20 @@ apply_push_options (struct options *options, struct buffer *buf)
       ++line_num;
       if (parse_line (line, p, SIZE (p), file, line_num, msglevel, &options->gc))
 	{
-	  add_option (options, 0, p, file, line_num, 0, msglevel, permission_mask);
+	  add_option (options, 0, p, file, line_num, 0, msglevel, permission_mask, option_types_found);
 	}
     }
   return true;
 }
 
-#define VERIFY_PERMISSION(mask) { if (!verify_permission(p[0], (mask), permission_mask, msglevel)) goto err; }
+#define VERIFY_PERMISSION(mask) { if (!verify_permission(p[0], (mask), permission_mask, option_types_found, msglevel)) goto err; }
 
 static bool
-verify_permission (const char *name, unsigned int type, unsigned int allowed, int msglevel)
+verify_permission (const char *name,
+		   unsigned int type,
+		   unsigned int allowed,
+		   unsigned int *found,
+		   int msglevel)
 {
   if (!(type & allowed))
     {
@@ -1497,7 +1530,11 @@ verify_permission (const char *name, unsigned int type, unsigned int allowed, in
       return false;
     }
   else
-    return true;
+    {
+      if (found)
+	*found |= type;
+      return true;
+    }
 }
 
 static int
@@ -1508,7 +1545,8 @@ add_option (struct options *options,
 	    int line,
 	    int level,
 	    int msglevel,
-	    unsigned int permission_mask)
+	    unsigned int permission_mask,
+	    unsigned int *option_types_found)
 {
   struct gc_arena gc = gc_new ();
   ASSERT (MAX_PARMS >= 5);
@@ -1547,8 +1585,8 @@ add_option (struct options *options,
       if (streq (p[1], "p2p"))
 	options->mode = MODE_POINT_TO_POINT;
 #if P2MP
-      else if (streq (p[1], "udp-server"))
-	options->mode = MODE_NONFORKING_UDP_SERVER;
+      else if (streq (p[1], "server"))
+	options->mode = MODE_SERVER;
 #endif
       else
 	{
@@ -1576,24 +1614,24 @@ add_option (struct options *options,
     }
   else if (streq (p[0], "tun-ipv6"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_UP);
       options->tun_ipv6 = true;
     }
   else if (streq (p[0], "ifconfig") && p[1] && p[2])
     {
       i += 2;
-      VERIFY_PERMISSION (OPT_P_IFCONFIG);
+      VERIFY_PERMISSION (OPT_P_UP);
       options->ifconfig_local = p[1];
       options->ifconfig_remote_netmask = p[2];
     }
   else if (streq (p[0], "ifconfig-noexec"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_UP);
       options->ifconfig_noexec = true;
     }
   else if (streq (p[0], "ifconfig-nowarn"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_UP);
       options->ifconfig_nowarn = true;
     }
   else if (streq (p[0], "local") && p[1])
@@ -1785,33 +1823,33 @@ add_option (struct options *options,
   else if (streq (p[0], "verb") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_MESSAGES);
       options->verbosity = positive (atoi (p[1]));
     }
   else if (streq (p[0], "mute") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_MESSAGES);
       options->mute = positive (atoi (p[1]));
     }
   else if ((streq (p[0], "link-mtu") || streq (p[0], "udp-mtu")) && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_MTU);
       options->link_mtu = positive (atoi (p[1]));
       options->link_mtu_defined = true;
     }
   else if (streq (p[0], "tun-mtu") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_MTU);
       options->tun_mtu = positive (atoi (p[1]));
       options->tun_mtu_defined = true;
     }
   else if (streq (p[0], "tun-mtu-extra") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_MTU);
       options->tun_mtu_extra = positive (atoi (p[1]));
       options->tun_mtu_extra_defined = true;
     }
@@ -1824,13 +1862,13 @@ add_option (struct options *options,
   else if (streq (p[0], "fragment") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_MTU);
       options->fragment = positive (atoi (p[1]));
     }
   else if (streq (p[0], "mtu-disc") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_MTU);
       options->mtu_discover_type = translate_mtu_discover_type_name (p[1]);
     }
   else if (streq (p[0], "mtu-test"))
@@ -1841,14 +1879,14 @@ add_option (struct options *options,
   else if (streq (p[0], "nice") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_NICE);
       options->nice = atoi (p[1]);
     }
 #ifdef USE_PTHREAD
   else if (streq (p[0], "nice-work") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_NICE);
       options->nice_work = atoi (p[1]);
     }
   else if (streq (p[0], "threads") && p[1])
@@ -1867,7 +1905,7 @@ add_option (struct options *options,
     {
 #ifdef HAVE_GETTIMEOFDAY
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_SHAPER);
       options->shaper = atoi (p[1]);
       if (options->shaper < SHAPER_MIN || options->shaper > SHAPER_MAX)
 	{
@@ -1922,7 +1960,7 @@ add_option (struct options *options,
   else if (streq (p[0], "inactive") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TIMER);
       options->inactivity_timeout = positive (atoi (p[1]));
     }
   else if (streq (p[0], "proto") && p[1])
@@ -1995,13 +2033,13 @@ add_option (struct options *options,
   else if (streq (p[0], "ping") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TIMER);
       options->ping_send_timeout = positive (atoi (p[1]));
     }
   else if (streq (p[0], "ping-exit") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TIMER);
       if (options->ping_rec_timeout_action)
 	ping_rec_err (msglevel);
       options->ping_rec_timeout = positive (atoi (p[1]));
@@ -2010,7 +2048,7 @@ add_option (struct options *options,
   else if (streq (p[0], "ping-restart") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TIMER);
       if (options->ping_rec_timeout_action)
 	ping_rec_err (msglevel);
       options->ping_rec_timeout = positive (atoi (p[1]));
@@ -2018,27 +2056,27 @@ add_option (struct options *options,
     }
   else if (streq (p[0], "ping-timer-rem"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TIMER);
       options->ping_timer_remote = true;
     }
   else if (streq (p[0], "persist-tun"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_PERSIST);
       options->persist_tun = true;
     }
   else if (streq (p[0], "persist-key"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_PERSIST);
       options->persist_key = true;
     }
   else if (streq (p[0], "persist-local-ip"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_PERSIST);
       options->persist_local_ip = true;
     }
   else if (streq (p[0], "persist-remote-ip"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_PERSIST);
       options->persist_remote_ip = true;
     }
   else if (streq (p[0], "route") && p[1])
@@ -2097,15 +2135,11 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_SETENV);
      setenv_str (p[1], p[2]);
     }
-  else if (streq (p[0], "mssfix"))
+  else if (streq (p[0], "mssfix") && p[1])
     {
+      ++i;
       VERIFY_PERMISSION (OPT_P_GENERAL);
-      options->mssfix_defined = true;
-      if (p[1])
-	{
-	  ++i;
-	  options->mssfix = positive (atoi (p[1]));
-	}
+      options->mssfix = positive (atoi (p[1]));
     }
   else if (streq (p[0], "disable-occ"))
     {
@@ -2117,7 +2151,7 @@ add_option (struct options *options,
     {
       ++i;
       VERIFY_PERMISSION (OPT_P_GENERAL);
-      push_option (options, p[1]);
+      push_option (options, p[1], msglevel);
     }
   else if (streq (p[0], "pull"))
     {
@@ -2298,12 +2332,12 @@ add_option (struct options *options,
 #ifdef USE_LZO
   else if (streq (p[0], "comp-lzo"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_COMP);
       options->comp_lzo = true;
     }
   else if (streq (p[0], "comp-noadapt"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_COMP);
       options->comp_lzo_adaptive = false;
     }
 #endif /* USE_LZO */
@@ -2337,7 +2371,7 @@ add_option (struct options *options,
   else if (streq (p[0], "auth") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_CRYPTO);
       options->authname_defined = true;
       options->authname = p[1];
       if (streq (options->authname, "none"))
@@ -2348,13 +2382,13 @@ add_option (struct options *options,
     }
   else if (streq (p[0], "auth"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_CRYPTO);
       options->authname_defined = true;
     }
   else if (streq (p[0], "cipher") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_CRYPTO);
       options->ciphername_defined = true;
       options->ciphername = p[1];
       if (streq (options->ciphername, "none"))
@@ -2365,17 +2399,17 @@ add_option (struct options *options,
     }
   else if (streq (p[0], "cipher"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_CRYPTO);
       options->ciphername_defined = true;
     }
   else if (streq (p[0], "no-replay"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_CRYPTO);
       options->replay = false;
     }
   else if (streq (p[0], "replay-window"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_CRYPTO);
       if (p[1])
 	{
 	  ++i;
@@ -2411,7 +2445,7 @@ add_option (struct options *options,
     }
   else if (streq (p[0], "no-iv"))
     {
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_CRYPTO);
       options->use_iv = false;
     }
   else if (streq (p[0], "replay-persist") && p[1])
@@ -2429,7 +2463,7 @@ add_option (struct options *options,
   else if (streq (p[0], "keysize") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_CRYPTO);
       options->keysize = atoi (p[1]) / 8;
       if (options->keysize < 0 || options->keysize > MAX_CIPHER_KEY_LENGTH)
 	{
@@ -2515,37 +2549,37 @@ add_option (struct options *options,
   else if (streq (p[0], "tls_timeout") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TLS_PARMS);
       options->tls_timeout = positive (atoi (p[1]));
     }
   else if (streq (p[0], "reneg-bytes") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TLS_PARMS);
       options->renegotiate_bytes = positive (atoi (p[1]));
     }
   else if (streq (p[0], "reneg-pkts") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TLS_PARMS);
       options->renegotiate_packets = positive (atoi (p[1]));
     }
   else if (streq (p[0], "reneg-sec") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TLS_PARMS);
       options->renegotiate_seconds = positive (atoi (p[1]));
     }
   else if (streq (p[0], "hand-window") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TLS_PARMS);
       options->handshake_window = positive (atoi (p[1]));
     }
   else if (streq (p[0], "tran-window") && p[1])
     {
       ++i;
-      VERIFY_PERMISSION (OPT_P_GENERAL);
+      VERIFY_PERMISSION (OPT_P_TLS_PARMS);
       options->transition_window = positive (atoi (p[1]));
     }
   else if (streq (p[0], "tls-auth") && p[1])

@@ -299,7 +299,8 @@ struct context_2
   /* return from main event loop select (or windows equivalent) */
   int select_status;
 
-  bool enable_up_delay;
+  /* indicates that the do_up_delay function has run */
+  bool do_up_delay_ran;
 
 #if P2MP
 

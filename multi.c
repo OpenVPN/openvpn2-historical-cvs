@@ -123,6 +123,8 @@ multi_close_instance (struct multi_context *m, struct multi_instance *mi)
 {
   msg (D_MULTI_DEBUG, "MULTI: multi_close_instance called");
 
+  schedule_remove_entry (m->schedule, (struct schedule_entry *) mi);
+
   if (mi->did_open_context)
     {
       multi_close_context (&mi->context);
@@ -137,7 +139,7 @@ multi_close_instance (struct multi_context *m, struct multi_instance *mi)
     }
   if (mi->did_ifconfig)
     {
-      ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle);
+      ASSERT (ifconfig_pool_release (m->ifconfig_pool, mi->vaddr_handle));
     }
   if (mi->did_routes)
     {
@@ -214,6 +216,8 @@ multi_open_instance (struct multi_context *m, struct context *t)
 
   ALLOC_OBJ_CLEAR (mi, struct multi_instance);
 
+  t->c2.current = mi->context.c2.current = time (NULL);
+
   msg (D_MULTI_DEBUG, "MULTI: multi_open_instance called");
 
   mroute_list_init (&mi->real);
@@ -241,9 +245,10 @@ multi_open_instance (struct multi_context *m, struct context *t)
     in_addr_t local, remote;
     struct sockaddr_in remote_si;
 
-    if (ifconfig_pool_acquire_30_net (m->ifconfig_pool, &local, &remote) < 0)
+    mi->vaddr_handle = ifconfig_pool_acquire_30_net (m->ifconfig_pool, &local, &remote);
+    if (mi->vaddr_handle < 0)
       {
-	msg (D_MULTI_ERROR, "MULTI: client connection rejected because no free --ifconfig-pool addresses are available");
+	msg (D_MULTI_ERRORS, "MULTI: client connection rejected because no free --ifconfig-pool addresses are available");
 	goto err;
       }
 
@@ -261,7 +266,7 @@ multi_open_instance (struct multi_context *m, struct context *t)
 
     if (!hash_add (m->vhash, &mi->virtual.addr, mi))
       {
-	msg (D_MULTI_ERROR, "MULTI: unable to add virtual address [%s] to global hash table",
+	msg (D_MULTI_ERRORS, "MULTI: unable to add virtual address [%s] to global hash table",
 	     mroute_addr_print (&mi->virtual.addr, &gc));
 	goto err;
       }
@@ -273,7 +278,7 @@ multi_open_instance (struct multi_context *m, struct context *t)
 
   if (!multi_process_post (m, mi))
     {
-      msg (D_MULTI_ERROR, "MULTI: signal occurred during client instance initialization");
+      msg (D_MULTI_ERRORS, "MULTI: signal occurred during client instance initialization");
       goto err;
     }
 
@@ -448,7 +453,7 @@ multi_process_post (struct multi_context *m, struct multi_instance *mi)
       if (m->link_out == mi)
 	m->link_out = NULL;
       if (m->tun_out == mi)
-	m->link_out = NULL;
+	m->tun_out = NULL;
       multi_close_instance (m, mi);
       return false;
     }
@@ -509,6 +514,9 @@ multi_process_incoming_link (struct multi_context *m, struct context *t)
       /* transfer from-addr from top-level context buffer to instance */
       c->c2.from = t->c2.from;
 
+      /* copy current time to instance */
+      c->c2.current = t->c2.current;
+
       /* decrypt in instance context */
       process_incoming_link (c);
 
@@ -547,6 +555,9 @@ multi_process_incoming_tun (struct multi_context *m, struct context *t)
       /* transfer packet pointer from top-level context buffer to instance */
       c->c2.buf = t->c2.buf;
      
+      /* copy current time to instance */
+      c->c2.current = t->c2.current;
+
       /* encrypt in instance context */
       process_incoming_tun (c);
 
@@ -561,6 +572,7 @@ multi_process_outgoing_link (struct multi_context *m, struct context *t)
   struct multi_instance *mi = m->link_out;
   ASSERT (mi);
   m->link_out = NULL;
+  mi->context.c2.current = t->c2.current;
   process_outgoing_link (&mi->context, &t->c2.link_socket);
   multi_process_post (m, mi);
 }
@@ -571,6 +583,7 @@ multi_process_outgoing_tun (struct multi_context *m, struct context *t)
   struct multi_instance *mi = m->tun_out;
   ASSERT (mi);
   m->tun_out = NULL;
+  mi->context.c2.current = t->c2.current;
   process_outgoing_tun (&mi->context, &t->c1.tuntap);
   multi_process_post (m, mi);
 }
@@ -617,6 +630,7 @@ multi_process_timeout (struct multi_context *m, struct context *t)
   /* instance marked for wakeup in multi_get_timeout? */
   if (m->earliest_wakeup)
     {
+      m->earliest_wakeup->context.c2.current = t->c2.current;
       multi_process_post (m, m->earliest_wakeup);
       m->earliest_wakeup = NULL;
     }

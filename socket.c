@@ -858,14 +858,25 @@ socket_adjust_frame_parameters (struct frame *frame, int proto)
 void
 link_socket_connection_initiated (const struct buffer *buf,
 				  struct link_socket *sock,
-				  const struct sockaddr_in *addr)
+				  const struct sockaddr_in *addr,
+				  const char *common_name)
 {
   struct gc_arena gc = gc_new ();
   struct link_socket_addr *lsa = sock->lsa;
   lsa->actual = *addr; /* Note: skip this line for --force-dest */
   sock->set_outgoing_initial = true;
   setenv_sockaddr ("trusted", &lsa->actual);
-  msg (M_INFO, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual, &gc));
+
+  /* Print connection initiated message, with common name if available */
+  {
+    struct buffer out = alloc_buf_gc (256, &gc);
+    if (common_name)
+      buf_printf (&out, "[%s] ", common_name);
+    buf_printf (&out, "Peer Connection Initiated with %s", print_sockaddr (&lsa->actual, &gc));
+    msg (M_INFO, "%s", BSTR (&out));
+  }
+
+  /* Process --ipchange option */
   if (sock->ipchange_command)
     {
       struct buffer out = alloc_buf_gc (512, &gc);

@@ -26,6 +26,7 @@
 #ifndef PING_H
 #define PING_H
 
+#include "init.h"
 #include "forward.h"
 
 extern const uint8_t ping_string[];

@@ -71,7 +71,7 @@ send_push_reply (struct context *c)
 }
 
 void
-push_option (struct options *o, const char *opt)
+push_option (struct options *o, const char *opt, int msglevel)
 {
   int len;
   bool first = false;
@@ -83,7 +83,7 @@ push_option (struct options *o, const char *opt)
 
   len = strlen (o->push_list->options);
   if (len + strlen (opt) + 2 >= MAX_PUSH_LIST_LEN)
-    msg (M_USAGE, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
+    msg (msglevel, "Maximum length of --push buffer (%d) has been exceeded", MAX_PUSH_LIST_LEN);
   if (!first)
     strcat (o->push_list->options, ",");
   strcat (o->push_list->options, opt);
@@ -92,7 +92,9 @@ push_option (struct options *o, const char *opt)
 int
 process_incoming_push_msg (struct context *c,
 			   struct buffer *buf,
-			   bool honor_received_options)
+			   bool honor_received_options,
+			   unsigned int permission_mask,
+			   int *option_types_found)
 {
   int ret = PUSH_MSG_ERROR;
   if (buf_string_compare_advance (buf, "PUSH_REQUEST"))
@@ -102,7 +104,10 @@ process_incoming_push_msg (struct context *c,
     }
   else if (honor_received_options && buf_string_compare_advance (buf, "PUSH_REPLY,"))
     {
-      if (apply_push_options (&c->options, buf))
+      if (apply_push_options (&c->options,
+			      buf,
+			      permission_mask,
+			      option_types_found))
 	ret = PUSH_MSG_REPLY;
       /* show_settings (&c->options); */
     }

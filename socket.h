@@ -245,7 +245,8 @@ void link_socket_inherit_passive (struct link_socket *dest, const struct link_so
 
 void link_socket_connection_initiated (const struct buffer *buf,
 				       struct link_socket *sock,
-				       const struct sockaddr_in *addr);
+				       const struct sockaddr_in *addr,
+				       const char *common_name);
 
 void link_socket_bad_incoming_addr (struct buffer *buf,
 				    const struct link_socket *sock,
@@ -424,7 +425,8 @@ link_socket_get_outgoing_addr (struct buffer *buf,
 static inline void
 link_socket_set_outgoing_addr (const struct buffer *buf,
 			       struct link_socket *sock,
-			       const struct sockaddr_in *addr)
+			       const struct sockaddr_in *addr,
+			       const char *common_name)
 {
   if (!buf || buf->len > 0)
     {
@@ -439,7 +441,7 @@ link_socket_set_outgoing_addr (const struct buffer *buf,
 	      || addr_match_proto (addr, &lsa->remote, sock->proto))
 	  )
 	{
-	  link_socket_connection_initiated (buf, sock, addr);
+	  link_socket_connection_initiated (buf, sock, addr, common_name);
 	}
     }
 }

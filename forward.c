@@ -105,30 +105,6 @@ check_tls_errors_dowork (struct context *c)
 }
 #endif
 
-static void
-do_up_delay (struct context *c)
-{
-  if (c->c2.enable_up_delay)
-    {
-      /* if --up-delay specified, open tun, do ifconfig, and run up script now */
-      if (c->options.up_delay)
-	{
-	  c->c2.did_open_tun = do_open_tun (c);
-	  TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
-	  c->c2.current = time (NULL);
-	}
-
-      if (c->c2.did_open_tun)
-	{
-	  /* if --route-delay was specified, start timer */
-	  if (c->options.route_delay_defined)
-	    event_timeout_init (&c->c2.route_wakeup, c->c2.current,
-				c->options.route_delay);
-	}
-      c->c2.enable_up_delay = false;
-    }
-}
-
 /*
  * Handle incoming configuration
  * messages on the control channel.
@@ -144,23 +120,28 @@ check_incoming_control_channel_dowork (struct context *c)
       struct buffer buf = alloc_buf_gc (len, &gc);
       if (tls_rec_payload (c->c2.tls_multi, &buf))
 	{
-	  msg (D_LOW, "NOTE: Received control message: '%s'", BSTR (&buf));
+	  msg (D_PUSH, "PUSH: Received control message: '%s'", BSTR (&buf));
 	  if (buf_string_match_head_str (&buf, "PUSH_"))
 	    {
-	      const int status = process_incoming_push_msg (c, &buf, c->options.pull);
+	      unsigned int option_types_found = 0;
+	      const int status = process_incoming_push_msg (c,
+							    &buf,
+							    c->options.pull,
+							    pull_permission_mask (),
+							    &option_types_found);
 	      if (status == PUSH_MSG_ERROR)
-		msg (D_LOW, "NOTE: Received bad push/pull message");
+		msg (D_PUSH_ERRORS, "WARNING: Received bad push/pull message: %s", BSTR (&buf));
 	      else if (status == PUSH_MSG_REPLY)
-		do_up_delay (c); /* delay bringing tun/tap up until --push parms received from remote */
+		do_up_delay (c, true, option_types_found); /* delay bringing tun/tap up until --push parms received from remote */
 	    }
 	  else
 	    {
-	      msg (D_LOW, "NOTE: Received unknown control message");
+	      msg (D_PUSH_ERRORS, "WARNING: Received unknown control message: %s", BSTR (&buf));
 	    }
 	}
       else
 	{
-	  msg (D_LOW, "NOTE: Receive control message failed");
+	  msg (D_PUSH_ERRORS, "WARNING: Receive control message failed");
 	}
       gc_free (&gc);
     }
@@ -185,7 +166,7 @@ check_connection_established_dowork (struct context *c)
 	  else
 #endif
 	    {
-	      do_up_delay (c);
+	      do_up_delay (c, false, 0);
 	    }
 
 	  event_timeout_clear (&c->c2.wait_for_connect);
@@ -234,9 +215,12 @@ check_add_routes_dowork (struct context *c)
 void
 check_inactivity_timeout_dowork (struct context *c)
 {
-  msg (M_INFO, "Inactivity timeout (--inactive), exiting");
+  struct gc_arena gc = gc_new ();
+  msg (M_INFO, "%sInactivity timeout (--inactive), exiting",
+       format_common_name (c, &gc));
   c->sig->signal_received = SIGTERM;
   c->sig->signal_text = "inactive";
+  gc_free (&gc);
 }
 
 /*
@@ -596,7 +580,7 @@ process_incoming_link (struct context *c)
        * Also, update the persisted version of our packet-id.
        */
       if (!TLS_MODE)
-	link_socket_set_outgoing_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from);
+	link_socket_set_outgoing_addr (&c->c2.buf, &c->c2.link_socket, &c->c2.from, NULL);
 
       /* reset packet received timer */
       if (c->options.ping_rec_timeout && c->c2.buf.len > 0)
@@ -685,7 +669,7 @@ process_incoming_tun (struct context *c)
        * The --passtos and --mssfix options require
        * us to examine the IPv4 header.
        */
-      if (c->options.mssfix_defined
+      if (c->options.mssfix
 #if PASSTOS_CAPABILITY
 	  || c->options.passtos
 #endif
@@ -706,7 +690,7 @@ process_incoming_tun (struct context *c)
 #endif
 			  
 	      /* possibly alter the TCP MSS */
-	      if (c->options.mssfix_defined)
+	      if (c->options.mssfix)
 		mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&c->c2.frame)));
 	    }
 	}
@@ -834,14 +818,14 @@ process_outgoing_tun (struct context *c, struct tuntap *tt)
    * The --mssfix option requires
    * us to examine the IPv4 header.
    */
-  if (c->options.mssfix_defined)
+  if (c->options.mssfix)
     {
       struct buffer ipbuf = c->c2.to_tun;
 
       if (is_ipv4 (tt->type, &ipbuf))
 	{
 	  /* possibly alter the TCP MSS */
-	  if (c->options.mssfix_defined)
+	  if (c->options.mssfix)
 	    mss_fixup (&ipbuf, MTU_TO_MSS (TUN_MTU_SIZE_DYNAMIC (&c->c2.frame)));
 	}
     }

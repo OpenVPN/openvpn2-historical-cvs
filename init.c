@@ -304,6 +304,23 @@ possibly_become_daemon (const struct options *options, const bool first_time)
   return ret;
 }
 
+/*
+ * Return common name in a way that is formatted for
+ * prepending to msg() output.
+ */
+const char *
+format_common_name (struct context *c, struct gc_arena *gc)
+{
+  struct buffer out = alloc_buf_gc (256, gc);
+#if defined(USE_CRYPTO) && defined(USE_SSL)
+  if (c->c2.tls_multi)
+    {
+      buf_printf (&out, "[%s] ", tls_common_name (c->c2.tls_multi));
+    }
+#endif
+  return BSTR (&out);
+}
+
 void
 pre_setup (const struct options *options)
 {
@@ -320,6 +337,77 @@ pre_setup (const struct options *options)
 
   /* print version number */
   msg (M_INFO, "%s", title_string);
+}
+
+/*
+ * initialize timers
+ */
+static void
+do_init_timers (struct context *c, bool deferred)
+{
+  c->c2.current = time (NULL);
+  c->c2.coarse_timer_wakeup = 0;
+
+  /* initialize inactivity timeout */
+  if (c->options.inactivity_timeout)
+    event_timeout_init (&c->c2.inactivity_interval, c->c2.current,
+			c->options.inactivity_timeout);
+
+  /* initialize pings */
+
+  if (c->options.ping_send_timeout)
+    event_timeout_init (&c->c2.ping_send_interval, 0,
+			c->options.ping_send_timeout);
+
+  if (c->options.ping_rec_timeout)
+    event_timeout_init (&c->c2.ping_rec_interval, c->c2.current,
+			c->options.ping_rec_timeout);
+
+  if (!deferred)
+    {
+      /* initialize connection establishment timer */
+      event_timeout_init (&c->c2.wait_for_connect, c->c2.current, 5);
+
+      /* initialize occ timers */
+
+      if (c->options.occ
+	  && !TLS_MODE
+	  && c->c2.options_string_local && c->c2.options_string_remote)
+	event_timeout_init (&c->c2.occ_interval, c->c2.current,
+			    OCC_INTERVAL_SECONDS);
+
+      if (c->options.mtu_test)
+	event_timeout_init (&c->c2.occ_mtu_load_test_interval, c->c2.current,
+			    OCC_MTU_LOAD_INTERVAL_SECONDS);
+
+      /* initialize packet_id persistence timer */
+#ifdef USE_CRYPTO
+      if (c->options.packet_id_file)
+	event_timeout_init (&c->c2.packet_id_persist_interval, c->c2.current, 60);
+#endif
+
+#if defined(USE_CRYPTO) && defined(USE_SSL)
+      /* initialize tmp_int optimization that limits the number of times we call
+	 tls_multi_process in the main event loop */
+      interval_init (&c->c2.tmp_int, TLS_MULTI_HORIZON, TLS_MULTI_REFRESH);
+#endif
+    }
+}
+
+/*
+ * Initialize traffic shaper.
+ */
+static void
+do_init_traffic_shaper (struct context *c)
+{
+#ifdef HAVE_GETTIMEOFDAY
+  /* initialize traffic shaper (i.e. transmit bandwidth limiter) */
+  if (c->options.shaper)
+    {
+      shaper_init (&c->c2.shaper, c->options.shaper);
+      shaper_msg (&c->c2.shaper);
+    }
+#endif
 }
 
 /*
@@ -402,11 +490,14 @@ do_init_tun (struct context *c)
  * Open tun/tap device, ifconfig, call up script, etc.
  */
 
-bool
+static bool
 do_open_tun (struct context *c)
 {
   struct gc_arena gc = gc_new ();
   bool ret = false;
+
+  c->c2.ipv4_tun = (!c->options.tun_ipv6
+		    && is_dev_type (c->options.dev, c->options.dev_type, "tun"));
 
   if (!tuntap_defined (&c->c1.tuntap))
     {
@@ -465,15 +556,6 @@ do_open_tun (struct context *c)
 			       c->c1.tuntap.post_open_mtu,
 			       SET_MTU_TUN | SET_MTU_UPPER_BOUND);
 
-      /*
-       * On Windows, it is usually wrong if --tun-mtu != 1500.
-       */
-#ifdef WIN32
-      if (TUN_MTU_SIZE (&c->c2.frame) != 1500)
-	msg (M_WARN,
-	     "WARNING: in general you should use '--tun-mtu 1500 --mssfix 1400' on both sides of the connection if at least one side is running Windows, unless you have explicitly modified the TAP-Win32 driver properties");
-#endif
-
       ret = true;
     }
   else
@@ -493,6 +575,85 @@ do_open_tun (struct context *c)
     }
   gc_free (&gc);
   return ret;
+}
+
+/*
+ * Handled delayed tun/tap interface bringup due to --up-delay or --pull
+ */
+
+unsigned int
+pull_permission_mask (void)
+{
+  return (  OPT_P_UP
+	  | OPT_P_ROUTE
+	  | OPT_P_IPWIN32
+	  | OPT_P_SETENV
+	  | OPT_P_SHAPER
+	  | OPT_P_TIMER
+	  | OPT_P_PERSIST
+	  | OPT_P_MESSAGES);
+}
+
+static void
+do_deferred_options (struct context *c, const unsigned int found)
+{
+  if (found & OPT_P_MESSAGES)
+    {
+      init_verb_mute (&c->options);
+      msg (D_PUSH, "PULL: --verb and/or --mute level changed");
+    }
+  if (found & OPT_P_TIMER)
+    {
+      do_init_timers (c, true);
+      msg (D_PUSH, "PULL: timers and/or timeouts modified");
+    }
+  if (found & OPT_P_SHAPER)
+    {
+      msg (D_PUSH, "PULL: traffic shaper enabled");
+      do_init_traffic_shaper (c);
+    }
+
+  if (found & OPT_P_PERSIST)
+    msg (D_PUSH, "PULL: --persist options modified");
+  if (found & OPT_P_UP)
+    msg (D_PUSH, "PULL: --ifconfig/up options modified");
+  if (found & OPT_P_ROUTE)
+    msg (D_PUSH, "PULL: route options modified");
+  if (found & OPT_P_IPWIN32)
+    msg (D_PUSH, "PULL: --ip-win32 and/or --dhcp-option options modified");
+  if (found & OPT_P_SETENV)
+    msg (D_PUSH, "PULL: environment modified");
+}
+
+void
+do_up_delay (struct context *c, bool pulled_options, unsigned int option_types_found)
+{
+  if (!c->c2.do_up_delay_ran)
+    {
+      if (pulled_options && option_types_found)
+	do_deferred_options (c, option_types_found);
+
+      /* if --up-delay specified, open tun, do ifconfig, and run up script now */
+      if (c->options.up_delay || c->options.pull)
+	{
+	  c->c2.did_open_tun = do_open_tun (c);
+	  TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
+	  c->c2.current = time (NULL);
+	}
+
+      if (c->c2.did_open_tun)
+	{
+	  /* if --route-delay was specified, start timer */
+	  if (c->options.route_delay_defined)
+	    event_timeout_init (&c->c2.route_wakeup, c->c2.current,
+				c->options.route_delay);
+	}
+      else if (pulled_options && (option_types_found & (OPT_P_UP|OPT_P_ROUTE|OPT_P_IPWIN32)))
+	{
+	  msg (D_PUSH_ERRORS, "WARNING: Options pulled from the server relating to tun/tap interface configuration and routes were not applied");
+	}
+      c->c2.do_up_delay_ran = true;
+    }
 }
 
 /*
@@ -947,28 +1108,15 @@ do_init_fragment (struct context *c)
 
 /*
  * Set the dynamic MTU parameter, used by the --mssfix
- * option.  If --mssfix is supplied without a parameter,
- * then default to --fragment size.  Otherwise default
- * to udp_mtu or (on Windows) TAP-Win32 mtu size which
- * is set in the adapter advanced properties dialog.
+ * option.
  */
 static void
 do_init_dynamic_mtu (struct context *c)
 {
-  if (c->options.mssfix_defined)
+  if (c->options.mssfix)
     {
-      if (c->options.mssfix)
-	{
-	  frame_set_mtu_dynamic (&c->c2.frame,
-				 c->options.mssfix, SET_MTU_UPPER_BOUND);
-	}
-      else if (c->c2.fragment)
-	{
-	  frame_set_mtu_dynamic (&c->c2.frame,
-				 EXPANDED_SIZE_DYNAMIC (&c->c2.
-							frame_fragment),
-				 SET_MTU_UPPER_BOUND);
-	}
+      frame_set_mtu_dynamic (&c->c2.frame,
+			     c->options.mssfix, SET_MTU_UPPER_BOUND);
     }
 }
 
@@ -1057,22 +1205,6 @@ do_compute_occ_strings (struct context *c)
 }
 
 /*
- * Initialize traffic shaper.
- */
-static void
-do_init_traffic_shaper (struct context *c)
-{
-#ifdef HAVE_GETTIMEOFDAY
-  /* initialize traffic shaper (i.e. transmit bandwidth limiter) */
-  if (c->options.shaper)
-    {
-      shaper_init (&c->c2.shaper, c->options.shaper);
-      shaper_msg (&c->c2.shaper);
-    }
-#endif
-}
-
-/*
  * These things can only be executed once per program instantiation.
  */
 static void
@@ -1130,57 +1262,6 @@ do_init_maxfd (struct context *c)
 {
   SOCKET_SETMAXFD (&c->c2.event_wait, &c->c2.link_socket);
   TUNTAP_SETMAXFD (&c->c2.event_wait, &c->c1.tuntap);
-}
-
-/*
- * initialize timers
- */
-void
-do_init_timers (struct context *c)
-{
-  c->c2.current = time (NULL);
-
-  /* initialize connection establishment timer */
-  event_timeout_init (&c->c2.wait_for_connect, c->c2.current, 5);
-
-  /* initialize inactivity timeout */
-  if (c->options.inactivity_timeout)
-    event_timeout_init (&c->c2.inactivity_interval, c->c2.current,
-			c->options.inactivity_timeout);
-
-  /* initialize pings */
-
-  if (c->options.ping_send_timeout)
-    event_timeout_init (&c->c2.ping_send_interval, 0,
-			c->options.ping_send_timeout);
-
-  if (c->options.ping_rec_timeout)
-    event_timeout_init (&c->c2.ping_rec_interval, c->c2.current,
-			c->options.ping_rec_timeout);
-
-  /* initialize occ timers */
-
-  if (c->options.occ
-      && !TLS_MODE
-      && c->c2.options_string_local && c->c2.options_string_remote)
-    event_timeout_init (&c->c2.occ_interval, c->c2.current,
-			OCC_INTERVAL_SECONDS);
-
-  if (c->options.mtu_test)
-    event_timeout_init (&c->c2.occ_mtu_load_test_interval, c->c2.current,
-			OCC_MTU_LOAD_INTERVAL_SECONDS);
-
-  /* initialize packet_id persistence timer */
-#ifdef USE_CRYPTO
-  if (c->options.packet_id_file)
-    event_timeout_init (&c->c2.packet_id_persist_interval, c->c2.current, 60);
-#endif
-
-#if defined(USE_CRYPTO) && defined(USE_SSL)
-    /* initialize tmp_int optimization that limits the number of times we call
-       tls_multi_process in the main event loop */
-    interval_init (&c->c2.tmp_int, TLS_MULTI_HORIZON, TLS_MULTI_REFRESH);
-#endif
 }
 
 /*
@@ -1384,8 +1465,6 @@ init_instance (struct context *c, bool init_buffers)
     do_mlockall (true);
 
   /* init flags */
-  c->c2.ipv4_tun = (!options->tun_ipv6
-		    && is_dev_type (options->dev, options->dev_type, "tun"));
   c->c2.log_rw = (check_debug_level (D_LOG_RW)
 		  && !check_debug_level (D_LOG_RW + 1));
   
@@ -1441,9 +1520,8 @@ init_instance (struct context *c, bool init_buffers)
 
   /* initialize tun/tap device object,
      open tun/tap device, ifconfig, run up script, etc. */
-  if (!options->up_delay && (c->mode == CM_P2P || c->mode == CM_TOP))
+  if (!(options->up_delay || options->pull) && (c->mode == CM_P2P || c->mode == CM_TOP))
     c->c2.did_open_tun = do_open_tun (c);
-  c->c2.enable_up_delay = options->up_delay;
 
   /* print MTU info */
   do_print_data_channel_mtu_parms (c);
@@ -1484,7 +1562,7 @@ init_instance (struct context *c, bool init_buffers)
 
   /* initialize timers */
   if (c->mode == CM_P2P || c->mode == CM_CHILD)
-    do_init_timers (c);
+    do_init_timers (c, false);
 }
 
 /*

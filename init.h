@@ -54,13 +54,19 @@ void init_instance (struct context *c, bool init_buffers);
 
 void do_route (const struct options *options, struct route_list *route_list);
 
-bool do_open_tun (struct context *c);
-
 void close_instance (struct context *c);
 
 bool do_test_crypto (const struct options *o);
 
 void context_gc_detach (struct context *c, bool options_only);
 void context_gc_free (struct context *c);
+
+void do_up_delay (struct context *c,
+		  bool pulled_options,
+		  unsigned int option_types_found);
+
+unsigned int pull_permission_mask (void);
+
+const char *format_common_name (struct context *c, struct gc_arena *gc);
 
 #endif

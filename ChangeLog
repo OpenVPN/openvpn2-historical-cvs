@@ -1,7 +1,13 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.16 2004/03/28 20:11:53 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.17 2004/03/29 15:04:41 jimyonan Exp $
+
+2004.03.29 -- Version 2.0-test17
+
+* Fixed some bugs related to instance timeout and deletion.
+* Extended --push/--pull option to support additional
+  option classes.
 
 2004.03.28 -- Version 2.0-test16
 

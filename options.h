@@ -63,9 +63,9 @@ struct options
   /* first config file */
   const char *config;
 
-  /* mode of operation */
+  /* major mode */
 # define MODE_POINT_TO_POINT 0
-# define MODE_NONFORKING_UDP_SERVER 1
+# define MODE_SERVER         1
   int mode;
 
   /* persist parms */
@@ -136,7 +136,6 @@ struct options
   bool persist_key;             /* Don't re-read key files on SIGUSR1 or PING_RESTART */
 
   int mssfix;                   /* Upper bound on TCP MSS */
-  bool mssfix_defined;
 
 #if PASSTOS_CAPABILITY
   bool passtos;                  
@@ -269,14 +268,23 @@ struct options
 #define streq(x, y) (!strcmp((x), (y)))
 
 /*
- * Permission flags.
+ * Option classes.
  */
 #define OPT_P_GENERAL   (1<<0)
-#define OPT_P_IFCONFIG  (1<<1)
+#define OPT_P_UP        (1<<1)
 #define OPT_P_ROUTE     (1<<2)
 #define OPT_P_IPWIN32   (1<<3)
 #define OPT_P_SCRIPT    (1<<4)
 #define OPT_P_SETENV    (1<<5)
+#define OPT_P_SHAPER    (1<<6)
+#define OPT_P_TIMER     (1<<7)
+#define OPT_P_PERSIST   (1<<8)
+#define OPT_P_COMP      (1<<9)  /* TODO */
+#define OPT_P_MESSAGES  (1<<10)
+#define OPT_P_CRYPTO    (1<<11) /* TODO */
+#define OPT_P_TLS_PARMS (1<<12) /* TODO */
+#define OPT_P_MTU       (1<<13) /* TODO */
+#define OPT_P_NICE      (1<<14)
 
 #define OPT_P_ALL       (~0)
 
@@ -312,6 +320,12 @@ void options_warning (char *actual, const char *expected, size_t actual_n);
 
 void options_postprocess (struct options *options, bool first_time);
 
-bool apply_push_options (struct options *o, struct buffer *buf);
+bool apply_push_options (struct options *options,
+			 struct buffer *buf,
+			 unsigned int permission_mask,
+			 unsigned int *option_types_found);
+
+bool is_persist_option (const struct options *o);
+
 
 #endif

@@ -36,9 +36,11 @@
 
 int process_incoming_push_msg (struct context *c,
 			       struct buffer *buf,
-			       bool honor_received_options);
+			       bool honor_received_options,
+			       unsigned int permission_mask,
+			       int *option_types_found);
 
-void push_option (struct options *o, const char *opt);
+void push_option (struct options *o, const char *opt, int msglevel);
 
 bool send_push_request (struct context *c);
 bool send_push_reply (struct context *c);

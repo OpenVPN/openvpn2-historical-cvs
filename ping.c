@@ -56,21 +56,25 @@ const uint8_t ping_string[] = {
 void
 check_ping_restart_dowork (struct context *c)
 {
+  struct gc_arena gc = gc_new ();
   switch (c->options.ping_rec_timeout_action)
     {
     case PING_EXIT:
-      msg (M_INFO, "Inactivity timeout (--ping-exit), exiting");
+      msg (M_INFO, "%sInactivity timeout (--ping-exit), exiting",
+	   format_common_name (c, &gc));
       c->sig->signal_received = SIGTERM;
       c->sig->signal_text = "ping-exit";
       break;
     case PING_RESTART:
-      msg (M_INFO, "Inactivity timeout (--ping-restart), restarting");
+      msg (M_INFO, "%sInactivity timeout (--ping-restart), restarting",
+	   format_common_name (c, &gc));
       c->sig->signal_received = SIGUSR1;
       c->sig->signal_text = "ping-restart";
       break;
     default:
       ASSERT (0);
     }
+  gc_free (&gc);
 }
 
 /*

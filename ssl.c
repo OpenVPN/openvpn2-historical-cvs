@@ -518,7 +518,7 @@ tls_common_name (struct tls_multi* multi)
   if (ret)
     return ret;
   else
-    return "CN-UNDEF";
+    return "UNDEF";
 }
 
 /*
@@ -2001,7 +2001,7 @@ tls_process (struct tls_multi *multi,
 		  INCR_SUCCESS;
 
 		  /* Set outgoing address for data channel packets */
-		  link_socket_set_outgoing_addr (NULL, to_link_socket, &ks->remote_addr);
+		  link_socket_set_outgoing_addr (NULL, to_link_socket, &ks->remote_addr, session->common_name);
 
 #ifdef MEASURE_TLS_HANDSHAKE_STATS
 		  show_tls_performance_stats();

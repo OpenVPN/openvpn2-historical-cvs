@@ -82,9 +82,10 @@ signal_handler_exit (int signum)
 
 static void print_frame_parms(int level, const struct frame *frame, const char* prefix)
 {
-  msg (level, "%s: mtu=%d extra_frame=%d extra_buffer=%d extra_tun=%d",
+  msg (level, "%s: mtu=%d mtud=%d extra_frame=%d extra_buffer=%d extra_tun=%d",
        prefix,
        frame->mtu,
+       frame->mtu_dynamic,
        frame->extra_frame,
        frame->extra_buffer,
        frame->extra_tun);
@@ -114,6 +115,8 @@ frame_finalize(struct frame *frame, const struct options *options)
     }
 
   frame->extra_buffer += frame->extra_frame + frame->extra_tun;
+
+  frame->mtu_dynamic = frame->mtu;
 }
 
 #if defined(USE_PTHREAD) && defined(USE_CRYPTO)

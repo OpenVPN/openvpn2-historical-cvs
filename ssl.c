@@ -140,6 +140,7 @@ tls_init_control_channel_frame_parameters(const struct frame *data_channel_frame
 
   /* finalize parameters based on data_channel_frame */
   frame->mtu = EXPANDED_SIZE (data_channel_frame) - frame->extra_frame;
+  frame->mtu_dynamic = frame->mtu;
   frame->extra_buffer += frame->extra_frame;
 }
 
@@ -1140,7 +1141,7 @@ static bool transmit_rate_limiter(struct tls_session* session, time_t* wakeup, t
   const int estimated_bytes = 20000;
 
   /* worst-case estimated finish at this rate */
-  time_t finish = current + ((freq * estimated_bytes) / PAYLOAD_SIZE (&session->opt->frame));
+  time_t finish = current + ((freq * estimated_bytes) / PAYLOAD_SIZE_DYNAMIC (&session->opt->frame));
 
   if (check_debug_level (D_TLS_DEBUG))
     {
@@ -1458,7 +1459,7 @@ tls_process (struct tls_multi *multi,
 	      int status;
 
 	      ASSERT (buf_init (buf, EXTRA_FRAME (&multi->opt.frame)));
-	      status = key_state_read_plaintext (ks, buf, PAYLOAD_SIZE (&multi->opt.frame));
+	      status = key_state_read_plaintext (ks, buf, PAYLOAD_SIZE_DYNAMIC (&multi->opt.frame));
 	      current = time (NULL);
 	      if (status == -1)
 		{
@@ -1567,7 +1568,7 @@ tls_process (struct tls_multi *multi,
 	      buf = reliable_get_buf (&ks->send_reliable);
 	      if (buf)
 		{
-		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE (&multi->opt.frame));
+		  int status = key_state_read_ciphertext (ks, buf, PAYLOAD_SIZE_DYNAMIC (&multi->opt.frame));
 		  if (status == -1)
 		    {
 		      msg (D_TLS_ERRORS,
@@ -1691,7 +1692,7 @@ tls_multi_process (struct tls_multi *multi,
 	  if (ks->state == S_ERROR)
 	    {
 	      if (i == TM_ACTIVE && ks_lame->state == S_ACTIVE)
-		move_session(multi, TM_LAME_DUCK, TM_ACTIVE, true);
+		move_session (multi, TM_LAME_DUCK, TM_ACTIVE, true);
 	      else
 		reset_session (multi, session);
 	    }
@@ -1714,7 +1715,7 @@ tls_multi_process (struct tls_multi *multi,
    * move it to active session, usurping any prior session.
    */
   if (DECRYPT_KEY_ENABLED (multi, &multi->session[TM_UNTRUSTED].key[KS_PRIMARY])) {
-    move_session(multi, TM_ACTIVE, TM_UNTRUSTED, true);
+    move_session (multi, TM_ACTIVE, TM_UNTRUSTED, true);
     msg (D_TLS_DEBUG_LOW, "tls_multi_process: untrusted session promoted to trusted");
   }
 
@@ -1731,8 +1732,8 @@ tls_multi_process (struct tls_multi *multi,
 #ifdef USE_PTHREAD
 
 /*
- * Main thread <-> TLS thread communication
- * errors are fatal if they are of these types.
+ * Main thread <-> TLS thread communication.
+ * Errors are fatal if they are of these types.
  */
 static inline bool
 local_sock_fatal ()

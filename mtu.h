@@ -66,7 +66,17 @@
 #define DEFAULT_TUN_MTU 1300
 
 struct frame {
-  int mtu;       /* MTU of tun/tap device, set by ifconfig */
+  /*
+   * MTU of tun/tap device, set by ifconfig
+   */
+  int mtu;
+
+  /*
+   * An MTU value that can dynamically change during the life of the session
+   * in order to reduce packet fragmentation.
+   * mtu_dynamic <= mtu
+   */
+  int mtu_dynamic;
 
   /*
    * extra_frame: How many extra bytes might each subsystem (crypto, TLS, or, compression)
@@ -103,7 +113,8 @@ struct frame {
  * a tap device ifconfiged to an MTU of 1200 might actually want
  * to return a packet size of 1214 on a read().
  */
-#define PAYLOAD_SIZE(f)      ((f)->mtu + (f)->extra_tun)
+#define PAYLOAD_SIZE(f)          ((f)->mtu + (f)->extra_tun)
+#define PAYLOAD_SIZE_DYNAMIC(f)  ((f)->mtu_dynamic + (f)->extra_tun)
 
 /*
  * In general, OpenVPN packet building routines set the initial

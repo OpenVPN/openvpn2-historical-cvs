@@ -43,15 +43,12 @@ frame_finalize (struct frame *frame,
 		bool link_mtu_defined,
 		int link_mtu,
 		bool tun_mtu_defined,
-		int tun_mtu,
-		bool link_mtu_min_defined,
-		int link_mtu_min,
-		bool link_mtu_max_defined,
-		int link_mtu_max)
+		int tun_mtu)
 {
   /* Set link_mtu based on command line options */
   if (tun_mtu_defined)
     {
+      ASSERT (!link_mtu_defined);
       frame->link_mtu = tun_mtu + TUN_LINK_DELTA (frame);
     }
   else
@@ -63,125 +60,39 @@ frame_finalize (struct frame *frame,
   if (TUN_MTU_SIZE (frame) < TUN_MTU_MIN)
     {
       msg (M_WARN, "TUN MTU value (%d) must be at least %d", TUN_MTU_SIZE (frame), TUN_MTU_MIN);
-      frame_print (frame, M_FATAL, "MTU is too small", false);
+      frame_print (frame, M_FATAL, "MTU is too small");
     }
 
-  /*
-   * Sets a range for the dynamic mtu value.
-   * Requires call to frame_dynamic_finalize to finalize.
-   */
-  if (link_mtu_min_defined)
-    frame->dynamic.mtu_min_initial = link_mtu_min;
-  else
-    frame->dynamic.mtu_min_initial = MTU_INITIAL_UNDEF;
-
-  if (link_mtu_max_defined)
-    frame->dynamic.mtu_max_initial = link_mtu_max;
-  else
-    frame->dynamic.mtu_max_initial = MTU_INITIAL_UNDEF;
-
-  if (link_mtu_min_defined && link_mtu_max_defined && link_mtu_min > link_mtu_max)
-    frame_print (frame, M_FATAL, "Dynamic MTU min is larger than dynamic MTU max", true);
-
-  frame_set_mtu_dynamic_initial (frame, MTU_SET_TO_MAX);
-  frame_dynamic_finalize (frame);
-}
-
-/*
- * struct frame_dynamic has two types of parameters: source parameters and derived parameters.
- * This function sets the derived parameters based on the source parameters.
- */
-void
-frame_dynamic_finalize (struct frame *frame)
-{
-  const int lower_bound = TUN_MTU_MIN + TUN_LINK_DELTA (frame);
-  const int upper_bound = max_int (lower_bound, frame->link_mtu);
-
-  if (frame->dynamic.mtu_min_initial == MTU_INITIAL_UNDEF)
-    frame->dynamic.mtu_min = lower_bound;
-  else
-    frame->dynamic.mtu_min = constrain_int (frame->dynamic.mtu_min_initial, lower_bound, upper_bound);
-  
-  if (frame->dynamic.mtu_max_initial == MTU_INITIAL_UNDEF)
-    frame->dynamic.mtu_max = upper_bound;
-  else
-    frame->dynamic.mtu_max = max_int (frame->dynamic.mtu_min,
-				      constrain_int (frame->dynamic.mtu_max_initial,
-						     lower_bound, upper_bound));
-
-  if (frame->dynamic.mtu_initial == MTU_SET_TO_MIN)
-    frame->dynamic.mtu = frame->dynamic.mtu_min;
-  else if (frame->dynamic.mtu_initial == MTU_SET_TO_MAX)
-    frame->dynamic.mtu = frame->dynamic.mtu_max;
-  else
-    frame->dynamic.mtu = constrain_int (frame->dynamic.mtu_initial,
-					frame->dynamic.mtu_min, frame->dynamic.mtu_max);
-
-  msg (D_MTU_DEBUG, "MTU dynamic=%d", frame->dynamic.mtu);
-}
-
-/*
- * Client initializes a struct frame by zeroing, then calling,
- *   frame_set_mtu_dynamic_initial
- *   frame_add_to_extra_frame
- *   frame_add_to_extra_tun
- *   frame_add_to_extra_buffer
- *
- * frame_finalize_derivative will then finalize the frame based
- * on a previously finalized frame (src).
- */
-void
-frame_finalize_derivative (struct frame *frame, const struct frame *src)
-{
-  frame->link_mtu = src->link_mtu;
-  frame->dynamic.mtu_min_initial = src->dynamic.mtu_min_initial;
-  frame->dynamic.mtu_max_initial = src->dynamic.mtu_max_initial;
-  frame_dynamic_finalize (frame);  
-}
-
-/*
- * Sets the dynamic mtu value (requires call to
- * frame_dynamic_finalize to finalize).
- * mtu_dynamic can be a value or MTU_SET_TO_MIN or MTU_SET_TO_MAX.
- */
-void
-frame_set_mtu_dynamic_initial (struct frame *frame, int mtu)
-{
-  frame->dynamic.mtu_initial = mtu;
+  frame->link_mtu_dynamic = frame->link_mtu;
 }
 
 /*
  * Set the tun MTU dynamically.
  */
 void
-frame_set_mtu_dynamic_upper_bound (struct frame *frame, int mtu, bool tun)
+frame_set_mtu_dynamic (struct frame *frame, int mtu, unsigned int flags)
 {
-  ASSERT (mtu > 0);
-  ASSERT (frame->dynamic.mtu > 0);
+  const int orig_mtu = mtu;
+  const int orig_link_mtu_dynamic = frame->link_mtu_dynamic;
 
-  if (tun)
+  ASSERT (mtu >= 0);
+
+  if (flags & SET_MTU_TUN)
     mtu += TUN_LINK_DELTA (frame);
 
-  frame->dynamic.mtu = constrain_int (
-      frame->dynamic.mtu,
-      frame->dynamic.mtu_min,
-      min_int (mtu, frame->dynamic.mtu)
-      );
-}
+  if (!(flags & SET_MTU_UPPER_BOUND) || mtu < frame->link_mtu_dynamic)
+    {
+      frame->link_mtu_dynamic = constrain_int (
+	mtu,
+	EXPANDED_SIZE_MIN (frame),
+	EXPANDED_SIZE (frame));
+    }
 
-/*
- * Increase/Decrease link_mtu by a percentage.
- *
- * Return true if mtu changed.
- */
-bool
-frame_mtu_change_pct (struct frame *frame, int pct)
-{
-  const int orig_mtu = frame->link_mtu;
-  const int new_mtu = orig_mtu + (orig_mtu * pct / 100);
-  frame_set_mtu_dynamic_initial (frame, new_mtu);
-  frame_dynamic_finalize (frame);
-  return frame->link_mtu != orig_mtu;
+  msg (D_MTU_DEBUG, "MTU DYNAMIC mtu=%d, flags=%u, %d -> %d",
+       orig_mtu,
+       flags,
+       orig_link_mtu_dynamic,
+       frame->link_mtu_dynamic);
 }
 
 /*
@@ -197,42 +108,17 @@ frame_subtract_extra (struct frame *frame, const struct frame *src)
 }
 
 void
-frame_print (const struct frame *frame, int level, const char *prefix, bool long_form)
+frame_print (const struct frame *frame, int level, const char *prefix)
 {
   struct buffer out = alloc_buf_gc (256);
   if (prefix)
     buf_printf (&out, "%s ", prefix);
   buf_printf (&out, "[");
-  buf_printf (&out, " link_mtu=%d", frame->link_mtu);
-  buf_printf (&out, " extra_frame=%d", frame->extra_frame);
-  buf_printf (&out, " extra_buffer=%d", frame->extra_buffer);
-  buf_printf (&out, " extra_tun=%d", frame->extra_tun);
-
-  if (long_form)
-    {
-      buf_printf (&out, " dynamic = [");
-      buf_printf (&out, " mtu_min_initial=");
-      if (frame->dynamic.mtu_min_initial == MTU_INITIAL_UNDEF)
-	buf_printf (&out, "MTU_INITIAL_UNDEF");
-      else
-	buf_printf (&out, "%d", frame->dynamic.mtu_min_initial);
-      buf_printf (&out, " mtu_max_initial=");
-      if (frame->dynamic.mtu_max_initial == MTU_INITIAL_UNDEF)
-	buf_printf (&out, "MTU_INITIAL_UNDEF");
-      else
-	buf_printf (&out, "%d", frame->dynamic.mtu_max_initial);
-      buf_printf (&out, " mtu_initial=");
-      if (frame->dynamic.mtu_initial == MTU_SET_TO_MIN)
-	buf_printf (&out, "MTU_SET_TO_MIN");
-      else if (frame->dynamic.mtu_initial == MTU_SET_TO_MAX)
-	buf_printf (&out, "MTU_SET_TO_MAX");
-      else
-	buf_printf (&out, "%d", frame->dynamic.mtu_initial);
-      buf_printf (&out, " mtu_min=%d", frame->dynamic.mtu_min);
-      buf_printf (&out, " mtu_max=%d", frame->dynamic.mtu_max);
-      buf_printf (&out, " mtu=%d", frame->dynamic.mtu);
-      buf_printf (&out, " ]");
-    }
+  buf_printf (&out, " L:%d", frame->link_mtu);
+  buf_printf (&out, " D:%d", frame->link_mtu_dynamic);
+  buf_printf (&out, " EF:%d", frame->extra_frame);
+  buf_printf (&out, " EB:%d", frame->extra_buffer);
+  buf_printf (&out, " ET:%d", frame->extra_tun);
   buf_printf (&out, " ]");
 
   msg (level, "%s", out.data);

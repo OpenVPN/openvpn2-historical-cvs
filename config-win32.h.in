@@ -36,6 +36,7 @@
 
 #include <windows.h>
 #include <winsock2.h>
+#include <iphlpapi.h>
 
 #define sleep(x) Sleep((x)*1000)
 
@@ -128,6 +129,9 @@ typedef unsigned int ssize_t;
 
 /* Define to 1 if you have the `vsnprintf' function. */
 #define HAVE_VSNPRINTF 1
+
+/* Special Windows version of getpass() defined in io.c */
+#define HAVE_GETPASS 1
 
 /* Name of package */
 #define PACKAGE "openvpn"

@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [1.5-beta9], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [1.5-beta10], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -59,8 +59,14 @@ AC_ARG_ENABLE(strict,
    [STRICT="no"]
 )
 
+AC_ARG_ENABLE(profiling,
+   [  --enable-profiling      Enable profiling],
+   [PROFILE="$enableval"],
+   [PROFILE="no"]
+)
+
 AC_ARG_ENABLE(mtu-dynamic,
-   [  --disable-mtu-dynamic    Disable dynamic MTU support],
+   [  --disable-mtu-dynamic   Disable dynamic MTU support],
    [DYNAMIC_MTU="$enableval"],
    [DYNAMIC_MTU="yes"]
 )
@@ -422,6 +428,11 @@ fi
 dnl enable strict compiler warnings
 if test "$STRICT" = "yes"; then
    CFLAGS="$CFLAGS -Wall -W -Wpointer-arith -Wsign-compare -Winline -Wno-unused-parameter"
+fi
+
+dnl enable profiling
+if test "$PROFILE" = "yes"; then
+   CFLAGS="$CFLAGS -pg -DENABLE_PROFILING"
 fi
 
 dnl enable strict options check between peers

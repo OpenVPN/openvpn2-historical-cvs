@@ -402,6 +402,9 @@ Section -post
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenVPN" "DisplayName" "OpenVPN ${MUI_VERSION}"
   WriteRegExpandStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenVPN" "UninstallString" "$INSTDIR\Uninstall.exe"
 
+  ; Advise a reboot
+  Messagebox MB_OK "Note: Rebooting the system is advised in order to finalize TAP-Win32 driver installation/upgrade (this is an informational message only, pressing OK will not reboot)."
+
 SectionEnd
 
 ;Display the Finish header

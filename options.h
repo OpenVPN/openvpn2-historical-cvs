@@ -135,6 +135,7 @@ struct options
   const char *writepid;
   const char *up_script;
   const char *down_script;
+  bool up_delay;
   bool up_restart;
   bool daemon;
   bool inetd;
@@ -173,7 +174,7 @@ struct options
   int keysize;
   bool packet_id;
   const char *packet_id_file;
-  bool iv;
+  bool use_iv;
   bool test_crypto;
 
 #ifdef USE_SSL

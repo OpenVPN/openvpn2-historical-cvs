@@ -242,7 +242,6 @@ possibly_become_daemon (int level, const struct options* options, const bool fir
   return ret;
 }
 
-
 /*
  * Possibly add routes and/or call route-up script
  * based on options.
@@ -258,6 +257,90 @@ do_route (const struct options* options,
       setenv_str ("script_type", "route-up");
       system_check (options->route_script, "Route script failed", false);
     }
+}
+
+/*
+ * Open tun/tap device, ifconfig, call up script, etc.
+ */
+
+static bool
+do_open_tun (const struct options *options,
+	     struct frame *frame,
+	     struct link_socket *link_socket,
+	     struct tuntap *tuntap,
+	     struct route_list *route_list)
+{
+  bool ret = false;
+
+  if (!tuntap_defined (tuntap))
+    {
+      /* do ifconfig */
+      if (!options->ifconfig_noexec
+	  && ifconfig_order() == IFCONFIG_BEFORE_TUN_OPEN)
+	{
+	  /* guess actual tun/tap unit number that will be returned
+	     by open_tun */
+	  const char *guess = guess_tuntap_dev (options->dev,
+						options->dev_type,
+						options->dev_node);
+	  do_ifconfig (tuntap,
+		       guess,
+		       TUN_MTU_SIZE (frame));
+	}
+
+      /* open the tun device */
+      open_tun (options->dev, options->dev_type, options->dev_node,
+		options->tun_ipv6, tuntap);
+
+      /* do ifconfig */  
+      if (!options->ifconfig_noexec
+	  && ifconfig_order() == IFCONFIG_AFTER_TUN_OPEN)
+	do_ifconfig (tuntap,
+		     tuntap->actual,
+		     TUN_MTU_SIZE (frame));
+
+      /* run the up script */
+      run_script (options->up_script,
+		  tuntap->actual,
+		  TUN_MTU_SIZE (frame),
+		  MAX_RW_SIZE_LINK (frame),
+		  print_in_addr_t (tuntap->local, true),
+		  print_in_addr_t (tuntap->remote_netmask, true),
+		  "init",
+		  NULL,
+		  "up");
+
+      /* possibly add routes */
+      if (!options->route_delay_defined)
+	do_route (options, route_list);
+
+      /*
+       * Did tun/tap driver give us an MTU?
+       */
+      if (tuntap->post_open_mtu)
+	frame_set_mtu_dynamic (
+			       frame,
+			       tuntap->post_open_mtu,
+			       SET_MTU_TUN | SET_MTU_UPPER_BOUND);
+      ret = true;
+    }
+  else
+    {
+      msg (M_INFO, "Preserving previous TUN/TAP instance: %s", tuntap->actual);
+
+      /* run the up script if user specified --up-restart */
+      if (options->up_restart)
+	run_script (options->up_script,
+		    tuntap->actual,
+		    TUN_MTU_SIZE (frame),
+		    MAX_RW_SIZE_LINK (frame),
+		    print_in_addr_t (tuntap->local, true),
+		    print_in_addr_t (tuntap->remote_netmask, true),
+		    "restart",
+		    NULL,
+		    "up");
+    }
+  return ret;
 }
 
 /* Handle signals */
@@ -395,19 +478,7 @@ frame_finalize_options (struct frame *frame, const struct options *options)
 		  options->link_mtu_defined,
 		  options->link_mtu,
 		  options->tun_mtu_defined,
-		  options->tun_mtu,
-#ifdef FRAGMENT_ENABLE
-		  options->mtu_min_defined,
-		  options->mtu_min,
-		  options->mtu_max_defined,
-		  options->mtu_max
-#else
-		  false,
-		  0,
-		  false,
-		  0
-#endif
-		  );
+		  options->tun_mtu);
 }
 
 /*
@@ -457,8 +528,6 @@ openvpn (const struct options *options,
 
   struct link_socket link_socket;  /* socket used for TCP/UDP connection to remote */
   struct sockaddr_in to_link_addr; /* IP address of remote */
-
-  int max_rw_size_link = 0;        /* max size of packet we can send to remote */
 
   /* MTU frame parameters */
   struct frame frame;
@@ -563,9 +632,6 @@ openvpn (const struct options *options,
 
   /* used to keep track of data channel packet sequence numbers */
   struct packet_id packet_id;
-
-  /* our residual iv from all encrypts */
-  uint8_t iv[EVP_MAX_IV_LENGTH];
 #endif
 
   /*
@@ -611,7 +677,7 @@ openvpn (const struct options *options,
   struct event_timeout route_wakeup = event_timeout_clear_ret ();
 
   /* did we open tun/tap dev during this cycle? */
-  bool did_tun_open = false;
+  bool did_open_tun = false;
 
   /* ------------- */
 
@@ -652,27 +718,18 @@ openvpn (const struct options *options,
 #endif
 
 #ifdef USE_CRYPTO
+  /* init PRNG used for IV generation */
+  prng_init ();
+
   /* load a persisted packet-id for cross-session replay-protection */
   if (options->packet_id_file)
     packet_id_persist_load (pid_persist, options->packet_id_file);
-
-  if (!options->test_crypto)
-#endif
-
-#ifdef USE_CRYPTO
 
   /* Initialize crypto options */
 
   CLEAR (crypto_options);
   CLEAR (packet_id);
-  CLEAR (iv);
-
-  /* Start with a random IV and carry forward the residuals */
-  if (options->iv)
-    {
-      randomize_iv (iv);
-      crypto_options.iv = iv;
-    }
+  crypto_options.use_iv = options->use_iv;
 
   if (options->shared_secret_file)
     {
@@ -727,12 +784,12 @@ openvpn (const struct options *options,
       crypto_adjust_frame_parameters(&frame,
 				     &ks->key_type,
 				     options->ciphername_defined,
-				     options->iv,
+				     options->use_iv,
 				     options->packet_id,
 				     true);
 
       /* Sanity check on IV, sequence number, and cipher mode options */
-      check_replay_iv_consistency(&ks->key_type, options->packet_id, options->iv);
+      check_replay_iv_consistency(&ks->key_type, options->packet_id, options->use_iv);
 
       /*
        * Test-crypto is a debugging tool
@@ -806,7 +863,7 @@ openvpn (const struct options *options,
 	}
 
       /* Sanity check on IV, sequence number, and cipher mode options */
-      check_replay_iv_consistency(&ks->key_type, options->packet_id, options->iv);
+      check_replay_iv_consistency(&ks->key_type, options->packet_id, options->use_iv);
 
       /* In short form, unique datagram identifier is 32 bits, in long form 64 bits */
       packet_id_long_form = cfb_ofb_mode (&ks->key_type);
@@ -815,7 +872,7 @@ openvpn (const struct options *options,
       crypto_adjust_frame_parameters(&frame,
 				     &ks->key_type,
 				     options->ciphername_defined,
-				     options->iv,
+				     options->use_iv,
 				     options->packet_id,
 				     packet_id_long_form);
       tls_adjust_frame_parameters(&frame);
@@ -920,25 +977,14 @@ openvpn (const struct options *options,
 #ifdef FRAGMENT_ENABLE
   frame_fragment = frame;
   frame_subtract_extra (&frame_fragment, &frame_fragment_omit);
-  frame_dynamic_finalize (&frame_fragment);
 #endif
-
-  max_rw_size_link = MAX_RW_SIZE_LINK (&frame);
 
 #if defined(USE_CRYPTO) && defined(USE_SSL)
   if (tls_multi)
     {
-      int size;
-
       tls_multi_init_finalize (tls_multi, &frame);
-      size = MAX_RW_SIZE_LINK (&tls_multi->opt.frame);
-      if (size > max_rw_size_link)
-	max_rw_size_link = size;
-
-      frame_print (&tls_multi->opt.frame,
-		   D_MTU_INFO,
-		   "Control Channel MTU parms",
-		   true);
+      ASSERT (MAX_RW_SIZE_LINK (&tls_multi->opt.frame) <= MAX_RW_SIZE_LINK (&frame));
+      frame_print (&tls_multi->opt.frame, D_MTU_INFO, "Control Channel MTU parms");
     }
 #endif
 
@@ -970,9 +1016,6 @@ openvpn (const struct options *options,
     fragment_frame_init (fragment, &frame_fragment);
 #endif
 
-  /* tun code has buffers to initialize once frame parameters are known */
-  tun_frame_init (&frame, tuntap);
-
   /*
    * Set the dynamic MTU parameter, used by the --mssfix
    * option.  If --mssfix is supplied without a parameter,
@@ -984,25 +1027,26 @@ openvpn (const struct options *options,
     {
       if (options->mssfix)
 	{
-	  frame_set_mtu_dynamic_upper_bound (
+	  frame_set_mtu_dynamic (
 	      &frame,
 	      options->mssfix,
-	      false
+	      SET_MTU_UPPER_BOUND
 	  );
 	}
 #ifdef FRAGMENT_ENABLE
       else if (fragment)
 	{
-	  frame_set_mtu_dynamic_upper_bound (
+	  frame_set_mtu_dynamic (
 	      &frame,
 	      EXPANDED_SIZE_DYNAMIC (&frame_fragment),
-	      false
+	      SET_MTU_UPPER_BOUND
 	  );
 	}
 #endif
     }
 
   /* bind the TCP/UDP socket */
+
   link_socket_init_phase1 (&link_socket,
 			   options->local, options->remote,
 			   options->local_port, options->remote_port,
@@ -1015,102 +1059,30 @@ openvpn (const struct options *options,
 			   options->resolve_retry_seconds,
 			   options->mtu_discover_type);
 
-  if (!tuntap_defined (tuntap))
-    {
-      /* do ifconfig */
-      if (ifconfig_order() == IFCONFIG_BEFORE_TUN_OPEN)
-	{
-	  /* guess actual tun/tap unit number that will be returned
-	     by open_tun */
-	  const char *guess = guess_tuntap_dev (options->dev,
-						options->dev_type,
-						options->dev_node);
-	  do_ifconfig (tuntap,
-		       options->dev,
-		       options->dev_type,
-		       guess,
-		       options->ifconfig_local,
-		       options->ifconfig_remote_netmask,
-		       TUN_MTU_SIZE (&frame),
-		       addr_host (&link_socket.lsa->local),
-		       addr_host (&link_socket.lsa->remote),
-		       options->ifconfig_noexec);
-	}
+  /* initialize tun/tap device object */
 
-      /* open the tun device */
-      open_tun (options->dev, options->dev_type, options->dev_node,
-		options->tun_ipv6, tuntap);
+  init_tun (tuntap,
+	    options->dev,
+	    options->dev_type,
+	    options->ifconfig_local,
+	    options->ifconfig_remote_netmask,
+	    addr_host (&link_socket.lsa->local),
+	    addr_host (&link_socket.lsa->remote),
+	    &frame,
+	    options->tuntap_flags);
 
-      /* do ifconfig */  
-      if (ifconfig_order() == IFCONFIG_AFTER_TUN_OPEN)
-	do_ifconfig (tuntap,
-		     options->dev,
-		     options->dev_type,
-		     tuntap->actual,
-		     options->ifconfig_local,
-		     options->ifconfig_remote_netmask,
-		     TUN_MTU_SIZE (&frame),
-		     addr_host (&link_socket.lsa->local),
-		     addr_host (&link_socket.lsa->remote),
-		     options->ifconfig_noexec);
-
-      /* perform any post-tun/tap open config steps */
-      open_tun_post_config (tuntap, options->tuntap_flags);
-
-      /* run the up script */
-      run_script (options->up_script,
-		  tuntap->actual,
-		  TUN_MTU_SIZE (&frame),
-		  max_rw_size_link,
-		  print_in_addr_t (tuntap->local, true),
-		  print_in_addr_t (tuntap->remote_netmask, true),
-		  "init",
-		  NULL,
-		  "up");
-
-      /* possibly add routes */
-      if (!options->route_delay_defined)
-	  do_route (options, route_list);
-
-      did_tun_open = true;
-    }
-  else
-    {
-      msg (M_INFO, "Preserving previous TUN/TAP instance: %s", tuntap->actual);
-
-      /* run the up script if user specified --up-restart */
-      if (options->up_restart)
-	run_script (options->up_script,
-		    tuntap->actual,
-		    TUN_MTU_SIZE (&frame),
-		    max_rw_size_link,
-		    print_in_addr_t (tuntap->local, true),
-		    print_in_addr_t (tuntap->remote_netmask, true),
-		    "restart",
-		    NULL,
-		    "up");
-    }
-
-  /*
-   * Did TUN/TAP driver give us an MTU?
-   */
-  if (tuntap->post_open_mtu)
-    frame_set_mtu_dynamic_upper_bound (
-	  &frame,
-	  tuntap->post_open_mtu,
-	  true);
+  /* open tun/tap device, ifconfig, run up script, etc. */
+  
+  if (!options->up_delay)
+    did_open_tun = do_open_tun (options, &frame, &link_socket, tuntap, route_list);
 
   /*
    * Print MTU INFO
    */
-  frame_print (&frame, D_MTU_INFO,
-	       "Data Channel MTU parms",
-	       true);
+  frame_print (&frame, D_MTU_INFO, "Data Channel MTU parms");
 #ifdef FRAGMENT_ENABLE
   if (fragment)
-    frame_print (&frame_fragment, D_MTU_INFO,
-		 "Fragmentation MTU parms",
-		 true);
+    frame_print (&frame_fragment, D_MTU_INFO, "Fragmentation MTU parms");
 #endif
 
   /*
@@ -1334,12 +1306,15 @@ openvpn (const struct options *options,
 	    {
 	      if (CONNECTION_ESTABLISHED (&link_socket))
 		{
-		  if (did_tun_open)
+		  /* if --up-delay specified, open tun, do ifconfig, and run up script now */
+		  if (options->up_delay)
 		    {
-		      /* perform connection-establishment config steps
-			 on tun/tap device */
-		      open_tun_connection_establishment (tuntap, options->tuntap_flags);
+		      did_open_tun = do_open_tun (options, &frame, &link_socket, tuntap, route_list);
+		      TUNTAP_SETMAXFD(tuntap);
+		    }
 
+		  if (did_open_tun)
+		    {
 		      /* if --route-delay was specified, start timer */
 		      if (options->route_delay_defined)
 			event_timeout_init (&route_wakeup, current, options->route_delay);
@@ -1790,7 +1765,7 @@ openvpn (const struct options *options,
 	      buf = read_link_buf;
 	      ASSERT (buf_init (&buf, EXTRA_FRAME (&frame)));
 
-	      status = link_socket_read (&link_socket, &buf, max_rw_size_link, &from);
+	      status = link_socket_read (&link_socket, &buf, MAX_RW_SIZE_LINK (&frame), &from);
 
 	      if (socket_connection_reset (&link_socket, status))
 		{
@@ -2206,7 +2181,7 @@ openvpn (const struct options *options,
 	  /* TCP/UDP port ready to accept write */
 	  else if (SOCKET_ISSET (link_socket, writes))
 	    {
-	      if (to_link.len > 0 && to_link.len <= max_rw_size_link)
+	      if (to_link.len > 0 && to_link.len <= MAX_RW_SIZE_LINK (&frame))
 		{
 		  /*
 		   * Setup for call to send/sendto which will send
@@ -2281,7 +2256,7 @@ openvpn (const struct options *options,
 		  msg (D_LINK_ERRORS, "TCP/UDP packet too large on write to %s (tried=%d,max=%d)",
 		       print_sockaddr (&to_link_addr),
 		       to_link.len,
-		       max_rw_size_link);
+		       MAX_RW_SIZE_LINK (&frame));
 		}
 
 	      /*
@@ -2374,42 +2349,45 @@ openvpn (const struct options *options,
   /*
    * Close TUN/TAP device
    */
-  if ( !(signal_received == SIGUSR1 && options->persist_tun) )
+  if (tuntap_defined (tuntap))
     {
-      char* tuntap_actual = (char *) gc_malloc (sizeof (tuntap->actual));
-      strcpy (tuntap_actual, tuntap->actual);
+      if ( !(signal_received == SIGUSR1 && options->persist_tun) )
+	{
+	  char* tuntap_actual = (char *) gc_malloc (sizeof (tuntap->actual));
+	  strcpy (tuntap_actual, tuntap->actual);
 
-      /* delete any routes we added */
-      delete_routes (route_list);
+	  /* delete any routes we added */
+	  delete_routes (route_list);
 
-      msg (D_CLOSE, "Closing TUN/TAP device");
-      close_tun (tuntap);
+	  msg (D_CLOSE, "Closing TUN/TAP device");
+	  close_tun (tuntap);
 
-      /* Run the down script -- note that it will run at reduced
-	 privilege if, for example, "--user nobody" was used. */
-      run_script (options->down_script,
-		  tuntap_actual,
-		  TUN_MTU_SIZE (&frame),
-		  max_rw_size_link,
-		  print_in_addr_t (tuntap->local, true),
-		  print_in_addr_t (tuntap->remote_netmask, true),
-		  "init",
-		  signal_description (signal_received, signal_text),
-		  "down");
-    }
-  else
-    {
-      /* run the down script on this restart if --up-restart was specified */
-      if (options->up_restart)
-	run_script (options->down_script,
-		    tuntap->actual,
-		    TUN_MTU_SIZE (&frame),
-		    max_rw_size_link,
-		    print_in_addr_t (tuntap->local, true),
-		    print_in_addr_t (tuntap->remote_netmask, true),
-		    "restart",
-		    signal_description (signal_received, signal_text),
-		    "down");
+	  /* Run the down script -- note that it will run at reduced
+	     privilege if, for example, "--user nobody" was used. */
+	  run_script (options->down_script,
+		      tuntap_actual,
+		      TUN_MTU_SIZE (&frame),
+		      MAX_RW_SIZE_LINK (&frame),
+		      print_in_addr_t (tuntap->local, true),
+		      print_in_addr_t (tuntap->remote_netmask, true),
+		      "init",
+		      signal_description (signal_received, signal_text),
+		      "down");
+	}
+      else
+	{
+	  /* run the down script on this restart if --up-restart was specified */
+	  if (options->up_restart)
+	    run_script (options->down_script,
+			tuntap->actual,
+			TUN_MTU_SIZE (&frame),
+			MAX_RW_SIZE_LINK (&frame),
+			print_in_addr_t (tuntap->local, true),
+			print_in_addr_t (tuntap->remote_netmask, true),
+			"restart",
+			signal_description (signal_received, signal_text),
+			"down");
+	}
     }
 
   /* remove non-parameter environmental vars except for signal */
@@ -2462,6 +2440,11 @@ main (int argc, char *argv[])
   error_reset ();                      /* initialize error.c */
   reset_check_status ();               /* initialize status check code in socket.c */
 
+#ifdef PID_TEST
+  packet_id_interactive_test();  /* test the sequence number code */
+  goto exit;
+#endif
+
 #ifdef WIN32
   init_win32 ();
 #endif
@@ -2472,11 +2455,6 @@ main (int argc, char *argv[])
     for (i = 0; i < argc; ++i)
       msg (M_INFO, "argv[%d] = '%s'", i, argv[i]);
   }
-#endif
-
-#ifdef PID_TEST
-  packet_id_interactive_test();  /* test the sequence number code */
-  goto exit;
 #endif
 
   del_env_nonparm (0);
@@ -2683,6 +2661,12 @@ main (int argc, char *argv[])
 	{
 	  msg (M_WARN, "Options error: On Windows, --ifconfig is required when --dev tun is used");
 	  usage_small ();
+	}
+      if (options.ifconfig_noexec)
+	{
+	  options.tuntap_flags &= ~IP_SET_MASK;
+	  options.tuntap_flags |= IP_SET_MANUAL;
+	  options.ifconfig_noexec = false;
 	}
 #endif
 

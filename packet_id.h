@@ -108,9 +108,25 @@ typedef unsigned int packet_id_print_type;
  * sequence number due to packets arriving
  * out of order.
  */
-#define PACKET_BACKTRACK_MAX   1024
+#define SEQ_BACKTRACK 256
 
-CIRC_LIST (pkt_id, uint8_t, PACKET_BACKTRACK_MAX);
+/*
+ * Maximum allowed backtrack in
+ * seconds due to packets arriving
+ * out of order.
+ */
+#define TIME_BACKTRACK 15
+
+/*
+ * Do a reap pass through the sequence number
+ * array once every n seconds in order to
+ * expire sequence numbers which can no longer
+ * be accepted because they would violate
+ * TIME_BACKTRACK.
+ */
+#define SEQ_REAP_INTERVAL 5
+
+CIRC_LIST (pkt_id, time_t, SEQ_BACKTRACK);
 
 /*
  * This is the data structure we keep on the receiving side,
@@ -119,8 +135,9 @@ CIRC_LIST (pkt_id, uint8_t, PACKET_BACKTRACK_MAX);
  */
 struct packet_id_rec
 {
-  time_t time;             /* time stamp */
-  packet_id_type id;       /* sequence number */
+  time_t last_reap;        /* last call of packet_id_reap */
+  time_t time;             /* highest time stamp received */
+  packet_id_type id;       /* highest sequence number received */
   struct pkt_id id_list;   /* packet-id "memory" */
 };
 
@@ -194,7 +211,10 @@ struct packet_id
 bool packet_id_test (const struct packet_id_rec *p, const struct packet_id_net *pin);
 
 /* change our current state to reflect an accepted packet id */
-void packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin);
+void packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin, time_t current);
+
+/* expire TIME_BACKTRACK sequence numbers */ 
+void packet_id_reap (struct packet_id_rec *p, time_t current);
 
 /*
  * packet ID persistence
@@ -356,6 +376,13 @@ check_timestamp_delta (time_t current, time_t remote, unsigned int max_delta)
   else
     abs = remote - current;
   return abs <= max_delta;
+}
+
+static inline void
+packet_id_reap_test (struct packet_id_rec *p, time_t current)
+{
+  if (p->last_reap + SEQ_REAP_INTERVAL <= current)
+    packet_id_reap (p, current);
 }
 
 #endif /* PACKET_ID_H */

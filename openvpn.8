@@ -28,7 +28,7 @@
 .\" IP indented paragraph
 .\" TP hanging label
 openvpn
-.TH openvpn 8 "29 September 2003"
+.TH openvpn 8 "8 October 2003"
 .SH NAME
 openvpn \- secure IP tunnel daemon.
 .SH SYNOPSIS
@@ -175,8 +175,9 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-tun\-ipv6\fR\ ]
 [\ \fB\-\-tun\-mtu\-extra\fR\ \fIn\fR\ ]
 [\ \fB\-\-tun\-mtu\fR\ \fIn\fR\ ]
-[\ \fB\-\-up\-restart\fR\ ]
 [\ \fB\-\-up\fR\ \fIcmd\fR\ ]
+[\ \fB\-\-up\-restart\fR\ ]
+[\ \fB\-\-up\-delay\fR\ ]
 [\ \fB\-\-user\fR\ \fIuser\fR\ ]
 [\ \fB\-\-verb\fR\ \fIn\fR\ ]
 [\ \fB\-\-writepid\fR\ \fIfile\fR\ ]
@@ -1273,6 +1274,23 @@ script so that they can be used to configure routes such as:
 
 .B route add -net 10.0.0.0 netmask 255.255.255.0 gw $5
 .TP
+.B --up-delay
+Delay TUN/TAP open and possible
+.B --up
+script execution
+until after TCP/UDP connection establishment with peer.
+
+In
+.B --proto udp
+mode, this option normally requires the use of
+.B --ping
+to allow connection initiation to be sensed in the absence
+of tunnel data, since UDP is a "connectionless" protocol.
+
+On Windows, this option will delay the TAP-Win32 media state
+transitioning to "connected" until connection establishment,
+i.e. the receipt of the first authenticated packet from the peer.
+.TP
 .B --down cmd
 Shell command to run after TUN/TAP device close
 (post
@@ -2213,28 +2231,40 @@ Remove a persistent tunnel.
 TUN/TAP device
 .SS Windows-Specific Options:
 .TP
+.B --ip-win32 method
+When using --ifconfig on Windows, set the TAP-Win32 adapter
+IP address and netmask using
+.B method.
+
+.B manual --
+Don't set the IP address or netmask automatically.
+Instead output a message
+to the console telling the user to configure the
+adapter manually and indicating the IP/netmask which
+OpenVPN expects the adapter to be set to.
+
+.B netsh --
+Automatically set the IP address and netmask using
+the Windows command-line "netsh"
+command.  This method appears to work correctly on
+Windows XP but not Windows 2000.
+
+.B ipapi --
+Set the IP address and netmask using the
+Windows IP Helper API (this is the default).  This approach
+does not have ideal semantics, though testing has indicated
+that it works well in practice.
+
+.B dynamic --
+This option is not yet implemented, and is reserved for
+future use.
+.TP
 .B --show-adapters
 Show available TAP-Win32 adapters which can be selected using the
 .B --dev-node
 option.  On non-Windows systems, the
 .BR ifconfig (8)
 command provides similar functionality.
-.TP
-.B --no-arp-del
-By default, the Windows version of OpenVPN executes an "arp -d *"
-command after the TAP-Win32 device is opened to force the
-refresh of the MAC cache.
-.B --no-arp-del
-will disable this behaviour.
-.TP
-.B --tap-delay
-Delay the seting of the TAP-Win32
-adapter media state to "connected" until after TCP/UDP connection
-establishment with peer.  This may require the use of the
-.B --ping
-option to trigger connection establishment when using
-connectionless protocols such as UDP as the tunnel data
-carrier.
 .TP
 .B --show-valid-subnets
 Show valid subnets for

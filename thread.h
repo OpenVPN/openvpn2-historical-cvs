@@ -39,7 +39,8 @@
 #define L_CTIME     4
 #define L_STRERR    5
 #define L_PUTENV    6
-#define N_MUTEXES   7
+#define L_PRNG      7
+#define N_MUTEXES   8
 
 #ifdef USE_PTHREAD
 

@@ -131,8 +131,6 @@ OPTIONS for ./configure:
 
   --enable-strict-options   Enable strict options check between peers
 
-  --enable-mtu-dynamic      Enable dynamic MTU support (experimental)
-
 *************************************************************************
 
 BUILDING ON LINUX 2.4+ FROM RPM
@@ -237,10 +235,6 @@ CAVEATS & BUGS:
   TAP driver (kernel 2.4.21 and 2.4.22) stall when lower --mssfix
   values are used.  The TCP sessions appear to unstall and resume
   normally when the remote VPN endpoint is pinged.
-
-* OpenVPN running on Windows can only connect to other systems which
-  have tap virtual device drivers available.  To my knowledge, this includes
-  Linux and FreeBSD.
 
 * OpenVPN works fine with the 1.1 TUN/TAP driver in the Linux 2.2 kernels,
   and with the integrated 1.4 TUN/TAP driver in the Linux 2.4 kernels, but

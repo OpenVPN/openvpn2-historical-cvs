@@ -71,32 +71,12 @@
 #define TAP_MTU_DEFAULT        1500
 #define TAP_MTU_EXTRA_DEFAULT  32
 
-/*
- * Dynamic MTU parameters (based on frame.link_mtu).
- *
- * MIN_TUN_MTU + TUN_LINK_DELTA <= link_mtu_min <= link_mtu_dynamic <= link_mtu_max <= mtu
- */
-struct frame_dynamic {
-  /* control parameters */
-# define MTU_INITIAL_UNDEF -1
-  int mtu_min_initial;
-  int mtu_max_initial;
-
-# define MTU_SET_TO_MIN -1
-# define MTU_SET_TO_MAX -2
-  int mtu_initial;
-
-  /* derived from control parameters, set by frame_dynamic_finalize */
-  int mtu_min;
-  int mtu_max;
-  int mtu;
-};
-
 struct frame {
   /*
    * Maximum datagram size to be sent over the tunnel TCP/UDP channel.
    */
   int link_mtu;
+  int link_mtu_dynamic;
 
   /*
    * extra_frame: How many extra bytes might each subsystem (crypto, TLS, or, compression)
@@ -118,12 +98,6 @@ struct frame {
    * or write from TUN/TAP device.
    */
   int extra_tun;
-
-  /*
-   * An MTU value that can dynamically change during the life of the session
-   * in order to reduce packet fragmentation.
-   */
-  struct frame_dynamic dynamic;
 };
 
 /* Routines which read struct frame should use the macros below */
@@ -144,7 +118,7 @@ struct frame {
  * This is the size to "ifconfig" the tun or tap device.
  */
 #define TUN_MTU_SIZE(f)          ((f)->link_mtu - TUN_LINK_DELTA(f))
-#define TUN_MTU_SIZE_DYNAMIC(f)  ((f)->dynamic.mtu - TUN_LINK_DELTA(f))
+#define TUN_MTU_SIZE_DYNAMIC(f)  ((f)->link_mtu_dynamic - TUN_LINK_DELTA(f))
 
 /*
  * This is the maximum packet size that we need to be able to
@@ -153,15 +127,15 @@ struct frame {
  * to return a packet size of 1214 on a read().
  */
 #define PAYLOAD_SIZE(f)          ((f)->link_mtu - EXTRA_FRAME(f))
-#define PAYLOAD_SIZE_DYNAMIC(f)  ((f)->dynamic.mtu - EXTRA_FRAME(f))
+#define PAYLOAD_SIZE_DYNAMIC(f)  ((f)->link_mtu_dynamic - EXTRA_FRAME(f))
 
 /*
  * Max size of a payload packet after encryption, compression, etc.
  * overhead is added.
  */
 #define EXPANDED_SIZE(f)         ((f)->link_mtu)
-#define EXPANDED_SIZE_DYNAMIC(f) ((f)->dynamic.mtu)
-
+#define EXPANDED_SIZE_DYNAMIC(f) ((f)->link_mtu_dynamic)
+#define EXPANDED_SIZE_MIN(f)     (TUN_MTU_MIN + TUN_LINK_DELTA(f))
 /*
  * Max size of a buffer used to build a packet for output to
  * the TCP/UDP port.
@@ -183,22 +157,22 @@ void frame_finalize (struct frame *frame,
 		     bool link_mtu_defined,
 		     int link_mtu,
 		     bool tun_mtu_defined,
-		     int tun_mtu,
-		     bool link_mtu_min_defined,
-		     int link_mtu_min,
-		     bool link_mtu_max_defined,
-		     int link_mtu_max);
+		     int tun_mtu);
 
-void frame_finalize_derivative (struct frame *frame, const struct frame *src);
-void frame_dynamic_finalize (struct frame *frame);
-void frame_set_mtu_dynamic_initial (struct frame *frame, int mtu);
-void frame_set_mtu_dynamic_upper_bound (struct frame *frame, int mtu, bool tun);
-bool frame_mtu_change_pct (struct frame *frame, int pct);
 void frame_subtract_extra (struct frame *frame, const struct frame *src);
-void frame_print (const struct frame *frame, int level, const char *prefix, bool long_form);
+void frame_print (const struct frame *frame, int level, const char *prefix);
 
 void set_mtu_discover_type (int sd, int mtu_type);
 int translate_mtu_discover_type_name (const char *name);
+
+/*
+ * frame_set_mtu_dynamic and flags
+ */
+
+#define SET_MTU_TUN         (1<<0) /* use tun/tap rather than link sizing */
+#define SET_MTU_UPPER_BOUND (1<<1) /* only decrease dynamic MTU */
+
+void frame_set_mtu_dynamic (struct frame *frame, int mtu, unsigned int flags);
 
 /*
  * EXTENDED_SOCKET_ERROR_CAPABILITY functions -- print extra error info

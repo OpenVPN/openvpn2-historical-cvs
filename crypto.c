@@ -36,6 +36,7 @@
 #include "crypto.h"
 #include "error.h"
 #include "misc.h"
+#include "thread.h"
 
 #include "memdbg.h"
 
@@ -72,10 +73,6 @@
  * Note that the buf_prepend return will assert if we try to
  * make a header bigger than EXTRA_FRAME.  This should not
  * happen unless the frame parameters are wrong.
- *
- * If opt->iv is not NULL it will be used and the residual
- * IV will be returned.
- *
  */
 
 #define CRYPT_ERROR(format) \
@@ -94,15 +91,20 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
       /* Do Encrypt from buf -> work */
       if (ctx->cipher)
 	{
-	  uint8_t *iv = opt->iv;
-	  uint8_t *residual_iv;
+	  uint8_t iv_buf[EVP_MAX_IV_LENGTH];
 	  const int iv_size = EVP_CIPHER_CTX_iv_length (ctx->cipher);
 	  const unsigned int mode = EVP_CIPHER_CTX_mode (ctx->cipher);  
 	  int outlen;
 
-	  /* Put packet ID in plaintext buffer or IV, depending on cipher mode */
 	  if (mode == EVP_CIPH_CBC_MODE)
 	    {
+	      CLEAR (iv_buf);
+
+	      /* generate pseudo-random IV */
+	      if (opt->use_iv)
+		prng_bytes (iv_buf, iv_size);
+
+	      /* Put packet ID in plaintext buffer or IV, depending on cipher mode */
 	      if (opt->packet_id)
 		{
 		  struct packet_id_net pin;
@@ -115,12 +117,12 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	      struct packet_id_net pin;
 	      struct buffer b;
 
-	      ASSERT (iv);             /* IV and packet-ID required */
+	      ASSERT (opt->use_iv);    /* IV and packet-ID required */
 	      ASSERT (opt->packet_id); /*  for this mode. */
 
 	      packet_id_alloc_outgoing (&opt->packet_id->send, &pin, true);
-	      memset (iv, 0, iv_size);
-	      buf_set_write (&b, iv, iv_size);
+	      memset (iv_buf, 0, iv_size);
+	      buf_set_write (&b, iv_buf, iv_size);
 	      ASSERT (packet_id_write (&pin, &b, true, false));
 	    }
 	  else /* We only support CBC, CFB, or OFB modes right now */
@@ -131,15 +133,15 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	  /* initialize work buffer with EXTRA_FRAME bytes of prepend capacity */
 	  ASSERT (buf_init (&work, EXTRA_FRAME (frame)));
 
-	  /* show the IV's initial state */
-	  if (iv)
-	    msg (D_PACKET_CONTENT, "ENCRYPT IV: %s", format_hex (iv, iv_size, 0));
+	  /* set the IV pseudo-randomly */
+	  if (opt->use_iv)
+	    msg (D_PACKET_CONTENT, "ENCRYPT IV: %s", format_hex (iv_buf, iv_size, 0));
 
 	  msg (D_PACKET_CONTENT, "ENCRYPT FROM: %s",
 	       format_hex (BPTR (buf), BLEN (buf), 80));
 
 	  /* cipher_ctx was already initialized with key & keylen */
-	  ASSERT (EVP_CipherInit_ov (ctx->cipher, NULL, NULL, iv, DO_ENCRYPT));
+	  ASSERT (EVP_CipherInit_ov (ctx->cipher, NULL, NULL, iv_buf, DO_ENCRYPT));
 
 	  /* Buffer overflow check (should never happen) */
 	  ASSERT (buf_safe (&work, buf->len + EVP_CIPHER_CTX_block_size (ctx->cipher)));
@@ -149,19 +151,16 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 	  work.len += outlen;
 
 	  /* Flush the encryption buffer */
-	  ASSERT (EVP_CipherFinal (ctx->cipher, (residual_iv = BPTR (&work) + outlen), &outlen));
+	  ASSERT (EVP_CipherFinal (ctx->cipher, BPTR (&work) + outlen, &outlen));
 	  work.len += outlen;
 	  ASSERT (outlen == iv_size);
 
 	  /* prepend the IV to the ciphertext */
-	  if (iv)
+	  if (opt->use_iv)
 	    {
 	      uint8_t *output = buf_prepend (&work, iv_size);
 	      ASSERT (output);
-	      memcpy (output, iv, iv_size);
-
-	      /* save the residual IV */
-	      memcpy (iv, residual_iv, iv_size);
+	      memcpy (output, iv_buf, iv_size);
 	    }
 
 	  msg (D_PACKET_CONTENT, "ENCRYPT TO: %s",
@@ -198,8 +197,7 @@ openvpn_encrypt (struct buffer *buf, struct buffer work,
 }
 
 /*
- * If opt->iv is not NULL, we will read an IV from the packet.
- * opt->iv is not modified.
+ * If opt->use_iv is not NULL, we will read an IV from the packet.
  */
 void
 openvpn_decrypt (struct buffer *buf, struct buffer work,
@@ -249,31 +247,31 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	{
 	  const unsigned int mode = EVP_CIPHER_CTX_mode (ctx->cipher);
 	  const int iv_size = EVP_CIPHER_CTX_iv_length (ctx->cipher);
-	  uint8_t iv[EVP_MAX_IV_LENGTH];
+	  uint8_t iv_buf[EVP_MAX_IV_LENGTH];
 	  int outlen;
 
 	  /* initialize work buffer with EXTRA_FRAME bytes of prepend capacity */
 	  ASSERT (buf_init (&work, EXTRA_FRAME (frame)));
 
 	  /* use IV if user requested it */
-	  CLEAR (iv);
-	  if (opt->iv)
+	  CLEAR (iv_buf);
+	  if (opt->use_iv)
 	    {
 	      if (buf->len < iv_size)
 		CRYPT_ERROR ("missing IV info");
-	      memcpy (iv, BPTR (buf), iv_size);
+	      memcpy (iv_buf, BPTR (buf), iv_size);
 	      ASSERT (buf_advance (buf, iv_size));
 	    }
 
 	  /* show the IV's initial state */
-	  if (iv)
-	    msg (D_PACKET_CONTENT, "DECRYPT IV: %s", format_hex (iv, iv_size, 0));
+	  if (opt->use_iv)
+	    msg (D_PACKET_CONTENT, "DECRYPT IV: %s", format_hex (iv_buf, iv_size, 0));
 
 	  if (buf->len < 1)
 	    CRYPT_ERROR ("missing payload");
 
 	  /* ctx->cipher was already initialized with key & keylen */
-	  if (!EVP_CipherInit_ov (ctx->cipher, NULL, NULL, iv, DO_DECRYPT))
+	  if (!EVP_CipherInit_ov (ctx->cipher, NULL, NULL, iv_buf, DO_DECRYPT))
 	    CRYPT_ERROR ("cipher init failed");
 
 	  /* Buffer overflow check (should never happen) */
@@ -308,10 +306,10 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
 	      {
 		struct buffer b;
 
-		ASSERT (iv);             /* IV and packet-ID required */
+		ASSERT (opt->use_iv);    /* IV and packet-ID required */
 		ASSERT (opt->packet_id); /*  for this mode. */
 
-		buf_set_read (&b, iv, iv_size);
+		buf_set_read (&b, iv_buf, iv_size);
 		if (!packet_id_read (&pin, &b, true))
 		  CRYPT_ERROR ("error reading CFB/OFB packet-id");
 		have_pin = true;
@@ -335,9 +333,10 @@ openvpn_decrypt (struct buffer *buf, struct buffer work,
       
       if (have_pin)
 	{
+	  packet_id_reap_test (&opt->packet_id->rec, current);
 	  if (packet_id_test (&opt->packet_id->rec, &pin))
 	    {
-	      packet_id_add (&opt->packet_id->rec, &pin);
+	      packet_id_add (&opt->packet_id->rec, &pin, current);
 	      if (opt->pid_persist && opt->packet_id_long_form)
 		packet_id_persist_save_obj (opt->pid_persist, opt->packet_id);
 	    }
@@ -365,13 +364,13 @@ void
 crypto_adjust_frame_parameters(struct frame *frame,
 			       const struct key_type* kt,
 			       bool cipher_defined,
-			       bool iv,
+			       bool use_iv,
 			       bool packet_id,
 			       bool packet_id_long_form)
 {
   frame_add_to_extra_frame (frame,
 			    (packet_id ? packet_id_size (packet_id_long_form) : 0) +
-			    ((cipher_defined && iv) ? EVP_CIPHER_iv_length (kt->cipher) : 0) +
+			    ((cipher_defined && use_iv) ? EVP_CIPHER_iv_length (kt->cipher) : 0) +
 			    (cipher_defined ? EVP_CIPHER_block_size (kt->cipher) : 0) + /* worst case padding expansion */
 			    kt->hmac_length);
 }
@@ -468,8 +467,11 @@ init_key_type (struct key_type *kt, const char *ciphername,
       {
 	const unsigned int mode = EVP_CIPHER_mode (kt->cipher);
 	if (!(mode == EVP_CIPH_CBC_MODE
-	      || (cfb_ofb_allowed && (mode == EVP_CIPH_CFB_MODE || mode == EVP_CIPH_OFB_MODE))))
-	  msg (M_FATAL, "Cipher %s uses a mode not supported by OpenVPN in your current configuration.  CBC mode is always supported, while CFB and OFB modes are supported only when using SSL/TLS authentication and key exchange mode.", ciphername);
+#ifdef ALLOW_NON_CBC_CIPHERS
+	      || (cfb_ofb_allowed && (mode == EVP_CIPH_CFB_MODE || mode == EVP_CIPH_OFB_MODE))
+#endif
+	      ))
+	  msg (M_FATAL, "Cipher %s uses a mode not supported by OpenVPN in your current configuration.  CBC mode is always supported, while CFB and OFB modes are supported only when using SSL/TLS authentication and key exchange mode, and when OpenVPN has been built with ALLOW_NON_CBC_CIPHERS.", ciphername);
       }
     }
   else
@@ -700,9 +702,9 @@ fixup_key (struct key *key, const struct key_type *kt)
 }
 
 void
-check_replay_iv_consistency(const struct key_type *kt, bool packet_id, bool iv)
+check_replay_iv_consistency(const struct key_type *kt, bool packet_id, bool use_iv)
 {
-  if (cfb_ofb_mode (kt) && !(packet_id && iv))
+  if (cfb_ofb_mode (kt) && !(packet_id && use_iv))
     msg (M_FATAL, "--no-replay or --no-iv cannot be used with a CFB or OFB mode cipher");
 }
 
@@ -744,13 +746,6 @@ generate_key_random (struct key *key, const struct key_type *kt)
 }
 
 void
-randomize_iv (uint8_t *iv)
-{
-  if (RAND_bytes (iv, EVP_MAX_IV_LENGTH) < 0)
-    msg (M_SSLERR, "RAND_bytes failed");
-}
-
-void
 test_crypto (const struct crypto_options *co, struct frame* frame)
 {
   int i, j;
@@ -767,7 +762,6 @@ test_crypto (const struct crypto_options *co, struct frame* frame)
   for (i = 1; i <= TUN_MTU_SIZE (frame); ++i)
     {
       const time_t current = time (NULL);
-      uint8_t iv_save[EVP_MAX_IV_LENGTH];
 
       msg (M_INFO, "TESTING ENCRYPT/DECRYPT of packet length=%d", i);
 
@@ -783,17 +777,8 @@ test_crypto (const struct crypto_options *co, struct frame* frame)
       buf = work;
       memcpy (buf_write_alloc (&buf, BLEN (&src)), BPTR (&src), BLEN (&src));
 
-      /* save IV */
-      memcpy (iv_save, co->iv, EVP_MAX_IV_LENGTH);
-
       /* encrypt */
       openvpn_encrypt (&buf, encrypt_workspace, co, frame, current);
-
-      /* make sure IV changed */
-      if (!memcmp (iv_save, co->iv, EVP_MAX_IV_LENGTH))
-	  msg (M_FATAL, "IV Collision: before:%s after:%s",
-	       format_hex (iv_save, EVP_MAX_IV_LENGTH, 0),
-	       format_hex (co->iv, EVP_MAX_IV_LENGTH, 0));
 
       /* decrypt */
       openvpn_decrypt (&buf, decrypt_workspace, co, frame, current);
@@ -1103,7 +1088,11 @@ show_available_ciphers ()
       if (cipher && cipher_ok (OBJ_nid2sn (nid)))
 	{
 	  const unsigned int mode = EVP_CIPHER_mode (cipher);
-	  if (mode == EVP_CIPH_CBC_MODE || mode == EVP_CIPH_CFB_MODE || mode == EVP_CIPH_OFB_MODE)
+	  if (mode == EVP_CIPH_CBC_MODE
+#ifdef ALLOW_NON_CBC_CIPHERS
+	      || mode == EVP_CIPH_CFB_MODE || mode == EVP_CIPH_OFB_MODE
+#endif
+	      )
 	    printf ("%s %d bit default key (%s)\n",
 		    OBJ_nid2sn (nid),
 		    EVP_CIPHER_key_length (cipher) * 8,
@@ -1145,12 +1134,47 @@ void init_crypto_lib ()
 {
 }
 
-/* an analogue to the random() function, but use OpenSSL function */
+/*
+ * Random number functions, used in cases where we want
+ * reasonably strong cryptographic random number generation
+ * without depleting our entropy pool.  Used for random
+ * IV values and a number of other miscellaneous tasks.
+ */
+
+#define NONCE_SECRET_LEN 16
+
+static uint8_t nonce_data [SHA_DIGEST_LENGTH + NONCE_SECRET_LEN];
+
+void
+prng_init (void)
+{
+  ASSERT (RAND_bytes (nonce_data, sizeof(nonce_data)));
+}
+
+void
+prng_bytes (uint8_t *output, int len)
+{
+  SHA_CTX ctx;
+  mutex_lock (L_PRNG);
+  while (len > 0)
+    {
+      const int blen = min_int (len, SHA_DIGEST_LENGTH);
+      SHA1_Init (&ctx);
+      SHA1_Update (&ctx, nonce_data, sizeof (nonce_data));
+      SHA1_Final (nonce_data, &ctx);
+      memcpy (output, nonce_data, blen);
+      output += blen;
+      len -= blen;
+    }
+  mutex_unlock (L_PRNG);
+}
+
+/* an analogue to the random() function, but use prng_bytes */
 long int
 get_random()
 {
   long int l;
-  ASSERT (RAND_pseudo_bytes ((unsigned char *)&l, sizeof(l)));
+  prng_bytes ((unsigned char *)&l, sizeof(l));
   if (l < 0)
     l = -l;
   return l;

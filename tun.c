@@ -132,51 +132,6 @@ guess_tuntap_dev (const char *dev, const char *dev_type, const char *dev_node)
 }
 
 /*
- * Called after open_tun for any post-open config steps.
- */
-void open_tun_post_config (struct tuntap *tt, unsigned int flags)
-{
-#ifdef WIN32
-  if (!(flags & TUNTAP_FLAGS_WIN32_NO_ARP_DEL))
-    {
-      char command_line[512];
-      netcmd_semaphore_lock ();
-      openvpn_snprintf (command_line, sizeof (command_line), "arp -d *");
-      msg (M_INFO, "%s", command_line);
-      system_check (command_line, NULL, false);
-      netcmd_semaphore_release ();
-    }
-  if (!(flags & TUNTAP_FLAGS_WIN32_TAP_DELAY) && tt->hand)
-    {
-      DWORD len;
-      ULONG status = TRUE;
-      if (!DeviceIoControl (tt->hand, TAP_IOCTL_SET_MEDIA_STATUS,
-			    &status, sizeof (status),
-			    &status, sizeof (status), &len, NULL))
-	msg (M_WARN, "WARNING: The TAP-Win32 driver rejected a TAP_IOCTL_SET_MEDIA_STATUS DeviceIoControl call.");
-    }
-#endif
-}
-
-/*
- * Called on TCP/UDP connection establishment with peer.
- */
-void open_tun_connection_establishment (struct tuntap *tt, unsigned int flags)
-{
-#ifdef WIN32
-  if ((flags & TUNTAP_FLAGS_WIN32_TAP_DELAY) && tt->hand)
-    {
-      DWORD len;
-      ULONG status = TRUE;
-      if (!DeviceIoControl (tt->hand, TAP_IOCTL_SET_MEDIA_STATUS,
-			    &status, sizeof (status),
-			    &status, sizeof (status), &len, NULL))
-	msg (M_WARN, "WARNING: The TAP-Win32 driver rejected a TAP_IOCTL_SET_MEDIA_STATUS DeviceIoControl call.");
-    }
-#endif
-}
-
-/*
  * Called by the open_tun function of OSes to check if we
  * explicitly support IPv6.
  *
@@ -340,36 +295,44 @@ ifconfig_options_string (const struct tuntap* tt, bool remote)
   return BSTR (&out);
 }
 
-/* execute the ifconfig command through the shell */
+/*
+ * Init tun/tap object.
+ *
+ * Set up tuntap structure for ifconfig,
+ * but don't execute yet.
+ */
 void
-do_ifconfig (struct tuntap *tt,
-	     const char *dev,       /* --dev option */
-	     const char *dev_type,  /* --dev-type option */
-	     const char *actual,    /* actual device name */
-	     const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
-	     const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
-	     int tun_mtu,
-	     in_addr_t local_public,
-	     in_addr_t remote_public,
-	     bool noexec)
+init_tun (struct tuntap *tt,
+	  const char *dev,       /* --dev option */
+	  const char *dev_type,  /* --dev-type option */
+	  const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
+	  const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
+	  in_addr_t local_public,
+	  in_addr_t remote_public,
+	  const struct frame *frame,
+	  unsigned int flags)
 {
+#ifdef WIN32
+  overlapped_io_init (&tt->reads, frame, FALSE, true);
+  overlapped_io_init (&tt->writes, frame, TRUE, true);
+#endif
+
+  tt->type = dev_type_enum (dev, dev_type);
+  tt->flags = flags;
+
   if (ifconfig_local_parm && ifconfig_remote_netmask_parm)
     {
-      const int type = dev_type_enum (dev, dev_type);
-      bool tun = true;
+      bool tun = false;
       const char *ifconfig_local = NULL;
       const char *ifconfig_remote_netmask = NULL;
       const char *ifconfig_broadcast = NULL;
-      char command_line[512];
-
-      CLEAR (command_line);
 
       /*
        * We only handle TUN/TAP devices here, not --dev null devices.
        */
-      if (type == DEV_TYPE_TUN)
+      if (tt->type == DEV_TYPE_TUN)
 	tun = true;
-      else if (type == DEV_TYPE_TAP)
+      else if (tt->type == DEV_TYPE_TAP)
 	tun = false;
       else
 	msg (M_FATAL, "'%s' is not a TUN/TAP device.  The --ifconfig option works only for TUN/TAP devices.", dev);
@@ -406,13 +369,13 @@ do_ifconfig (struct tuntap *tt,
        */
 
       check_addr_clash ("local",
-			type,
+			tt->type,
 			local_public,
 			tt->local,
 			tt->remote_netmask);
 
       check_addr_clash ("remote",
-			type,
+			tt->type,
 			remote_public,
 			tt->local,
 			tt->remote_netmask);
@@ -447,9 +410,45 @@ do_ifconfig (struct tuntap *tt,
 	}
 
       tt->did_ifconfig_setup = true;
+    }
+}
 
-      if (noexec)
-	return;
+
+/* execute the ifconfig command through the shell */
+void
+do_ifconfig (struct tuntap *tt,
+	     const char *actual,    /* actual device name */
+	     int tun_mtu)
+{
+  if (tt->did_ifconfig_setup)
+    {
+      bool tun = false;
+      const char *ifconfig_local = NULL;
+      const char *ifconfig_remote_netmask = NULL;
+      const char *ifconfig_broadcast = NULL;
+      char command_line[512];
+
+      /*
+       * We only handle TUN/TAP devices here, not --dev null devices.
+       */
+      if (tt->type == DEV_TYPE_TUN)
+	tun = true;
+      else if (tt->type == DEV_TYPE_TAP)
+	tun = false;
+      else
+	ASSERT (0); /* should have been caught in init_tun */
+
+      /*
+       * Set ifconfig parameters
+       */
+      ifconfig_local = print_in_addr_t (tt->local, false);
+      ifconfig_remote_netmask = print_in_addr_t (tt->remote_netmask, false);
+
+      /*
+       * If TAP-style device, generate broadcast address.
+       */
+      if (!tun)
+	ifconfig_broadcast = print_in_addr_t (tt->broadcast, false);
 
 #if defined(TARGET_LINUX)
 
@@ -472,6 +471,7 @@ do_ifconfig (struct tuntap *tt,
 			  );
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "Linux ifconfig failed", true);
+      tt->did_ifconfig = true;
 
 #elif defined(TARGET_SOLARIS)
 
@@ -491,12 +491,13 @@ do_ifconfig (struct tuntap *tt,
 	{
 	  openvpn_snprintf (command_line, sizeof (command_line),
 			    IFCONFIG_PATH " %s unplumb",
-			    dev
+			    actual
 			    );
 	  msg (M_INFO, "%s", command_line);
 	  system_check (command_line, "Solaris ifconfig unplumb failed", false);
 	  msg (M_FATAL, "ifconfig failed");
 	}
+      tt->did_ifconfig = true;
 
 #elif defined(TARGET_OPENBSD)
 
@@ -508,7 +509,7 @@ do_ifconfig (struct tuntap *tt,
 
       openvpn_snprintf (command_line, sizeof (command_line),
 			IFCONFIG_PATH " %s delete",
-			dev);
+			actual);
       msg (M_INFO, "%s", command_line);
       system_check (command_line, NULL, false);
       msg (M_INFO, "NOTE: Tried to delete pre-existing tun/tap instance -- No Problem if failure");
@@ -526,6 +527,7 @@ do_ifconfig (struct tuntap *tt,
 	no_tap_ifconfig ();
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "OpenBSD ifconfig failed", true);
+      tt->did_ifconfig = true;
 
 #elif defined(TARGET_NETBSD)
 
@@ -541,6 +543,7 @@ do_ifconfig (struct tuntap *tt,
 	no_tap_ifconfig ();
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "NetBSD ifconfig failed", true);
+      tt->did_ifconfig = true;
 
 #elif defined(TARGET_DARWIN)
 
@@ -550,7 +553,7 @@ do_ifconfig (struct tuntap *tt,
 
       openvpn_snprintf (command_line, sizeof (command_line),
 			IFCONFIG_PATH " %s delete",
-			dev);
+			actual);
       msg (M_INFO, "%s", command_line);
       system_check (command_line, NULL, false);
       msg (M_INFO, "NOTE: Tried to delete pre-existing tun/tap instance -- No Problem if failure");
@@ -569,6 +572,7 @@ do_ifconfig (struct tuntap *tt,
 	no_tap_ifconfig ();
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "Mac OS X ifconfig failed", true);
+      tt->did_ifconfig = true;
 
 #elif defined(TARGET_FREEBSD)
 
@@ -592,38 +596,56 @@ do_ifconfig (struct tuntap *tt,
 	
       msg (M_INFO, "%s", command_line);
       system_check (command_line, "FreeBSD ifconfig failed", true);
+      tt->did_ifconfig = true;
 
 #elif defined (WIN32)
+      {
+	const char *netmask;
 
-      /* example: netsh interface ip set address my-tap static 10.3.0.1 255.255.255.0 */
-      if (tun)
-	{
-	  /*
-	   * Make sure that both ifconfig addresses are part of the same .252 subnet.
-	   */
-	  verify_255_255_255_252 (tt->local, tt->remote_netmask);
-	  openvpn_snprintf (command_line, sizeof (command_line),
-			    "netsh interface ip set address \"%s\" static %s 255.255.255.252",
-			    actual,
-			    ifconfig_local);
-	}
-      else
-	{
-	  openvpn_snprintf (command_line, sizeof (command_line),
-			    "netsh interface ip set address \"%s\" static %s %s",
-			    actual,
-			    ifconfig_local,
-			    ifconfig_remote_netmask);
-	}
-      netcmd_semaphore_lock ();
-      msg (M_INFO, "%s", command_line);
-      system_check (command_line, "ERROR: netsh command failed", true);
-      netcmd_semaphore_release ();
+	/*
+	 * Make sure that both ifconfig addresses are part of the
+	 * same .252 subnet.
+	 */
+	if (tun)
+	  {
+	    verify_255_255_255_252 (tt->local, tt->remote_netmask);
+	    tt->adapter_netmask = ~3;
+	    netmask = print_in_addr_t (tt->adapter_netmask, false);
+	  }
+	else
+	  {
+	    netmask = ifconfig_remote_netmask;
+	    tt->adapter_netmask = tt->remote_netmask;
+	  }
+
+	/* example: netsh interface ip set address my-tap static 10.3.0.1 255.255.255.0 */
+	openvpn_snprintf (command_line, sizeof (command_line),
+			  "netsh interface ip set address \"%s\" static %s %s",
+			  actual,
+			  ifconfig_local,
+			  netmask);
+	
+	switch (tt->flags & IP_SET_MASK)
+	  {
+	  case IP_SET_MANUAL:
+	    msg (M_INFO, "******** NOTE:  Please manually set the IP/netmask of '%s' to %s/%s (if it is not already set)",
+		 actual,
+		 ifconfig_local,
+		 netmask);
+	    break;
+	  case IP_SET_NETSH:
+	    netcmd_semaphore_lock ();
+	    msg (M_INFO, "%s", command_line);
+	    system_check (command_line, "ERROR: netsh command failed", true);
+	    netcmd_semaphore_release ();
+	    break;
+	  }
+	tt->did_ifconfig = true;
+      }
 
 #else
       msg (M_FATAL, "Sorry, but I don't know how to do 'ifconfig' commands on this operating system.  You should ifconfig your TUN/TAP device manually or use an --up script.");
 #endif
-
     }
 }
 
@@ -657,9 +679,6 @@ open_tun_generic (const char *dev, const char *dev_type, const char *dev_node,
   char tunname[256];
   char dynamic_name[256];
   bool dynamic_opened = false;
-
-  /* get device type, i.e. tun, tap, or null */
-  tt->type = dev_type_enum (dev, dev_type);
 
   ipv6_support (ipv6, ipv6_explicitly_supported, tt);
 
@@ -756,9 +775,6 @@ void
 open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
 {
   struct ifreq ifr;
-
-  /* get device type, i.e. tun, tap, or null */
-  tt->type = dev_type_enum (dev, dev_type);
 
   /*
    * Set tt->ipv6 to true if
@@ -945,9 +961,6 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   const char *dev_tuntap_type;
   int link_type;
   bool is_tun;
-
-  /* get device type, i.e. tun, tap, or null */
-  tt->type = dev_type_enum (dev, dev_type);
 
   ipv6_support (ipv6, false, tt);
 
@@ -1518,7 +1531,7 @@ is_tap_win32_dev (const char* guid)
 
 /*
  * The caller should set name to the name
- * of a TAP-Win32 device on this system.
+ * of a TAP-Win32 adapter on this system.
  * The GUID that is associated with the
  * device node will be returned.
  *
@@ -1661,7 +1674,7 @@ get_device_guid (const char *name,
     return NULL; /* successful return in enumerated list mode */
 
   if (op == GET_DEV_UID_NORMAL) 
-    msg (M_FATAL|M_NOPREFIX, "TAP-Win32 device '%s' not found -- run with --show-adapters to show a list of TAP-WIN32 adapters on this system", name);
+    msg (M_FATAL|M_NOPREFIX, "TAP-Win32 adapter '%s' not found -- run with --show-adapters to show a list of TAP-WIN32 adapters on this system", name);
 
   if (!dev_count)
     msg (M_FATAL|M_NOPREFIX, "There are no TAP-Win32 adapters on this system.  You should be able to create a TAP-Win32 adapter by going to Start -> All Programs -> OpenVPN -> Add a new TAP-Win32 virtual ethernet adapter.");
@@ -1744,6 +1757,62 @@ show_tap_win32_adapters (void)
   get_device_guid (NULL, NULL, 0, GET_DEV_UID_ENUMERATE);
 }
 
+/*
+ * Delete all temporary address/netmask pairs which were added
+ * to adapter (given by index) by previous calls to AddIPAddress.
+ */
+static void
+delete_temp_addresses (DWORD index)
+{
+  PIP_ADAPTER_INFO pi;
+  PIP_ADAPTER_INFO a;
+  ULONG size = 0;
+
+  if (GetAdaptersInfo (NULL, &size) != ERROR_BUFFER_OVERFLOW)
+    msg (M_FATAL, "GetAdaptersInfo #1 failed");
+  pi = (PIP_ADAPTER_INFO) malloc (size);
+  ASSERT (pi);
+  if (GetAdaptersInfo (pi, &size) != NO_ERROR)
+    msg (M_FATAL, "GetAdaptersInfo #2 failed");
+
+  for (a = pi; a != NULL; a = a->Next)
+    {
+      if (a->Index == index)
+	{
+	  PIP_ADDR_STRING ip = &a->IpAddressList;
+	  while (ip)
+	    {
+	      const DWORD context = ip->Context;
+	      if (DeleteIPAddress ((ULONG) context) == NO_ERROR)
+		{
+		  msg (M_INFO, "Successfully deleted previously set dynamic IP/netmask: %s/%s",
+		       ip->IpAddress.String,
+		       ip->IpMask.String);
+		}
+	      ip = ip->Next;
+	    }
+	}
+    }
+  
+  free (pi);
+}
+
+/*
+ * Get interface index for use with IP Helper API functions.
+ */
+static DWORD
+get_interface_index (const char *guid)
+{
+  ULONG index;
+  wchar_t wbuf[256];
+  snwprintf (wbuf, SIZE (wbuf), L"\\DEVICE\\TCPIP_%S", guid);
+  wbuf [SIZE(wbuf) - 1] = 0;
+  if (GetAdapterIndex (wbuf, &index) != NO_ERROR)
+    return ~0;
+  else
+    return index;
+}
+
 void
 open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6, struct tuntap *tt)
 {
@@ -1751,8 +1820,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   const char *device_guid = NULL;
   DWORD len;
 
-  /* get device type, i.e. tun, tap, or null */
-  tt->type = dev_type_enum (dev, dev_type);
+  netcmd_semaphore_lock ();
 
   ipv6_support (ipv6, false, tt);
 
@@ -1785,7 +1853,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   }
 
   /*
-   * Open Windows TAP-Win32 device
+   * Open Windows TAP-Win32 adapter
    */
   openvpn_snprintf (device_path, sizeof(device_path), "%s%s%s",
 		    USERMODEDEVICEDIR,
@@ -1810,6 +1878,7 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
   /* get driver version info */
   {
     ULONG info[3];
+    CLEAR (info);
     if (DeviceIoControl (tt->hand, TAP_IOCTL_GET_VERSION,
 			 &info, sizeof (info),
 			 &info, sizeof (info), &len, NULL))
@@ -1818,7 +1887,12 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	     (int) info[0],
 	     (int) info[1],
 	     (info[2] ? "(DEBUG)" : ""));
+
       }
+    if ( !(info[0] > TAP_WIN32_MIN_MAJOR || (info[0] == TAP_WIN32_MIN_MAJOR && info[1] >= TAP_WIN32_MIN_MINOR)) )
+      msg (M_FATAL, "ERROR:  This version of OpenVPN requires a TAP-Win32 driver that is at least version %d.%d -- If you recently upgraded your OpenVPN distribution, a reboot is probably required at this point to get Windows to see the new driver.",
+	   TAP_WIN32_MIN_MAJOR,
+	   TAP_WIN32_MIN_MINOR);
   }
 
   /* get driver MTU */
@@ -1848,6 +1922,83 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 			    ep, sizeof (ep), &len, NULL))
 	msg (M_FATAL, "ERROR: The TAP-Win32 driver rejected a DeviceIoControl call to set Point-to-Point mode, which is required for --dev tun");
     }
+
+  /* should we tell the TAP-Win32 driver to masquerade as a DHCP server as a means
+     of setting the adapter address? */
+  if (tt->did_ifconfig_setup && (tt->flags & IP_SET_MASK) == IP_SET_DHCP)
+    {
+      in_addr_t ep[2];
+      ep[0] = htonl (tt->local);
+      ep[1] = htonl (tt->adapter_netmask);
+      if (!DeviceIoControl (tt->hand, TAP_IOCTL_CONFIG_DHCP_MASQ,
+			    ep, sizeof (ep),
+			    ep, sizeof (ep), &len, NULL))
+	msg (M_FATAL, "ERROR: The TAP-Win32 driver rejected a DeviceIoControl call to set TAP_IOCTL_CONFIG_DHCP_MASQ mode");
+      msg (M_INFO, "Notified TAP-Win32 driver to set a dynamic IP/netmask of %s/%s on interface %s",
+	   print_in_addr_t (tt->local, false),
+	   print_in_addr_t (tt->adapter_netmask, false),
+	   device_guid
+	   );
+    }
+
+  /* set driver media status to 'connected' */
+  {
+    ULONG status = TRUE;
+    if (!DeviceIoControl (tt->hand, TAP_IOCTL_SET_MEDIA_STATUS,
+			  &status, sizeof (status),
+			  &status, sizeof (status), &len, NULL))
+      msg (M_WARN, "WARNING: The TAP-Win32 driver rejected a TAP_IOCTL_SET_MEDIA_STATUS DeviceIoControl call.");
+  }
+
+  /* give adapter time to get connected */
+  sleep (1);
+
+  /* possibly use IP Helper API to set IP address on adapter */
+  {
+    DWORD index = get_interface_index (device_guid);
+    
+    /* flush arp cache */
+    if (index != ~0)
+      {
+	if (FlushIpNetTable (index) == NO_ERROR)
+	  msg (M_INFO, "Successful ARP Flush on interface %s", device_guid);
+	else
+	  msg (M_FATAL, "ERROR: FlushIpNetTable failed on interface %s", device_guid);
+      }
+
+    if (tt->did_ifconfig_setup && (tt->flags & IP_SET_MASK) == IP_SET_IPAPI)
+      {
+	/* couldn't get adapter index */
+	if (index == ~0)
+	  {
+	    msg (M_FATAL, "ERROR: unable to get adapter index for interface %s", device_guid);
+	  }
+
+	/* delete previously added IP addresses which were not
+	   correctly deleted */
+	delete_temp_addresses (index);
+
+	/* add a new IP address */
+	if (AddIPAddress (htonl(tt->local),
+			  htonl(tt->adapter_netmask),
+			  index,
+			  &tt->ipapi_context,
+			  &tt->ipapi_instance) == NO_ERROR)
+	  msg (M_INFO, "Succeeded in adding a temporary IP/netmask of %s/%s to interface %s using the Win32 IP Helper API",
+	       print_in_addr_t (tt->local, false),
+	       print_in_addr_t (tt->adapter_netmask, false),
+	       device_guid
+	       );
+	else
+	  msg (M_FATAL, "ERROR: AddIPAddress %s/%s failed on interface %s, index=%u",
+	       print_in_addr_t (tt->local, false),
+	       print_in_addr_t (tt->adapter_netmask, false),
+	       device_guid,
+	       (unsigned int) index);
+	tt->ipapi_context_defined = true;
+      }
+  }
+  netcmd_semaphore_release ();
 }
 
 const char *
@@ -1869,35 +2020,89 @@ tap_win32_getinfo (struct tuntap *tt)
 }
 
 void
-tun_frame_init (struct frame *frame, struct tuntap *tt)
-{
-  overlapped_io_init (&tt->reads, frame, FALSE, true);
-  overlapped_io_init (&tt->writes, frame, TRUE, true);
-}
-
-void
 close_tun (struct tuntap *tt)
 {
-  if (tt->hand != NULL)
+  if (tt->ipapi_context_defined)
     {
-      msg (D_WIN32_IO_LOW, "Attempting CancelIO on TAP-Win32 device");
-      if (!CancelIo (tt->hand))
-	msg (M_WARN | M_ERRNO, "Warning: CancelIO failed on TAP-Win32 device");
+      if (DeleteIPAddress (tt->ipapi_context) != NO_ERROR)
+	{
+	  msg (M_WARN, "Warning: DeleteIPAddress[%u] failed on TAP-Win32 adapter", (unsigned int)tt->ipapi_context);
+	}
     }
 
-  msg (D_WIN32_IO_LOW, "Attempting close of overlapped read event on TAP-Win32 device");
+  if (tt->hand != NULL)
+    {
+      msg (D_WIN32_IO_LOW, "Attempting CancelIO on TAP-Win32 adapter");
+      if (!CancelIo (tt->hand))
+	msg (M_WARN | M_ERRNO, "Warning: CancelIO failed on TAP-Win32 adapter");
+    }
+
+  msg (D_WIN32_IO_LOW, "Attempting close of overlapped read event on TAP-Win32 adapter");
   overlapped_io_close (&tt->reads);
 
-  msg (D_WIN32_IO_LOW, "Attempting close of overlapped write event on TAP-Win32 device");
+  msg (D_WIN32_IO_LOW, "Attempting close of overlapped write event on TAP-Win32 adapter");
   overlapped_io_close (&tt->writes);
 
   if (tt->hand != NULL)
     {
-      msg (D_WIN32_IO_LOW, "Attempting CloseHandle on TAP-Win32 device");
+      msg (D_WIN32_IO_LOW, "Attempting CloseHandle on TAP-Win32 adapter");
       if (!CloseHandle (tt->hand))
-	msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on TAP-Win32 device");
+	msg (M_WARN | M_ERRNO, "Warning: CloseHandle failed on TAP-Win32 adapter");
     }
   clear_tuntap (tt);
+}
+
+/*
+ * Convert --ip-win32 constants between index and ascii form.
+ */
+
+struct ipset_names {
+  const char *short_form;
+};
+
+/* Indexed by IP_SET_x */
+static const struct ipset_names ipset_names[] = {
+  {"manual"},
+  {"netsh"},
+  {"ipapi"},
+  {"dynamic"}
+};
+
+int
+ascii2ipset (const char* name)
+{
+  int i;
+  ASSERT (IP_SET_N == SIZE (ipset_names));
+  for (i = 0; i < IP_SET_N; ++i)
+    if (!strcmp (name, ipset_names[i].short_form))
+      return i;
+  return -1;
+}
+
+const char *
+ipset2ascii (int index)
+{
+  ASSERT (IP_SET_N == SIZE (ipset_names));
+  if (index < 0 || index >= IP_SET_N)
+    return "[unknown --ip-win32 type]";
+  else
+    return ipset_names[index].short_form;
+}
+
+const char *
+ipset2ascii_all ()
+{
+  struct buffer out = alloc_buf_gc (256);
+  int i;
+
+  ASSERT (IP_SET_N == SIZE (ipset_names));
+  for (i = 0; i < IP_SET_N; ++i)
+    {
+      if (i)
+	buf_printf(&out, " ");
+      buf_printf(&out, "[%s]", ipset2ascii(i));
+    }
+  return BSTR (&out);
 }
 
 #else /* generic */

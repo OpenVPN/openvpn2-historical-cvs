@@ -46,8 +46,11 @@ struct tuntap
   int type; /* DEV_TYPE_x as defined in proto.h */
 
   bool did_ifconfig_setup;
+  bool did_ifconfig;
 
   bool ipv6;
+
+  unsigned int flags; /* options set on command line */
 
   char actual[256]; /* actual name of TUN/TAP dev, usually including unit number */
 
@@ -60,6 +63,13 @@ struct tuntap
   HANDLE hand;
   struct overlapped_io reads;
   struct overlapped_io writes;
+
+  /* used for setting interface address via IP Helper API
+     or DHCP masquerade */
+  bool ipapi_context_defined;
+  ULONG ipapi_context;
+  ULONG ipapi_instance;
+  in_addr_t adapter_netmask;
 #else
   int fd;   /* file descriptor for TUN/TAP dev */
 #endif
@@ -119,10 +129,6 @@ void clear_tuntap (struct tuntap *tuntap);
 void open_tun (const char *dev, const char *dev_type, const char *dev_node,
 	       bool ipv6, struct tuntap *tt);
 
-void open_tun_post_config (struct tuntap *tt, unsigned int flags);
-
-void open_tun_connection_establishment (struct tuntap *tt, unsigned int flags);
-
 void close_tun (struct tuntap *tt);
 
 int write_tun (struct tuntap* tt, uint8_t *buf, int len);
@@ -135,16 +141,19 @@ void tuncfg (const char *dev, const char *dev_type, const char *dev_node,
 const char *guess_tuntap_dev (const char *dev, const char *dev_type,
 			      const char *dev_node);
 
+void init_tun (struct tuntap *tt,
+	       const char *dev,       /* --dev option */
+	       const char *dev_type,  /* --dev-type option */
+	       const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
+	       const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
+	       in_addr_t local_public,
+	       in_addr_t remote_public,
+	       const struct frame *frame,
+	       unsigned int flags);
+
 void do_ifconfig (struct tuntap *tt,
-		  const char *dev,       /* --dev option */
-		  const char *dev_type,  /* --dev-type option */
 		  const char *actual,    /* actual device name */
-		  const char *ifconfig_local_parm,          /* --ifconfig parm 1 */
-		  const char *ifconfig_remote_netmask_parm, /* --ifconfig parm 2 */
-		  int tun_mtu,
-		  in_addr_t local_public,
-		  in_addr_t remote_public,
-		  bool noexec);
+		  int tun_mtu);
 
 const char *dev_component_in_dev_node (const char *dev_node);
 
@@ -206,10 +215,23 @@ ifconfig_order(void)
 
 #ifdef WIN32
 
-#define TUNTAP_FLAGS_WIN32_NO_ARP_DEL (1<<0)
-#define TUNTAP_FLAGS_WIN32_TAP_DELAY  (1<<1)
-
 #define TUN_PASS_BUFFER
+
+/* --ip-win32 constants */
+
+#define IP_SET_MANUAL      0  /* "manual" */
+#define IP_SET_NETSH       1  /* "netsh" */
+#define IP_SET_IPAPI       2  /* "ipapi" */
+#define IP_SET_DHCP        3  /* "dhcp" */
+
+#define IP_SET_N           4
+#define IP_SET_MASK        3
+
+int ascii2ipset (const char* name);
+const char *ipset2ascii (int index);
+const char *ipset2ascii_all (void);
+
+/* op for get_device_guid */
 
 #define GET_DEV_UID_NORMAL           0
 #define GET_DEV_UID_DEFAULT          1
@@ -227,7 +249,6 @@ void show_tap_win32_adapters (void);
 void show_valid_win32_tun_subnets (void);
 const char *tap_win32_getinfo (struct tuntap *tt);
 
-void tun_frame_init (struct frame *frame, struct tuntap *tt);
 int tun_read_queue (struct tuntap *tt, int maxsize);
 int tun_write_queue (struct tuntap *tt, struct buffer *buf);
 int tun_finalize (HANDLE h, struct overlapped_io *io, struct buffer *buf);
@@ -280,8 +301,6 @@ write_tun_buffered (struct tuntap *tt, struct buffer *buf)
 }
 
 #else
-
-static inline void tun_frame_init (struct frame *frame, struct tuntap *tt) {}
 
 static inline bool
 tuntap_stop (int status)

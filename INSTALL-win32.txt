@@ -10,12 +10,45 @@ guide for more info:
 
 http://openvpn.sourceforge.net/trouble.html
 
-
-As of 1.5-beta3, OpenVPN runs on Win 2000
+As of 1.5-beta1, OpenVPN runs on Win 2000
 and XP.  OpenVPN also runs on Linux, Mac OS X,
 Solaris, FreeBSD, NetBSD, and OpenBSD, making it
 one of the most portable VPN packages today.
 
+What's new in 1.5-beta10
+-----------------------
+
+See Change Log:
+
+http://openvpn.sourceforge.net/changelog.html
+
+What's new in 1.5-beta9
+-----------------------
+
+OpenSSL 0.9.7c DLLs are now shipped with 1.5-beta9
+in response to an OpenSSL security advisory.
+
+An option has been added to the TAP-Win32 driver
+advanced properties page that allows you to control
+whether the adapter appears to Windows as
+"Always Connected" or whether the connection status
+is dynamically brought up and down by OpenVPN
+("Application Controlled").
+
+Notes:
+
+* If you plan on using the --ifconfig option on
+  Win 2000, it is advisable to set the TAP-Win32
+  adapter "Media Status" parameter to
+  "Always Connected" in the advanced properties
+  page.  Go to Control Panel -> Network Connections,
+  right click on TAP-Win32 adapter and select
+  Properties, Configure, and Advanced.
+
+* If you are installing 1.5-beta9 as an upgrade to a
+  prior OpenVPN version, it is advisable to reboot
+  the system after the upgrade.
+  
 What's new in 1.5-beta8
 -----------------------
 
@@ -812,23 +845,6 @@ pool {
 
 }
 
-Notes -- Caveats and bugs
--------------------------
-
-* The Windows TAP-Win32 driver should not be used on SMP systems prior
-  to beta8, and beta8 should be considered experimental when run on
-  SMP systems.
-
-* I have noticed cases where TCP sessions tunneled over the Linux
-  TAP driver (kernel 2.4.21 and 2.4.22) stall when lower --mssfix
-  values are used.  The TCP sessions appear to unstall and resume
-  normally when the remote VPN endpoint is pinged.
-
-* OpenVPN running on Windows can only connect to other systems which
-  have tap virtual device drivers available.  To my knowledge, this includes
-  Linux and FreeBSD.
-
-
 Notes -- Driver Stability
 -------------------------
 
@@ -850,6 +866,37 @@ NOT safe for usage on SMP (i.e. multiprocessor) systems.
 Beta8 has been redesigned to be SMP-safe but more real
 world testing will be required before its stability
 can be assured.
+
+Notes -- TUN devices
+--------------------
+
+Tun device support (via the --dev tun option) was first
+included in OpenVPN 1.5-beta8.
+
+A "tun" device is a virtual point-to-point IP link.
+
+Using --dev tun also requires that you use --ifconfig
+to tell OpenVPN the local and remote IP endpoints for
+the point-to-point tunnel.
+
+The --ifconfig option also calls the Windows "netsh"
+command, and some problems have been reported with
+this command on Win2K at lower service packet levels.
+
+If you would like to use --dev tun but would rather
+set the TCP/IP properties manually rather than having
+OpenVPN try to do it automatically with netsh, follow
+these steps:
+
+* Specify --ifconfig with endpoint addresses.
+
+* Specify the --ifconfig-noexec option.
+
+* Manually set the network/subnet in the TCP/IP
+  properties.  You should use a /30 subnet that
+  encloses the addresses that were specified
+  in the --ifconfig option.  The netmask, therefore,
+  will be 255.255.255.252.
 
 Notes -- TAP vs. TUN devices
 ----------------------------
@@ -1124,7 +1171,7 @@ significant changes:
      cause a bug check if driver was unloaded or disabled
      while still open by a userspace process (beta8).
 
-(11) Fixed bug that rendered a driver instance unusable
+(11) Fixed bug that rendered an adapter instance unusable
      if a userspace process tried to read a packet
      of data but provided a buffer that was too small
      to completely return the packet (beta8).
@@ -1139,7 +1186,14 @@ significant changes:
 (14) Adapter media state is now controlled directly from
      userspace using the TAP_IOCTL_SET_MEDIA_STATUS ioctl.
 
-(15) To a certain extent, backwards compatibility with NT 4 has
+(15) An option has been added to the TAP-Win32 driver
+     advanced properties page that allows you to control
+     whether the adapter appears to Windows as
+     "Always Connected" or whether the connection status
+     is dynamically brought up and down by OpenVPN
+     ("Application Controlled").
+
+(16) To a certain extent, backwards compatibility with NT 4 has
      been sacrificed in the interest of better usability and
      stability on Win2K/XP.
 

@@ -158,6 +158,8 @@ static const char usage_message[] =
   "                  Execute as: cmd TUN/TAP-dev tun-mtu link-mtu \\\n"
   "                              ifconfig-local-ip ifconfig-remote-ip\n"
   "                  (pre --user or --group UID/GID change)\n"
+  "--up-delay      : Delay TUN/TAP open and possible --up script execution\n"
+  "                  until after TCP/UDP connection establishment with peer.\n"
   "--down cmd      : Shell cmd to run after tun device close.\n"
   "                  (post --user/--group UID/GID change and/or --chroot)\n"
   "                  (script parameters are same as --up option)\n"
@@ -191,7 +193,9 @@ static const char usage_message[] =
   "                : 3 -- show extra TLS info + --gremlin net outages +\n"
   "                       adaptive compress info\n"
   "                : 4 -- show parameters\n"
-  "                : 5 to 11 -- debug messages of increasing verbosity\n"
+  "                : 5 -- show 'RrWw' chars on console for each packet sent\n"
+  "                       and received from TCP/UDP (caps) or TUN/TAP (lc)\n"
+  "                : 6 to 11 -- debug messages of increasing verbosity\n"
   "--mute n        : Log at most n consecutive messages in the same category.\n"
   "--gremlin       : Simulate dropped & corrupted packets + network outages\n"
   "                  to test robustness of protocol (for debugging only).\n"
@@ -272,11 +276,11 @@ static const char usage_message[] =
   "\n"
   "Windows Specific:\n"
   "--show-adapters : Show all TAP-Win32 adapters.\n"
+  "--ip-win32 method : When using --ifconfig on Windows, set TAP-Win32 adapter\n"
+  "                    IP address using method = manual, netsh, ipapi, or\n"
+  "                    dynamic (default = ipapi).\n"
   "--show-valid-subnets : Show valid subnets for --dev tun emulation.\n" 
-  "--no-arp-del    : Don't do an 'arp -d *' after TAP-Win32 open.\n"
   "--pause-exit    : When run from a console window, pause before exiting.\n"
-  "--tap-delay     : Don't set TAP-Win32 media state to 'connected' until\n"
-  "                  TCP/UDP connection establishment with peer.\n"
 #endif
   "\n"
   "Generate a random key (only for non-TLS static key encryption mode):\n"
@@ -320,13 +324,16 @@ init_options (struct options *o)
 #ifdef USE_LZO
   o->comp_lzo_adaptive = true;
 #endif
+#ifdef WIN32
+  o->tuntap_flags = (IP_SET_IPAPI & IP_SET_MASK);
+#endif
 #ifdef USE_CRYPTO
   o->ciphername = "BF-CBC";
   o->ciphername_defined = true;
   o->authname = "SHA1";
   o->authname_defined = true;
   o->packet_id = true;
-  o->iv = true;
+  o->use_iv = true;
 #ifdef USE_SSL
   o->tls_timeout = 2;
   o->renegotiate_seconds = 3600;
@@ -339,6 +346,7 @@ init_options (struct options *o)
 #define SHOW_PARM(name, value, format) msg(D_SHOW_PARMS, "  " #name " = " format, (value))
 #define SHOW_STR(var)  SHOW_PARM(var, (o->var ? o->var : "[UNDEF]"), "'%s'")
 #define SHOW_INT(var)  SHOW_PARM(var, o->var, "%d")
+#define SHOW_UINT(var)  SHOW_PARM(var, o->var, "%u")
 #define SHOW_UNSIGNED(var)  SHOW_PARM(var, o->var, "0x%08x")
 #define SHOW_BOOL(var) SHOW_PARM(var, (o->var ? "ENABLED" : "DISABLED"), "%s");
 
@@ -447,7 +455,7 @@ show_settings (const struct options *o)
   SHOW_INT (verbosity);
   SHOW_INT (mute);
   SHOW_BOOL (gremlin);
-  SHOW_BOOL (tuntap_flags);
+  SHOW_UINT (tuntap_flags);
 
   SHOW_BOOL (occ);
 
@@ -472,7 +480,7 @@ show_settings (const struct options *o)
   SHOW_INT (keysize);
   SHOW_BOOL (packet_id);
   SHOW_STR (packet_id_file);
-  SHOW_BOOL (iv);
+  SHOW_BOOL (use_iv);
   SHOW_BOOL (test_crypto);
 
 #ifdef USE_SSL
@@ -616,7 +624,7 @@ options_string (const struct options *o,
 	  buf_printf (&out, ",secret");
 	if (!o->packet_id)
 	  buf_printf (&out, ",no-replay");
-	if (!o->iv)
+	if (!o->use_iv)
 	  buf_printf (&out, ",no-iv");
       }
 
@@ -754,7 +762,7 @@ usage (void)
 void
 usage_small (void)
 {
-  msg (M_WARN|M_NOPREFIX, "Use --help for more information");
+  msg (M_WARN|M_NOPREFIX, "Use --help for more information.");
   openvpn_exit (OPENVPN_EXIT_STATUS_USAGE); /* exit point */
 }
 
@@ -1079,6 +1087,10 @@ add_option (struct options *options, int i, char *p[],
       ++i;
       options->down_script = p[1];
     }
+  else if (streq (p[0], "up-delay"))
+    {
+      options->up_delay = true;
+    }
   else if (streq (p[0], "up-restart"))
     {
       options->up_restart = true;
@@ -1362,6 +1374,22 @@ add_option (struct options *options, int i, char *p[],
       options->occ = false;
     }
 #ifdef WIN32
+  else if (streq (p[0], "ip-win32") && p[1])
+    {
+      const int index = ascii2ipset (p[1]);
+      ++i;
+      if (index < 0)
+	{
+	  msg (M_WARN|M_NOPREFIX,
+	       "Bad --ip-win32 method: '%s'.  Allowed methods: %s",
+	       p[1],
+	       ipset2ascii_all());
+	  usage_small ();
+	}
+
+      options->tuntap_flags &= ~IP_SET_MASK;
+      options->tuntap_flags |= (index & IP_SET_MASK);
+    }
   else if (streq (p[0], "show-adapters"))
     {
       show_tap_win32_adapters ();
@@ -1375,14 +1403,6 @@ add_option (struct options *options, int i, char *p[],
   else if (streq (p[0], "pause-exit"))
     {
       set_pause_exit_win32 ();
-    }
-  else if (streq (p[0], "no-arp-del"))
-    {
-      options->tuntap_flags |= TUNTAP_FLAGS_WIN32_NO_ARP_DEL;
-    }
-  else if (streq (p[0], "tap-delay"))
-    {
-      options->tuntap_flags |= TUNTAP_FLAGS_WIN32_TAP_DELAY;
     }
 #endif
 #if PASSTOS_CAPABILITY
@@ -1455,7 +1475,7 @@ add_option (struct options *options, int i, char *p[],
     }
   else if (streq (p[0], "no-iv"))
     {
-      options->iv = false;
+      options->use_iv = false;
     }
   else if (streq (p[0], "replay-persist") && p[1])
     {

@@ -166,12 +166,16 @@ tls_init_control_channel_frame_parameters(const struct frame *data_channel_frame
    * if --tls-auth is enabled.
    */
 
+  /* inherit link MTU from data channel */
+  frame->link_mtu = data_channel_frame->link_mtu;
+
   /* set extra_frame */
   tls_adjust_frame_parameters (frame);
   reliable_ack_adjust_frame_parameters (frame, CONTROL_SEND_ACK_MAX);
   frame_add_to_extra_frame (frame, SID_SIZE + sizeof (packet_id_type));
-  frame_set_mtu_dynamic_initial (frame, MTU_SET_TO_MIN);
-  frame_finalize_derivative (frame, data_channel_frame);
+
+  /* set dynamic link MTU to minimum value */
+  frame_set_mtu_dynamic (frame, 0, SET_MTU_TUN);
 }
 
 void
@@ -220,6 +224,8 @@ pem_password_callback (char *buf, int size, int rwflag, void *u)
   if (!strlen (passbuf))
     {
       char *gp = getpass ("Enter PEM pass phrase:");
+      if (!gp)
+	msg (M_FATAL, "TLS Error: Error reading PEM pass phrase for private key");
       strncpynt (passbuf, gp, sizeof (passbuf));
       memset (gp, 0, strlen (gp));
     }
@@ -227,7 +233,7 @@ pem_password_callback (char *buf, int size, int rwflag, void *u)
   if (buf)
     {
       if (!strlen (passbuf))
-	msg (M_FATAL, "TLS Error: need PEM password for private key");
+	msg (M_FATAL, "TLS Error: Need PEM pass phrase for private key");
       strncpynt (buf, passbuf, size);
       CLEAR (passbuf);
       return strlen (buf);
@@ -394,7 +400,6 @@ init_ssl (bool server,
       msg (D_TLS_DEBUG_LOW, "Diffie-Hellman initialized with %d bit key",
 	   8 * DH_size (dh));
       DH_free (dh);
-
     }
   else				/* if client */
     {

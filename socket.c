@@ -346,7 +346,7 @@ socket_frame_init (const struct frame *frame, struct link_socket *sock)
 void
 frame_adjust_path_mtu (struct frame *frame, int pmtu, int proto)
 {
-  frame_set_mtu_dynamic_upper_bound (frame, pmtu - datagram_overhead (proto), false);
+  frame_set_mtu_dynamic (frame, pmtu - datagram_overhead (proto), SET_MTU_UPPER_BOUND);
 }
 
 /*
@@ -958,6 +958,7 @@ int
 ascii2proto (const char* proto_name)
 {
   int i;
+  ASSERT (PROTO_N == SIZE (proto_names));
   for (i = 0; i < PROTO_N; ++i)
     if (!strcmp (proto_name, proto_names[i].short_form))
       return i;
@@ -967,7 +968,8 @@ ascii2proto (const char* proto_name)
 const char *
 proto2ascii (int proto, bool display_form)
 {
-  if (proto < 0 || proto > PROTO_N)
+  ASSERT (PROTO_N == SIZE (proto_names));
+  if (proto < 0 || proto >= PROTO_N)
     return "[unknown protocol]";
   else if (display_form)
     return proto_names[proto].display_form;
@@ -981,6 +983,7 @@ proto2ascii_all ()
   struct buffer out = alloc_buf_gc (256);
   int i;
 
+  ASSERT (PROTO_N == SIZE (proto_names));
   for (i = 0; i < PROTO_N; ++i)
     {
       if (i)

@@ -41,21 +41,17 @@
 #define TAP_NDIS_MAJOR_VERSION 5
 #define TAP_NDIS_MINOR_VERSION 0
 
-#ifndef TAP_DRIVER_MAJOR_VERSION
-#   define TAP_DRIVER_MAJOR_VERSION 2
-#endif
+// Minimum version number expected by userspace
+#define TAP_WIN32_MIN_MAJOR 3
+#define TAP_WIN32_MIN_MINOR 10
 
-#ifndef TAP_DRIVER_MINOR_VERSION
-#   define TAP_DRIVER_MINOR_VERSION 1
-#endif
+#ifdef CIPE_SERVICE_DEFINES
 
 #ifndef ENABLE_RANDOM_MAC
 # ifndef TAP_MAC_ROOT_ADDRESS
 #   define TAP_MAC_ROOT_ADDRESS "8:0:58:0:0:1"
 # endif
 #endif
-
-#ifdef CIPE_SERVICE_DEFINES
 
 // milliseconds before ping timeout
 #ifndef PING_TIMEOUT
@@ -179,6 +175,7 @@ typedef unsigned char UDPBUFFER [UDP_DATAGRAM_BUFFER_SIZE];
 #define TAP_IOCTL_GET_INFO              TAP_CONTROL_CODE (5, METHOD_BUFFERED)
 #define TAP_IOCTL_CONFIG_POINT_TO_POINT TAP_CONTROL_CODE (6, METHOD_BUFFERED)
 #define TAP_IOCTL_SET_MEDIA_STATUS      TAP_CONTROL_CODE (7, METHOD_BUFFERED)
+#define TAP_IOCTL_CONFIG_DHCP_MASQ      TAP_CONTROL_CODE (8, METHOD_BUFFERED)
 
 //=======================================================================
 // Registry keys

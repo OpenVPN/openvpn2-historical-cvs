@@ -243,6 +243,8 @@ void netcmd_semaphore_close (void);
 void netcmd_semaphore_lock (void);
 void netcmd_semaphore_release (void);
 
+char *getpass (const char *prompt);
+
 #else /* Posix stuff here */
 
 struct event_wait {
@@ -250,7 +252,13 @@ struct event_wait {
   fd_set reads, writes;
 };
 
+#ifdef ENABLE_PROFILING
+int profile_select(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
+#define SELECT() profile_select (event_wait.max_fd_plus_one, &event_wait.reads, &event_wait.writes, NULL, tv)
+#else
 #define SELECT() select (event_wait.max_fd_plus_one, &event_wait.reads, &event_wait.writes, NULL, tv)
+#endif
+
 #define SELECT_SIGNAL_RECEIVED()
 #define GET_SIGNAL(sig)
 #define WAIT_SIGNAL(ew)

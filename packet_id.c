@@ -47,8 +47,14 @@
 
 #include "memdbg.h"
 
+/*
+ * Special time_t value that indicates that
+ * sequence number has expired.
+ */
+#define SEQ_EXPIRED ((time_t)1)
+
 void
-packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin)
+packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin, time_t current)
 {
   packet_id_type diff;
 
@@ -58,25 +64,49 @@ packet_id_add (struct packet_id_rec *p, const struct packet_id_net *pin)
    */
   if (!CIRC_LIST_SIZE (p->id_list)
       || pin->time > p->time
-      || (pin->id >= PACKET_BACKTRACK_MAX
-	  && pin->id - PACKET_BACKTRACK_MAX > p->id))
+      || (pin->id >= SEQ_BACKTRACK
+	  && pin->id - SEQ_BACKTRACK > p->id))
     {
       p->time = pin->time;
       p->id = 0;
-      if (pin->id > PACKET_BACKTRACK_MAX)
-	p->id = pin->id - PACKET_BACKTRACK_MAX;
+      if (pin->id > SEQ_BACKTRACK)
+	p->id = pin->id - SEQ_BACKTRACK;
       CLEAR (p->id_list);
     }
 
   while (p->id < pin->id)
     {
-      CIRC_LIST_PUSH (p->id_list, false);
+      CIRC_LIST_PUSH (p->id_list, (time_t)0);
       ++p->id;
     }
 
   diff = p->id - pin->id;
-  if (diff < (packet_id_type) CIRC_LIST_SIZE (p->id_list))
-    CIRC_LIST_ITEM (p->id_list, diff) = true;
+  if (diff < (packet_id_type) CIRC_LIST_SIZE (p->id_list)
+      && current > SEQ_EXPIRED)
+    CIRC_LIST_ITEM (p->id_list, diff) = current;
+}
+
+/*
+ * Expire sequence numbers which can no longer
+ * be accepted because they would violate
+ * TIME_BACKTRACK.
+ */
+void
+packet_id_reap (struct packet_id_rec *p, time_t current)
+{
+  int i;
+  bool expire = false;
+  for (i = 0; i < CIRC_LIST_SIZE (p->id_list); ++i)
+    {
+      const time_t t = CIRC_LIST_ITEM (p->id_list, i);
+      if (t == SEQ_EXPIRED)
+	break;
+      if (!expire && t && t + TIME_BACKTRACK < current)
+	expire = true;
+      if (expire)
+	CIRC_LIST_ITEM (p->id_list, i) = SEQ_EXPIRED;
+    }
+  p->last_reap = current;
 }
 
 /*
@@ -107,7 +137,7 @@ packet_id_test (const struct packet_id_rec *p, const struct packet_id_net *pin)
       if (diff >= (packet_id_type) CIRC_LIST_SIZE (p->id_list))
 	return false;
 
-      return !CIRC_LIST_ITEM (p->id_list, diff);
+      return CIRC_LIST_ITEM (p->id_list, diff) == 0;
     }
   else if (pin->time < p->time) /* if time goes back, reject */
     return false;
@@ -286,25 +316,26 @@ void packet_id_interactive_test ()
     char buf[80];
     if (!fgets(buf, sizeof(buf), stdin))
       break;
-    if (sscanf (buf, "%u,%u", &pin.time, &pin.id) == 2)
+    if (sscanf (buf, "%lu,%u", &pin.time, &pin.id) == 2)
       {
+	packet_id_reap_test (&p, time (NULL));
 	test = packet_id_test (&p, &pin);
 	printf ("packet_id_test (" packet_id_format ", " packet_id_format ") returned %d\n",
-		pin.time,
-		pin.id,
+		(time_type)pin.time,
+		(packet_id_print_type)pin.id,
 		test);
 	if (test)
-	  packet_id_add (&p, &pin);
+	  packet_id_add (&p, &pin, time (NULL));
       }
     else
       {
 	long_form = (count < 20);
 	packet_id_alloc_outgoing (&s, &pin, long_form);
 	printf ("(" time_format "(" packet_id_format "), " time_format "(" packet_id_format "), %d)\n",
-		pin.time,
-		pin.time,
-		pin.id,
-		pin.id,
+		(time_type)pin.time,
+		(time_type)pin.time,
+		(packet_id_print_type)pin.id,
+		(packet_id_print_type)pin.id,
 		long_form);
 	if (s.id == 10)
 	  s.id = 0xFFFFFFF8;

@@ -31,6 +31,8 @@ CC = gcc -g -O2 -Wall -Wno-unused-function -Wno-unused-variable -mno-cygwin
 
 INCLUDE_DIRS = -I${OPENSSL}/include -I${LZO}/include
 
+LIBS = -llzo -lws2_32 -lgdi32 -liphlpapi
+
 LIB_DIRS = -L${OPENSSL}/out -L${LZO}/src/.libs
 
 EXE = openvpn.exe
@@ -51,10 +53,10 @@ OBJS =	buffer.o crypto.o error.o fdmisc.o fragment.o \
         ssl.o thread.o tun.o
 
 dynamic : ${OBJS}
-	${CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl32 -leay32 -llzo -lws2_32 -lgdi32
+	${CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl32 -leay32 ${LIBS}
 
 static : ${OBJS}
-	${CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl -lcrypto -llzo -lws2_32 -lgdi32
+	${CC} -o ${EXE} ${OBJS} ${LIB_DIRS} -lssl -lcrypto ${LIBS}
 
 clean :
 	rm -f ${OBJS} ${EXE}

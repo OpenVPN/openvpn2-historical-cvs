@@ -33,6 +33,7 @@
 #include <openssl/hmac.h>
 #include <openssl/des.h>
 #include <openssl/md5.h>
+#include <openssl/sha.h>
 #include <openssl/err.h>
 
 #include "basic.h"
@@ -212,7 +213,7 @@ struct crypto_options
   struct packet_id *packet_id;
   struct packet_id_persist *pid_persist;
   bool packet_id_long_form;
-  uint8_t *iv;
+  bool use_iv;
 };
 
 void init_key_type (struct key_type *kt, const char *ciphername,
@@ -226,9 +227,7 @@ void write_key_file (const struct key *key, const char *filename);
 
 void generate_key_random (struct key *key, const struct key_type *kt);
 
-void randomize_iv (uint8_t *iv);
-
-void check_replay_iv_consistency(const struct key_type *kt, bool packet_id, bool iv);
+void check_replay_iv_consistency(const struct key_type *kt, bool packet_id, bool use_iv);
 
 bool check_key (struct key *key, const struct key_type *kt);
 
@@ -270,9 +269,12 @@ void openvpn_decrypt (struct buffer *buf, struct buffer work,
 void crypto_adjust_frame_parameters (struct frame *frame,
 				     const struct key_type* kt,
 				     bool cipher_defined,
-				     bool iv,
+				     bool use_iv,
 				     bool packet_id,
 				     bool packet_id_long_form);
+
+void prng_init (void);
+void prng_bytes (uint8_t *output, int len);
 
 void test_crypto (const struct crypto_options *co, struct frame* f);
 

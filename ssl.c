@@ -226,6 +226,7 @@ free_ssl_lib ()
   fclose (fp);
 #endif
 
+  uninit_crypto_lib ();
   EVP_cleanup ();
   ERR_free_strings ();
 }
@@ -1353,7 +1354,7 @@ tls_multi_init (struct tls_options *tls_options)
 void
 tls_multi_init_finalize (struct tls_multi* multi, const struct frame* frame)
 {
-  tls_init_control_channel_frame_parameters(frame, &multi->opt.frame);
+  tls_init_control_channel_frame_parameters (frame, &multi->opt.frame);
   
   /* initialize the active and untrusted sessions */
 
@@ -1361,6 +1362,36 @@ tls_multi_init_finalize (struct tls_multi* multi, const struct frame* frame)
 
   if (!multi->opt.single_session)
     tls_session_init (multi, &multi->session[TM_UNTRUSTED]);
+}
+
+/*
+ * Initialize and finalize a standalone tls-auth verification object.
+ */
+
+struct tls_auth_standalone *
+tls_auth_standalone_init (struct tls_options *tls_options,
+			  struct gc_arena *gc)
+{
+  struct tls_auth_standalone *tas;
+
+  ALLOC_OBJ_CLEAR_GC (tas, struct tls_auth_standalone, gc);
+
+  /* set up pointer to HMAC object for TLS packet authentication */
+  tas->tls_auth_key = tls_options->tls_auth_key;
+  tas->tls_auth_options.key_ctx_bi = &tas->tls_auth_key;
+  tas->tls_auth_options.packet_id_long_form = true;
+
+  /* get initial frame parms, still need to finalize */
+  tas->frame = tls_options->frame;
+
+  return tas;
+}
+
+void
+tls_auth_standalone_finalize (struct tls_auth_standalone *tas,
+			      const struct frame *frame)
+{
+  tls_init_control_channel_frame_parameters (frame, &tas->frame);
 }
 
 /*
@@ -2980,14 +3011,19 @@ tls_pre_decrypt (struct tls_multi *multi,
 
 /*
  * This function is similar to tls_pre_decrypt, except it is called
- * when we are in forking server mode.  Note that we don't modify
+ * when we are in server mode and receive an initial incoming
+ * packet.  Note that we don't modify
  * any state in our parameter objects.  The purpose is solely to
- * determine whether we should fork, in which case true is returned.
+ * determine whether we should generate a client instance
+ * object, in which case true is returned.
+ *
+ * This function is essentially the first-line HMAC firewall
+ * on the UDP port listener in --mode server mode.
  */
 bool
-tls_pre_decrypt_dynamic (const struct tls_multi *multi,
-			 const struct sockaddr_in *from,
-			 const struct buffer *buf)
+tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
+		      const struct sockaddr_in *from,
+		      const struct buffer *buf)
 {
   struct gc_arena gc = gc_new ();
   bool ret = false;
@@ -3010,7 +3046,7 @@ tls_pre_decrypt_dynamic (const struct tls_multi *multi,
       if (op != P_CONTROL_HARD_RESET_CLIENT_V2)
 	{
 	  msg (D_TLS_ERRORS,
-	       "TLS Error: Unknown opcode (%d) received from %s -- make sure the connecting client is using the --dynamic option",
+	       "TLS Error: Unknown opcode (%d) received from %s",
 	       op,
 	       print_sockaddr (from, &gc));
 	  goto error;
@@ -3025,20 +3061,19 @@ tls_pre_decrypt_dynamic (const struct tls_multi *multi,
 	  goto error;
 	}
 
-      if (buf->len > EXPANDED_SIZE_DYNAMIC (&multi->opt.frame))
+      if (buf->len > EXPANDED_SIZE_DYNAMIC (&tas->frame))
 	{
 	  msg (D_TLS_ERRORS,
 	       "TLS Error: Large packet (size %d) received from %s -- a packet no larger than %d bytes was expected",
 	       buf->len,
 	       print_sockaddr (from, &gc),
-	       EXPANDED_SIZE_DYNAMIC (&multi->opt.frame));
+	       EXPANDED_SIZE_DYNAMIC (&tas->frame));
 	  goto error;
 	}
 
       {
 	struct buffer newbuf = clone_buf (buf);
-	const struct tls_session *session = &multi->session[TM_UNTRUSTED];
-	struct crypto_options co = session->tls_auth;
+	struct crypto_options co = tas->tls_auth_options;
 	bool status;
 
 	/*

@@ -566,10 +566,10 @@ schedule_print_work (struct schedule_entry *e, int indent)
       printf ("%s [%u] e=" ptr_format ", p=" ptr_format " lt=" ptr_format " gt=" ptr_format "\n",
 	      tv_string (&e->tv, &gc),
 	      e->pri,
-	      (pointer_type)e,
-	      (pointer_type)e->parent,
-	      (pointer_type)e->lt,
-	      (pointer_type)e->gt);
+	      (ptr_type)e,
+	      (ptr_type)e->parent,
+	      (ptr_type)e->lt,
+	      (ptr_type)e->gt);
       schedule_print_work (e->lt, indent+1);
       schedule_print_work (e->gt, indent+1);
     }

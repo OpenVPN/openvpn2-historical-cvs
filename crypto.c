@@ -1437,11 +1437,44 @@ show_available_digests ()
 }
 
 /*
+ * Enable crypto acceleration, if available
+ */
+
+static bool engine_initialized = false; /* GLOBAL */
+
+void init_crypto_lib_engine ()
+{
+  if (!engine_initialized)
+    {
+#if CRYPTO_ENGINE
+      /* Init available hardware crypto engines. */
+      msg (M_INFO, "Initializing OpenSSL hardware crypto engine functionality");
+      ENGINE_load_builtin_engines ();
+      ENGINE_register_all_complete ();
+#else
+      msg (M_WARN, "Note: OpenSSL hardware crypto engine functionality is not available");
+#endif
+      engine_initialized = true;
+    }
+}
+
+/*
  * This routine should have additional OpenSSL crypto library initialisations
  * used by both crypto and ssl components of OpenVPN.
  */
 void init_crypto_lib ()
 {
+}
+
+void uninit_crypto_lib ()
+{
+#if CRYPTO_ENGINE
+  if (engine_initialized)
+    {
+      ENGINE_cleanup ();
+      engine_initialized = false;
+    }
+#endif
 }
 
 /*
@@ -1506,12 +1539,13 @@ init_ssl_lib (void)
 {
   ERR_load_crypto_strings ();
   OpenSSL_add_all_algorithms ();
-  init_crypto_lib();
+  init_crypto_lib ();
 }
 
 void
 free_ssl_lib (void)
 {
+  uninit_crypto_lib ();
   EVP_cleanup ();
   ERR_free_strings ();
 }

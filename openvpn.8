@@ -82,6 +82,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-secret\fR\ \fIfile\fR\ ]
 [\ \fB\-\-auth\fR\ \fIalg\fR\ ]
 [\ \fB\-\-cipher\fR\ \fIalg\fR\ ]
+[\ \fB\-\-engine\fR\ ]
 [\ \fB\-\-keysize\fR\ \fIn\fR\ ]
 [\ \fB\-\-no\-replay\fR\ ]
 [\ \fB\-\-no\-iv\fR\ ]
@@ -123,6 +124,7 @@ openvpn \- secure IP tunnel daemon.
 [\ \fB\-\-disable\-occ\fR\ ]
 [\ \fB\-\-down\fR\ \fIcmd\fR\ ]
 [\ \fB\-\-down\fR\ ]
+[\ \fB\-\-engine\fR\ ]
 [\ \fB\-\-float\fR\ ]
 [\ \fB\-\-fragment\fR\ \fImax\fR\ ]
 [\ \fB\-\-genkey\fR\ ]
@@ -1600,6 +1602,10 @@ This option is persistent over the entire course of
 an OpenVPN instantiation and will not be reset by SIGHUP,
 SIGUSR1, or
 .B --ping-restart.
+
+Note that on Windows, when OpenVPN is started as a service,
+logging occurs by default without the need to specify
+this option.
 .TP
 .B --log-append file
 Append logging messages to
@@ -2091,6 +2097,9 @@ key size.  Many ciphers have not been extensively
 cryptanalyzed with non-standard key lengths, and a
 larger key may offer no real guarantee of greater
 security, or may even reduce security.
+.TP
+.B --engine
+Enable OpenSSL hardware crypto engine functionality.
 .TP
 .B --no-replay
 Disable OpenVPN's protection against replay attacks.

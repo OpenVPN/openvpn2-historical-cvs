@@ -1,7 +1,22 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.34 2004/06/24 03:48:27 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.35 2004/06/30 00:35:40 jimyonan Exp $
+
+2004.06.29 -- Version 2.0-beta7
+
+* Fixed bug in link_socket_verify_incoming_addr() which
+  under certain circumstances could have caused --float
+  behavior even if --float was not specified.
+* --tls-auth option now works with --mode server.
+  All clients and the server should use the same
+  --tls-auth key when operating in client/server mode.
+* Added --engine option to make use of OpenSSL-supported
+  crypto acceleration hardware.
+* Fixed some high verbosity print format size issues
+  in event.c for 64 bit platforms (Janne Johansson).
+* Made failure to open --log or --log-append file
+  a non-fatal error.
 
 2004.06.23 -- Version 2.0-beta6
 
@@ -27,7 +42,7 @@ $Id: ChangeLog,v 1.89.2.34 2004/06/24 03:48:27 jimyonan Exp $
   ifconfig substring if it is empty.  Incremented
   options compatibility string version number to 4.
 * Fixed typo in --tls-timeout option parsing
-  (Mikael Lönnroth).
+  (Mikael Lonnroth).
 
 2004.06.13 -- Version 2.0-beta5
 

@@ -1138,7 +1138,7 @@ get_default_gateway (in_addr_t *ret)
 
   if (write(s, (char *)&m_rtmsg, l) < 0)
     {
-      warn("writing to routing socket");
+      msg (M_WARN, "ROUTE: problem writing to routing socket");
       gc_free (&gc);
       return false;
     }

@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [2.0_beta6], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [2.0_beta7], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -404,6 +404,12 @@ if test "$CRYPTO" = "yes"; then
                        AC_DEFINE(USE_CRYPTO, 1, [Use OpenSSL crypto library])
                        OPENVPN_ADD_LIBS(-lcrypto)
                        AC_CHECK_FUNCS(EVP_CIPHER_CTX_set_key_length)
+
+		       dnl check for OpenSSL crypto acceleration capability
+		       AC_CHECK_HEADERS(openssl/engine.h)
+                       AC_CHECK_FUNCS(ENGINE_load_builtin_engines)
+                       AC_CHECK_FUNCS(ENGINE_register_all_complete)
+                       AC_CHECK_FUNCS(ENGINE_cleanup)
                      ],
 		     [AC_MSG_ERROR([OpenSSL crypto Library is too old.])]
 		   )

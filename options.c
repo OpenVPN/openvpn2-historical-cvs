@@ -286,6 +286,7 @@ static const char usage_message[] =
   "--keysize n     : Size of cipher key in bits (optional).\n"
   "                  If unspecified, defaults to cipher-specific default.\n"
 #endif
+  "--engine        : Enable OpenSSL hardware crypto engine functionality.\n"
   "--no-replay     : Disable replay protection.\n"
   "--replay-window n [t] : Use a replay protection sliding window of size n\n"
   "                        and a time window of t seconds.\n"
@@ -774,6 +775,7 @@ show_settings (const struct options *o)
   SHOW_STR (up_script);
   SHOW_STR (down_script);
   SHOW_BOOL (up_restart);
+  SHOW_BOOL (up_delay);
   SHOW_BOOL (daemon);
   SHOW_INT (inetd);
   SHOW_BOOL (log);
@@ -820,6 +822,7 @@ show_settings (const struct options *o)
   SHOW_BOOL (authname_defined);
   SHOW_STR (authname);
   SHOW_INT (keysize);
+  SHOW_BOOL (engine);
   SHOW_BOOL (replay);
   SHOW_INT (replay_window);
   SHOW_INT (replay_time);
@@ -1073,8 +1076,6 @@ options_postprocess (struct options *options, bool first_time)
 	msg (M_USAGE, "Options error: --mode server currently only supports --proto udp or --proto tcp-server");
       if (!options->tls_server)
 	msg (M_USAGE, "Options error: --mode server requires --tls-server");
-      if (options->tls_auth_file)
-	msg (M_USAGE, "Options error: --tls-auth cannot be used with --mode server");
       if (options->remote_list)
 	msg (M_USAGE, "Options error: --remote cannot be used with --mode server");
       if (options->http_proxy_server || options->socks_proxy_server)
@@ -1333,7 +1334,7 @@ options_string (const struct options *o,
 	tt_local = true;
     }
 
-  if (tt && !PUSH_DEFINED(o) && !PULL_DEFINED(o))
+  if (tt && o->mode == MODE_POINT_TO_POINT && !PULL_DEFINED(o))
     {
       const char *ios = ifconfig_options_string (tt, remote, o->ifconfig_nowarn, gc);
       if (ios && strlen (ios))
@@ -2966,6 +2967,11 @@ add_option (struct options *options,
       VERIFY_PERMISSION (OPT_P_GENERAL);
       options->test_crypto = true;
     }
+  else if (streq (p[0], "engine"))
+    {
+      VERIFY_PERMISSION (OPT_P_GENERAL);
+      options->engine = true;
+    }  
 #ifdef HAVE_EVP_CIPHER_CTX_SET_KEY_LENGTH
   else if (streq (p[0], "keysize") && p[1])
     {

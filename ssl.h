@@ -417,6 +417,17 @@ struct tls_multi
   struct tls_session session[TM_SIZE];
 };
 
+/*
+ * Used in --mode server mode to check tls-auth signature on initial
+ * packets received from new clients.
+ */
+struct tls_auth_standalone
+{
+  struct key_ctx_bi tls_auth_key;
+  struct crypto_options tls_auth_options;
+  struct frame frame;
+};
+
 void init_ssl_lib (void);
 void free_ssl_lib (void);
 
@@ -428,6 +439,12 @@ SSL_CTX *init_ssl (bool server,
 		   const char *priv_key_file, const char *cipher_list);
 
 struct tls_multi *tls_multi_init (struct tls_options *tls_options);
+
+struct tls_auth_standalone *tls_auth_standalone_init (struct tls_options *tls_options,
+						      struct gc_arena *gc);
+
+void tls_auth_standalone_finalize (struct tls_auth_standalone *tas,
+				   const struct frame *frame);
 
 void tls_multi_init_finalize(struct tls_multi *multi,
 			     const struct frame *frame);
@@ -449,9 +466,9 @@ bool tls_pre_decrypt (struct tls_multi *multi,
 		      struct buffer *buf,
 		      struct crypto_options *opt);
 
-bool tls_pre_decrypt_dynamic (const struct tls_multi *multi,
-			      const struct sockaddr_in *from,
-			      const struct buffer *buf);
+bool tls_pre_decrypt_lite (const struct tls_auth_standalone *tas,
+			   const struct sockaddr_in *from,
+			   const struct buffer *buf);
 
 void tls_pre_encrypt (struct tls_multi *multi,
 		      struct buffer *buf, struct crypto_options *opt);

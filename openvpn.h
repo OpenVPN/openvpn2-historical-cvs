@@ -236,6 +236,10 @@ struct context_2
   /* master OpenVPN SSL/TLS object */
   struct tls_multi *tls_multi;
 
+  /* check --tls-auth signature without needing
+     a full-size tls_multi object */
+  struct tls_auth_standalone *tls_auth_standalone;
+
   /* used to optimize calls to tls_multi_process */
   struct interval tmp_int;
 

@@ -43,6 +43,13 @@
 
 #include "occ-inline.h"
 
+/*
+ * Crypto initialization flags
+ */
+#define CF_LOAD_PERSISTED_PACKET_ID (1<<0)
+#define CF_INIT_TLS_MULTI           (1<<1)
+#define CF_INIT_TLS_AUTH_STANDALONE (1<<2)
+
 void
 context_clear (struct context *c)
 {
@@ -762,8 +769,10 @@ key_schedule_free (struct key_schedule *ks, bool free_ssl_ctx)
   free_key_ctx_bi (&ks->static_key);
 #ifdef USE_SSL
   if (ks->ssl_ctx && free_ssl_ctx)
-    SSL_CTX_free (ks->ssl_ctx);
-  free_key_ctx_bi (&ks->tls_auth_key);
+    {
+      SSL_CTX_free (ks->ssl_ctx);
+      free_key_ctx_bi (&ks->tls_auth_key);
+    }
 #endif /* USE_SSL */
 #endif /* USE_CRYPTO */
   CLEAR (*ks);
@@ -772,11 +781,17 @@ key_schedule_free (struct key_schedule *ks, bool free_ssl_ctx)
 #ifdef USE_CRYPTO
 
 static void
-init_crypto_pre (struct context *c)
+init_crypto_pre (struct context *c, const unsigned int flags)
 {
-  /* load a persisted packet-id for cross-session replay-protection */
-  if (c->options.packet_id_file)
-    packet_id_persist_load (&c->c1.pid_persist, c->options.packet_id_file);
+  if (c->options.engine)
+    init_crypto_lib_engine ();
+
+  if (flags & CF_LOAD_PERSISTED_PACKET_ID)
+    {
+      /* load a persisted packet-id for cross-session replay-protection */
+      if (c->options.packet_id_file)
+	packet_id_persist_load (&c->c1.pid_persist, c->options.packet_id_file);
+    }
 
   /* Initialize crypto options */
   c->c2.crypto_options.use_iv = c->options.use_iv;
@@ -786,12 +801,12 @@ init_crypto_pre (struct context *c)
  * Static Key Mode (using a pre-shared key)
  */
 static void
-do_init_crypto_static (struct context *c)
+do_init_crypto_static (struct context *c, const unsigned int flags)
 {
   const struct options *options = &c->options;
   ASSERT (options->shared_secret_file);
 
-  init_crypto_pre (c);
+  init_crypto_pre (c, flags);
 
   /* Initialize packet ID tracking */
   if (options->replay)
@@ -897,7 +912,7 @@ do_init_crypto_tls_c1 (struct context *c)
 }
 
 static void
-do_init_crypto_tls (struct context *c, bool lite)
+do_init_crypto_tls (struct context *c, const unsigned int flags)
 {
   const struct options *options = &c->options;
   struct tls_options to;
@@ -906,8 +921,7 @@ do_init_crypto_tls (struct context *c, bool lite)
   ASSERT (options->tls_server || options->tls_client);
   ASSERT (!options->test_crypto);
 
-  if (!lite)
-    init_crypto_pre (c);
+  init_crypto_pre (c, flags);
 
   /* Make sure we are either a TLS client or server but not both */
   ASSERT (options->tls_server == !options->tls_client);
@@ -970,18 +984,30 @@ do_init_crypto_tls (struct context *c, bool lite)
   /*
    * Initialize OpenVPN's master TLS-mode object.
    */
-  if (!lite)
+  if (flags & CF_INIT_TLS_MULTI)
     c->c2.tls_multi = tls_multi_init (&to);
+
+  if (flags & CF_INIT_TLS_AUTH_STANDALONE)
+    c->c2.tls_auth_standalone = tls_auth_standalone_init (&to, &c->c2.gc);
 }
 
 static void
 do_init_finalize_tls_frame (struct context *c)
 {
-  tls_multi_init_finalize (c->c2.tls_multi, &c->c2.frame);
-  ASSERT (EXPANDED_SIZE (&c->c2.tls_multi->opt.frame) <=
-	  EXPANDED_SIZE (&c->c2.frame));
-  frame_print (&c->c2.tls_multi->opt.frame, D_MTU_INFO,
-	       "Control Channel MTU parms");
+  if (c->c2.tls_multi)
+    {
+      tls_multi_init_finalize (c->c2.tls_multi, &c->c2.frame);
+      ASSERT (EXPANDED_SIZE (&c->c2.tls_multi->opt.frame) <=
+	      EXPANDED_SIZE (&c->c2.frame));
+      frame_print (&c->c2.tls_multi->opt.frame, D_MTU_INFO,
+		   "Control Channel MTU parms");
+    }
+  if (c->c2.tls_auth_standalone)
+    {
+      tls_auth_standalone_finalize (c->c2.tls_auth_standalone, &c->c2.frame);
+      frame_print (&c->c2.tls_auth_standalone->frame, D_MTU_INFO,
+		   "TLS-Auth MTU parms");
+    }
 }
 
 #endif /* USE_SSL */
@@ -1001,14 +1027,14 @@ do_init_crypto_none (const struct context *c)
 #endif
 
 static void
-do_init_crypto (struct context *c, bool lite)
+do_init_crypto (struct context *c, const unsigned int flags)
 {
 #ifdef USE_CRYPTO
   if (c->options.shared_secret_file)
-    do_init_crypto_static (c);
+    do_init_crypto_static (c, flags);
 #ifdef USE_SSL
   else if (c->options.tls_server || c->options.tls_client)
-    do_init_crypto_tls (c, lite);
+    do_init_crypto_tls (c, flags);
 #endif
   else				/* no encryption or authentication. */
     do_init_crypto_none (c);
@@ -1085,8 +1111,7 @@ static void
 do_init_frame_tls (struct context *c)
 {
 #if defined(USE_CRYPTO) && defined(USE_SSL)
-  if (c->c2.tls_multi)
-    do_init_finalize_tls_frame (c);
+  do_init_finalize_tls_frame (c);
 #endif
 }
 
@@ -1610,7 +1635,16 @@ init_instance (struct context *c)
     c->c2.fragment = fragment_init (&c->c2.frame);
 
   /* init crypto layer */
-  do_init_crypto (c, c->mode == CM_TOP);
+  {
+    unsigned int crypto_flags = 0;
+    if (c->mode == CM_TOP)
+      crypto_flags = CF_INIT_TLS_AUTH_STANDALONE;
+    else if (c->mode == CM_P2P)
+      crypto_flags = CF_LOAD_PERSISTED_PACKET_ID | CF_INIT_TLS_MULTI;
+    else if (child)
+      crypto_flags = CF_INIT_TLS_MULTI;
+    do_init_crypto (c, crypto_flags);
+  }
 
 #ifdef USE_LZO
   /* initialize LZO compression library. */
@@ -1622,8 +1656,7 @@ init_instance (struct context *c)
   do_init_frame (c);
 
   /* initialize TLS MTU variables */
-  if (c->mode == CM_P2P || child)
-    do_init_frame_tls (c);
+  do_init_frame_tls (c);
 
   /* init workspace buffers whose size is derived from frame size */
   if (c->mode == CM_P2P || c->mode == CM_CHILD_TCP)
@@ -1777,6 +1810,7 @@ inherit_context_child (struct context *dest,
 #ifdef USE_SSL
   /* inherit SSL context */
   dest->c1.ks.ssl_ctx = src->c1.ks.ssl_ctx;
+  dest->c1.ks.tls_auth_key = src->c1.ks.tls_auth_key;
 #endif
 #endif
 
@@ -1830,6 +1864,10 @@ inherit_context_thread (struct context *dest,
   options_detach (&dest->options);
   gc_detach (&dest->gc);
   gc_detach (&dest->c2.gc);
+
+#if defined(USE_CRYPTO) && defined(USE_SSL)
+  dest->c2.tls_multi = NULL;
+#endif
 
   dest->c1.tuntap_owned = false;
   dest->c1.status_output_owned = false;
@@ -1885,7 +1923,7 @@ test_crypto_thread (void *arg)
   ASSERT (options->test_crypto);
   init_verb_mute (c, IVM_LEVEL_1);
   context_init_1 (c);
-  do_init_crypto_static (c);
+  do_init_crypto_static (c, 0);
 
 #if defined(USE_PTHREAD)
   {

@@ -256,6 +256,7 @@ struct options
   bool authname_defined;
   const char *authname;
   int keysize;
+  bool engine;
   bool replay;
   int replay_window;
   int replay_time;

@@ -84,19 +84,28 @@ LDADD = @LIBOBJS@
 
 man_MANS = openvpn.8
 
-EXTRA_DIST = $(man_MANS) \
-	     COPYRIGHT.GPL PORTS openvpn.spec \
-	     easy-rsa sample-config-files sample-keys \
-	     sample-scripts gentoo suse openvpn.spec.in \
-	     config-win32.h \
-	     win32.h \
-	     win32.c \
-	     makefile.w32 \
-	     INSTALL-win32.txt \
-	     tap-win32 \
-	     install-win32 \
-	     service-win32 \
-	     contrib
+EXTRA_DIST = \
+	doclean \
+	$(man_MANS) \
+	COPYRIGHT.GPL \
+	PORTS \
+	openvpn.spec \
+	easy-rsa \
+	sample-config-files \
+	sample-keys \
+	sample-scripts \
+	gentoo \
+	suse \
+	openvpn.spec.in \
+	config-win32.h \
+	win32.h \
+	win32.c \
+	makefile.w32 \
+	INSTALL-win32.txt \
+	tap-win32 \
+	install-win32 \
+	service-win32 \
+	contrib
 
 dist-hook:
 	cd $(distdir) && for i in $(EXTRA_DIST) ; do find $$i -name CVS -type d -prune -exec rm -r '{}' ';' ; rm -f `find $$i -type f | grep -E '(^|\/)\.?\#|\~$$'` ; done

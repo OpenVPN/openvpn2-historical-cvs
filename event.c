@@ -103,11 +103,11 @@ we_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
 {
   struct we_set *wes = (struct we_set *) es;
 
-  msg (D_EVENT_WAIT, "WE_CTL n=%d rwflags=0x%04x ev=0x%08x arg=0x%08x",
+  msg (D_EVENT_WAIT, "WE_CTL n=%d rwflags=0x%04x ev=0x%08x arg=" ptr_format,
        wes->n_events,
        rwflags,
        (unsigned int)event,
-       (unsigned int)arg);
+       (ptr_type)arg);
 
   if (wes->fast)
     {
@@ -161,8 +161,8 @@ we_wait (struct event_set *es, const struct timeval *tv, struct event_set_return
   if (outlen >= 1 && status >= WSA_WAIT_EVENT_0 && status < WSA_WAIT_EVENT_0 + (DWORD) wes->n_events)
     {
       *out = wes->esr[status - WSA_WAIT_EVENT_0];
-      msg (D_EVENT_WAIT, "WE_WAIT rwflags=0x%04x arg=0x%08x",
-	   out->rwflags, (unsigned int)out->arg);
+      msg (D_EVENT_WAIT, "WE_WAIT rwflags=0x%04x arg=" ptr_format,
+	   out->rwflags, (ptr_type)out->arg);
       return 1;
     }
   else if (status == WSA_WAIT_TIMEOUT)
@@ -258,8 +258,13 @@ ep_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
     ev.events |= EPOLLIN;
   if (rwflags & EVENT_WRITE)
     ev.events |= EPOLLOUT;
-  msg (D_EVENT_WAIT, "EP_CTL fd=%d rwflags=0x%04x ev=0x%08x arg=0x%08x",
-       (int)event, rwflags, ev.events, (unsigned int)ev.data.ptr);
+
+  msg (D_EVENT_WAIT, "EP_CTL fd=%d rwflags=0x%04x ev=0x%08x arg=" ptr_format,
+       (int)event,
+       rwflags,
+       (unsigned int)ev.events,
+       (ptr_type)ev.data.ptr);
+
   if (epoll_ctl (eps->epfd, EPOLL_CTL_MOD, event, &ev) < 0)
     {
       if (errno == ENOENT)
@@ -297,8 +302,8 @@ ep_wait (struct event_set *es, const struct timeval *tv, struct event_set_return
 	  if (ev->events & EPOLLOUT)
 	    esr->rwflags |= EVENT_WRITE;
 	  esr->arg = ev->data.ptr;
-	  msg (D_EVENT_WAIT, "EP_WAIT[%d] rwflags=0x%04x ev=0x%08x arg=0x%08x",
-	       i, esr->rwflags, ev->events, (unsigned int)ev->data.ptr);
+	  msg (D_EVENT_WAIT, "EP_WAIT[%d] rwflags=0x%04x ev=0x%08x arg=" ptr_format,
+	       i, esr->rwflags, ev->events, (ptr_type)ev->data.ptr);
 	  ++ev;
 	  ++esr;
 	}
@@ -386,8 +391,8 @@ po_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
 {
   struct po_set *pos = (struct po_set *) es;
 
-  msg (D_EVENT_WAIT, "PO_CTL rwflags=0x%04x ev=%d arg=0x%08x",
-       rwflags, (unsigned int)event, (unsigned int)arg);
+  msg (D_EVENT_WAIT, "PO_CTL rwflags=0x%04x ev=%d arg=" ptr_format,
+       rwflags, (int)event, (ptr_type)arg);
 
   if (pos->fast)
     {
@@ -448,8 +453,8 @@ po_wait (struct event_set *es, const struct timeval *tv, struct event_set_return
 	      if (pfdp->revents & POLLOUT)
 		out->rwflags |= EVENT_WRITE;
 	      out->arg = pos->args[i];
-	      msg (D_EVENT_WAIT, "PO_WAIT[%d,%d] fd=%d rev=0x%08x rwflags=0x%04x arg=0x%08x",
-		   i, j, pfdp->fd, pfdp->revents, out->rwflags, (unsigned int)out->arg);
+	      msg (D_EVENT_WAIT, "PO_WAIT[%d,%d] fd=%d rev=0x%08x rwflags=0x%04x arg=" ptr_format,
+		   i, j, pfdp->fd, pfdp->revents, out->rwflags, (ptr_type)out->arg);
 	      ++out;
 	      ++j;
 	    }
@@ -552,8 +557,8 @@ se_ctl (struct event_set *es, event_t event, unsigned int rwflags, void *arg)
 {
   struct se_set *ses = (struct se_set *) es;
 
-  msg (D_EVENT_WAIT, "SE_CTL rwflags=0x%04x ev=%d arg=0x%08x",
-       rwflags, (unsigned int)event, (unsigned int)arg);
+  msg (D_EVENT_WAIT, "SE_CTL rwflags=0x%04x ev=%d arg=" ptr_format,
+       rwflags, (int)event, (ptr_type)arg);
 
   if (event >= 0 && event < ses->capacity)
     {
@@ -604,8 +609,8 @@ se_wait_return (struct se_set *ses,
 	  if (w)
 	    out->rwflags |= EVENT_WRITE;
 	  out->arg = ses->args[i];
-	  msg (D_EVENT_WAIT, "SE_WAIT[%d,%d] rwflags=0x%04x arg=0x%08x",
-	       i, j, out->rwflags, (unsigned int)out->arg);
+	  msg (D_EVENT_WAIT, "SE_WAIT[%d,%d] rwflags=0x%04x arg=" ptr_format,
+	       i, j, out->rwflags, (ptr_type)out->arg);
 	  ++out;
 	  ++j;
 	}

@@ -559,20 +559,24 @@ multi_get_create_instance (struct multi_thread *mt)
 	}
       else
 	{
-	  if (frequency_limit_event_allowed (mt->multi->new_connection_limiter))
+	  if (!mt->top.c2.tls_auth_standalone
+	      || tls_pre_decrypt_lite (mt->top.c2.tls_auth_standalone, &mt->top.c2.from, &mt->top.c2.buf))
 	    {
-	      mi = multi_create_instance (mt, &real);
-	      if (mi)
+	      if (frequency_limit_event_allowed (mt->multi->new_connection_limiter))
 		{
-		  hash_add_fast (hash, bucket, &mi->real, hv, mi);
-		  mi->did_real_hash = true;
+		  mi = multi_create_instance (mt, &real);
+		  if (mi)
+		    {
+		      hash_add_fast (hash, bucket, &mi->real, hv, mi);
+		      mi->did_real_hash = true;
+		    }
 		}
-	    }
-	  else
-	    {
-	      msg (D_MULTI_ERRORS,
-		   "MULTI: Connection from %s would exceed new connection frequency limit as controlled by --connect-freq",
-		   mroute_addr_print (&real, &gc));
+	      else
+		{
+		  msg (D_MULTI_ERRORS,
+		       "MULTI: Connection from %s would exceed new connection frequency limit as controlled by --connect-freq",
+		       mroute_addr_print (&real, &gc));
+		}
 	    }
 	}
 

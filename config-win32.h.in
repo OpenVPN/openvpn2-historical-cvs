@@ -66,6 +66,18 @@ typedef unsigned long in_addr_t;
 /* Enable multiclient server capability */
 #define MULTICLIENT_SERVER_ENABLED 1
 
+/* Define to 1 if you have the <openssl/engine.h> header file. */
+#define HAVE_OPENSSL_ENGINE_H 1
+
+/* Define to 1 if you have the `ENGINE_load_builtin_engines' function. */
+#define HAVE_ENGINE_LOAD_BUILTIN_ENGINES 1
+
+/* Define to 1 if you have the `ENGINE_register_all_complete' function. */
+#define HAVE_ENGINE_REGISTER_ALL_COMPLETE 1
+
+/* Define to 1 if you have the `ENGINE_cleanup' function. */
+#define HAVE_ENGINE_CLEANUP 1
+
 /* gettimeofday() is implemented in otime.c for Windows */
 #define HAVE_GETTIMEOFDAY 1
 

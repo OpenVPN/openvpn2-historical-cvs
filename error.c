@@ -370,7 +370,10 @@ redirect_stdout_stderr (const char *file, bool append)
 			       NULL);
 
       if (log_handle == INVALID_HANDLE_VALUE)
-	msg (M_ERR, "Error: cannot open --log file: %s", file);
+	{
+	  msg (M_WARN|M_ERRNO, "Warning: cannot open --log file: %s", file);
+	  return;
+	}
 
       /* append to logfile? */
       if (append)
@@ -405,7 +408,11 @@ redirect_stdout_stderr (const char *file, bool append)
 		      S_IRUSR | S_IWUSR);
 
       if (out < 0)
-	msg (M_ERR, "Error redirecting stdout/stderr to --log file: %s", file);
+	{
+	  msg (M_WARN|M_ERRNO, "Warning: Error redirecting stdout/stderr to --log file: %s", file);
+	  return;
+	}
+
       if (dup2 (out, 1) == -1)
 	msg (M_ERR, "--log file redirection error on stdout");
       if (dup2 (out, 2) == -1)

@@ -27,6 +27,15 @@
 #define CRYPTO_H
 #ifdef USE_CRYPTO
 
+/*
+ * Does our OpenSSL library support crypto hardware acceleration?
+ */
+#if defined(HAVE_OPENSSL_ENGINE_H) && defined(HAVE_ENGINE_LOAD_BUILTIN_ENGINES) && defined(HAVE_ENGINE_REGISTER_ALL_COMPLETE) && defined(HAVE_ENGINE_CLEANUP)
+#define CRYPTO_ENGINE 1
+#else
+#define CRYPTO_ENGINE 0
+#endif
+
 #include <openssl/objects.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
@@ -35,6 +44,10 @@
 #include <openssl/md5.h>
 #include <openssl/sha.h>
 #include <openssl/err.h>
+
+#if CRYPTO_ENGINE
+#include <openssl/engine.h>
+#endif
 
 #include "basic.h"
 #include "buffer.h"
@@ -314,7 +327,11 @@ void show_available_ciphers (void);
 
 void show_available_digests (void);
 
+void init_crypto_lib_engine (void);
+
 void init_crypto_lib (void);
+
+void uninit_crypto_lib (void);
 
 /* key direction functions */
 

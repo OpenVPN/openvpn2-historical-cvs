@@ -437,10 +437,7 @@ link_socket_verify_incoming_addr (struct buffer *buf,
       if (addr_match_proto (from_addr, &info->lsa->remote, info->proto))
 	return true;
     }
-  else
-    {
-      return false;
-    }
+  return false;
 }
 
 static inline void

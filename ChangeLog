@@ -1,9 +1,9 @@
 OpenVPN
 Copyright (C) 2002-2003 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.63.2.12 2003/05/13 09:50:38 jimyonan Exp $
+$Id: ChangeLog,v 1.63.2.13 2003/05/16 08:30:35 jimyonan Exp $
 
-Upcoming Version 1.4.1
+2003.05.15 -- Version 1.4.1
 
 * Modified the Linux 2.4 TUN/TAP open code to
   fall back to the 2.2 TUN/TAP interface if the
@@ -13,7 +13,10 @@ Upcoming Version 1.4.1
   Occurs on platorms where
   EXTENDED_SOCKET_ERROR_CAPABILITY is defined,
   such as Linux 2.4.
-* Added --enable-dynamic-mtu configure option.
+* Fixed typo in tun.c that was preventing
+  OpenBSD build.
+* Added --enable-mtu-dynamic configure option
+  to enable --mtu-dynamic experimental option.
 	
 2003.05.07 -- Version 1.4.0
 

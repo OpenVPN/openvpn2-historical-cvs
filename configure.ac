@@ -25,7 +25,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.50)
 
-AC_INIT([OpenVPN], [1.4.0.2-MTU-4], [openvpn-users@lists.sourceforge.net], [openvpn])
+AC_INIT([OpenVPN], [1.4.1], [openvpn-users@lists.sourceforge.net], [openvpn])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR(syshead.h)
 
@@ -59,8 +59,8 @@ AC_ARG_ENABLE(strict,
    [STRICT="no"]
 )
 
-AC_ARG_ENABLE(dynamic-mtu,
-   [  --enable-dynamic-mtu    Enable dynamic MTU support],
+AC_ARG_ENABLE(mtu-dynamic,
+   [  --enable-mtu-dynamic    Enable dynamic MTU support],
    [DYNAMIC_MTU="$enableval"],
    [DYNAMIC_MTU="no"]
 )

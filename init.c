@@ -518,10 +518,10 @@ do_init_route_list (const struct options *options,
  * based on options.
  */
 void
-do_route (const struct options *options, struct route_list *route_list)
+do_route (const struct options *options, struct route_list *route_list, const struct tuntap *tt)
 {
   if (!options->route_noexec && route_list)
-    add_routes (route_list, false);
+    add_routes (route_list, tt, false);
 
   if (options->route_script)
     {
@@ -623,7 +623,7 @@ do_open_tun (struct context *c)
 
       /* possibly add routes */
       if (!c->options.route_delay_defined)
-	do_route (&c->options, c->c1.route_list);
+	do_route (&c->options, c->c1.route_list, c->c1.tuntap);
 
       /*
        * Did tun/tap driver give us an MTU?
@@ -1491,7 +1491,7 @@ do_close_tuntap (struct context *c)
 	{
 	  /* delete any routes we added */
 	  if (c->c1.route_list)
-	    delete_routes (c->c1.route_list);
+	    delete_routes (c->c1.route_list, c->c1.tuntap);
 
 	  msg (D_CLOSE, "Closing TUN/TAP interface");
 	  close_tun (c->c1.tuntap);

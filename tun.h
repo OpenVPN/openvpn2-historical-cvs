@@ -287,6 +287,12 @@ const char *get_device_guid (const char *name,
 
 void verify_255_255_255_252 (in_addr_t local, in_addr_t remote);
 
+const IP_ADAPTER_INFO *get_adapter_info_list (struct gc_arena *gc);
+const IP_ADAPTER_INFO *get_tun_adapter (const struct tuntap *tt, const IP_ADAPTER_INFO *list);
+bool is_adapter_up (const struct tuntap *tt, const IP_ADAPTER_INFO *list);
+bool is_ip_in_adapter_subnet (const IP_ADAPTER_INFO *ai, const in_addr_t ip, in_addr_t *highest_netmask);
+DWORD adapter_index_of_ip (const IP_ADAPTER_INFO *list, const in_addr_t ip, int *count);
+
 void show_tap_win32_adapters (int msglev, int warnlev);
 void show_adapters (int msglev);
 

@@ -1068,8 +1068,7 @@ options_postprocess (struct options *options, bool first_time)
 	  options->tuntap_options.ip_win32_type != IPW32_SET_DHCP_MASQ)
 	msg (M_USAGE, "Options error: --dhcp-options requires --ip-win32 dynamic");
 
-      if (options->tuntap_options.ip_win32_type == IPW32_SET_DHCP_MASQ
-	  && !options->route_delay_defined)
+      if (!options->route_delay_defined)
 	{
 	  options->route_delay_defined = true;
 	  options->route_delay = 0;

@@ -1458,7 +1458,7 @@ print_in_addr_t (in_addr_t addr, unsigned int flags, struct gc_arena *gc)
   struct in_addr ia;
   struct buffer out = alloc_buf_gc (64, gc);
 
-  if (addr || (flags & IA_EMPTY_IF_UNDEF))
+  if (addr || !(flags & IA_EMPTY_IF_UNDEF))
     {
       CLEAR (ia);
       ia.s_addr = (flags & IA_NET_ORDER) ? addr : htonl (addr);

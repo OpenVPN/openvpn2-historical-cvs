@@ -236,10 +236,10 @@ send_control_channel_string (struct context *c, char *str)
 void
 check_add_routes_dowork (struct context *c)
 {
-  if (test_routes (c->c1.route_list)
+  if (test_routes (c->c1.route_list, c->c1.tuntap)
       || event_timeout_trigger (&c->c2.route_wakeup_expire, &c->c2.timeval, ETT_DEFAULT))
     {
-      do_route (&c->options, c->c1.route_list);
+      do_route (&c->options, c->c1.route_list, c->c1.tuntap);
       update_time ();
       event_timeout_clear (&c->c2.route_wakeup);
       event_timeout_clear (&c->c2.route_wakeup_expire);

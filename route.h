@@ -30,7 +30,7 @@
 #ifndef ROUTE_H
 #define ROUTE_H
 
-#include "buffer.h"
+#include "tun.h"
 
 #define MAX_ROUTES 100
 
@@ -116,9 +116,12 @@ bool init_route_list (struct route_list *rl,
 		      in_addr_t remote_host);
 
 void add_routes (struct route_list *rl,
+		 const struct tuntap *tt,
 		 bool delete_first);
 
-void delete_routes (struct route_list *rl);
+void delete_routes (struct route_list *rl,
+		    const struct tuntap *tt);
+
 void setenv_routes (const struct route_list *rl);
 
 void print_route_options (const struct route_option_list *rol,
@@ -130,11 +133,11 @@ bool netmask_to_netbits (in_addr_t network, in_addr_t netmask, int *netbits);
 
 #ifdef WIN32
 void show_routes (int msglev);
-bool test_routes (const struct route_list *rl);
-bool add_route_ipapi (const struct route *r);
-bool del_route_ipapi (const struct route *r);
+bool test_routes (const struct route_list *rl, const struct tuntap *tt);
+bool add_route_ipapi (const struct route *r, const struct tuntap *tt);
+bool del_route_ipapi (const struct route *r, const struct tuntap *tt);
 #else
-static inline bool test_routes (const struct route_list *rl) { return true; }
+static inline bool test_routes (const struct route_list *rl, const struct tuntap *tt) { return true; }
 #endif
 
 static inline in_addr_t

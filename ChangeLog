@@ -1,7 +1,13 @@
 OpenVPN
 Copyright (C) 2002-2004 James Yonan <jim@yonan.net>
 
-$Id: ChangeLog,v 1.89.2.36 2004/07/28 07:45:46 jimyonan Exp $
+$Id: ChangeLog,v 1.89.2.37 2004/07/31 03:33:08 jimyonan Exp $
+
+2004.07.30 -- Version 2.0-beta9
+
+* Fixed --route issue on Windows that was introduced with
+  the new beta8 route implementation based on the
+  IP Helper API.
 
 2004.07.27 -- Version 2.0-beta8
 

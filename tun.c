@@ -2164,8 +2164,8 @@ get_device_guid (const char *name,
 /*
  * Get adapter info list
  */
-static IP_ADAPTER_INFO *
-get_adapt_info_list (struct gc_arena *gc)
+const IP_ADAPTER_INFO *
+get_adapter_info_list (struct gc_arena *gc)
 {
   ULONG size = 0;
   IP_ADAPTER_INFO *pi = NULL;
@@ -2192,11 +2192,11 @@ get_adapt_info_list (struct gc_arena *gc)
   return pi;
 }
 
-static PIP_INTERFACE_INFO
+static const IP_INTERFACE_INFO *
 get_interface_info_list (struct gc_arena *gc)
 {
   ULONG size = 0;
-  PIP_INTERFACE_INFO ii = NULL;
+  IP_INTERFACE_INFO *ii = NULL;
   DWORD status;
 
   if ((status = GetInterfaceInfo (NULL, &size)) != ERROR_INSUFFICIENT_BUFFER)
@@ -2220,16 +2220,16 @@ get_interface_info_list (struct gc_arena *gc)
   return ii;
 }
 
-static PIP_ADAPTER_INDEX_MAP
+static const IP_ADAPTER_INDEX_MAP *
 get_interface_info (DWORD index, struct gc_arena *gc)
 {
-  PIP_INTERFACE_INFO list = get_interface_info_list (gc);
+  const IP_INTERFACE_INFO *list = get_interface_info_list (gc);
   if (list)
     {
       int i;
       for (i = 0; i < list->NumAdapters; ++i)
 	{
-	  PIP_ADAPTER_INDEX_MAP inter = &list->Adapter[i];
+	  const IP_ADAPTER_INDEX_MAP *inter = &list->Adapter[i];
 	  if (index == inter->Index)
 	    return inter;
 	}
@@ -2241,22 +2241,196 @@ get_interface_info (DWORD index, struct gc_arena *gc)
  * Given an adapter index, return a pointer to the
  * IP_ADAPTER_INFO structure for that adapter.
  */
-static IP_ADAPTER_INFO *
-get_adapt_info (DWORD index, struct gc_arena *gc)
+
+static const IP_ADAPTER_INFO *
+get_adapter (const IP_ADAPTER_INFO *ai, DWORD index)
 {
-  if (index != (DWORD)~0)
+  if (ai && index != (DWORD)~0)
     {
-      IP_ADAPTER_INFO *pi = get_adapt_info_list (gc);
-      IP_ADAPTER_INFO *a;
+      const IP_ADAPTER_INFO *a;
 
       /* find index in the linked list */
-      for (a = pi; a != NULL; a = a->Next)
+      for (a = ai; a != NULL; a = a->Next)
 	{
 	  if (a->Index == index)
 	    return a;
 	}
     }
   return NULL;
+}
+
+static const IP_ADAPTER_INFO *
+get_adapter_info (DWORD index, struct gc_arena *gc)
+{
+  return get_adapter (get_adapter_info_list (gc), index);
+}
+
+static int
+get_adapter_n_ip_netmask (const IP_ADAPTER_INFO *ai)
+{
+  if (ai)
+    {
+      int n = 0;
+      const IP_ADDR_STRING *ip = &ai->IpAddressList;
+
+      while (ip)
+	{
+	  ++n;
+	  ip = ip->Next;
+	}
+      return n;
+    }
+  else
+    return 0;
+}
+
+static bool
+get_adapter_ip_netmask (const IP_ADAPTER_INFO *ai, const int n, in_addr_t *ip, in_addr_t *netmask)
+{
+  *ip = 0;
+  *netmask = 0;
+  bool ret = false;
+
+  if (ai)
+    {
+      const IP_ADDR_STRING *iplist = &ai->IpAddressList;
+      int i = 0;
+
+      while (iplist)
+	{
+	  if (i == n)
+	    break;
+	  ++i;
+	  iplist = iplist->Next;
+	}
+
+      if (iplist)
+	{
+	  const unsigned int getaddr_flags = GETADDR_HOST_ORDER;
+	  const char *ip_str = iplist->IpAddress.String;
+	  const char *netmask_str = iplist->IpMask.String;
+	  bool succeed1 = false;
+	  bool succeed2 = false;
+
+	  if (ip_str && netmask_str && strlen (ip_str) && strlen (netmask_str))
+	    {
+	      *ip = getaddr (getaddr_flags, ip_str, 0, &succeed1, NULL);
+	      *netmask = getaddr (getaddr_flags, netmask_str, 0, &succeed2, NULL);
+	      ret = (succeed1 == true && succeed2 == true);
+	    }
+	}
+    }
+
+  return ret;
+}
+
+const IP_ADAPTER_INFO *
+get_tun_adapter (const struct tuntap *tt, const IP_ADAPTER_INFO *list)
+{
+  if (list && tt)
+    return get_adapter (list, tt->adapter_index);
+  else
+    return NULL;
+}
+
+bool
+is_adapter_up (const struct tuntap *tt, const IP_ADAPTER_INFO *list)
+{
+  int i;
+  bool ret = false;
+
+  const IP_ADAPTER_INFO *ai = get_tun_adapter (tt, list);
+
+  if (ai)
+    {
+      const int n = get_adapter_n_ip_netmask (ai);
+      for (i = 0; i < n; ++i)
+	{
+	  in_addr_t ip, netmask;
+	  if (get_adapter_ip_netmask (ai, i, &ip, &netmask))
+	    {
+	      if (tt->local && tt->adapter_netmask && tt->local == ip && tt->adapter_netmask == netmask)
+		ret = true;
+	    }
+	}
+    }
+  return ret;
+}
+
+bool
+is_ip_in_adapter_subnet (const IP_ADAPTER_INFO *ai, const in_addr_t ip, in_addr_t *highest_netmask)
+{
+  int i;
+  bool ret = false;
+
+  if (highest_netmask)
+    *highest_netmask = 0;
+
+  if (ai)
+    {
+      const int n = get_adapter_n_ip_netmask (ai);
+      for (i = 0; i < n; ++i)
+	{
+	  in_addr_t adapter_ip, adapter_netmask;
+	  if (get_adapter_ip_netmask (ai, i, &adapter_ip, &adapter_netmask))
+	    {
+	      if (adapter_ip && adapter_netmask && (ip & adapter_netmask) == (adapter_ip & adapter_netmask))
+		{
+		  if (highest_netmask && adapter_netmask > *highest_netmask)
+		    *highest_netmask = adapter_netmask;
+		  ret = true;
+		}
+	    }
+	}
+    }
+  return ret;
+}
+
+DWORD
+adapter_index_of_ip (const IP_ADAPTER_INFO *list, const in_addr_t ip, int *count)
+{
+  struct gc_arena gc = gc_new ();
+  DWORD ret = ~0;
+  in_addr_t highest_netmask = 0;
+  bool first = true;
+
+  if (count)
+    *count = 0;
+
+  while (list)
+    {
+      in_addr_t hn;
+
+      if (is_ip_in_adapter_subnet (list, ip, &hn))
+	{
+	  if (first || hn > highest_netmask)
+	    {
+	      highest_netmask = hn;
+	      if (count)
+		*count = 1;
+	      ret = list->Index;
+	      first = false;
+	    }
+	  else if (hn == highest_netmask)
+	    {
+	      if (count)
+		++*count;
+	    }
+	}
+      list = list->Next;
+    }
+
+  msg (D_ROUTE_DEBUG, "DEBUG: IP Locate: ip=%s nm=%s index=%d count=%d",
+       print_in_addr_t (ip, 0, &gc),
+       print_in_addr_t (highest_netmask, 0, &gc),
+       (int)ret,
+       count ? *count : -1);
+
+  if (ret == ~0 && count)
+    *count = 0;
+
+  gc_free (&gc);
+  return ret;
 }
 
 /*
@@ -2267,7 +2441,7 @@ static bool
 dhcp_disabled (DWORD index)
 {
   struct gc_arena gc = gc_new ();
-  IP_ADAPTER_INFO *ai = get_adapt_info (index, &gc);
+  const IP_ADAPTER_INFO *ai = get_adapter_info (index, &gc);
   bool ret = false;
 
   if (ai && !ai->DhcpEnabled)
@@ -2285,11 +2459,11 @@ static void
 delete_temp_addresses (DWORD index)
 {
   struct gc_arena gc = gc_new ();
-  PIP_ADAPTER_INFO a = get_adapt_info (index, &gc);
+  const IP_ADAPTER_INFO *a = get_adapter_info (index, &gc);
 
   if (a)
     {
-      PIP_ADDR_STRING ip = &a->IpAddressList;
+      const IP_ADDR_STRING *ip = &a->IpAddressList;
       while (ip)
 	{
 	  DWORD status;
@@ -2349,7 +2523,7 @@ get_interface_index (const char *guid)
  * Return a string representing a PIP_ADDR_STRING
  */
 static const char *
-format_ip_addr_string (PIP_ADDR_STRING ip, struct gc_arena *gc)
+format_ip_addr_string (const IP_ADDR_STRING *ip, struct gc_arena *gc)
 {
   struct buffer out = alloc_buf_gc (512, gc);
   while (ip)
@@ -2370,7 +2544,7 @@ format_ip_addr_string (PIP_ADDR_STRING ip, struct gc_arena *gc)
  * Show info for a single adapter
  */
 static void
-show_adapter (int msglev, IP_ADAPTER_INFO *a, struct gc_arena *gc)
+show_adapter (int msglev, const IP_ADAPTER_INFO *a, struct gc_arena *gc)
 {
   msg (msglev, "%s", a->Description);
   msg (msglev, "  Index = %d", (int)a->Index);
@@ -2398,12 +2572,12 @@ void
 show_adapters (int msglev)
 {
   struct gc_arena gc = gc_new ();
-  IP_ADAPTER_INFO *ai = get_adapt_info_list (&gc);
+  const IP_ADAPTER_INFO *ai = get_adapter_info_list (&gc);
 
   msg (msglev, "SYSTEM ADAPTER LIST");
   if (ai)
     {
-      IP_ADAPTER_INFO *a;
+      const IP_ADAPTER_INFO *a;
 
       /* find index in the linked list */
       for (a = ai; a != NULL; a = a->Next)
@@ -2425,10 +2599,10 @@ dhcp_release (const struct tuntap *tt)
   bool ret = false;
   if (tt && tt->options.ip_win32_type == IPW32_SET_DHCP_MASQ && tt->adapter_index != ~0)
     {
-      PIP_ADAPTER_INDEX_MAP inter = get_interface_info (tt->adapter_index, &gc);
+      const IP_ADAPTER_INDEX_MAP *inter = get_interface_info (tt->adapter_index, &gc);
       if (inter)
 	{
-	  DWORD status = IpReleaseAddress (inter);
+	  DWORD status = IpReleaseAddress ((IP_ADAPTER_INDEX_MAP *)inter);
 	  if (status == NO_ERROR)
 	    {
 	      msg (D_TUNTAP_INFO, "TAP: DHCP address released");
@@ -2451,10 +2625,10 @@ dhcp_renew (const struct tuntap *tt)
   bool ret = false;
   if (tt && tt->options.ip_win32_type == IPW32_SET_DHCP_MASQ && tt->adapter_index != ~0)
     {
-      PIP_ADAPTER_INDEX_MAP inter = get_interface_info (tt->adapter_index, &gc);
+      const IP_ADAPTER_INDEX_MAP *inter = get_interface_info (tt->adapter_index, &gc);
       if (inter)
 	{
-	  DWORD status = IpRenewAddress (inter);
+	  DWORD status = IpRenewAddress ((IP_ADAPTER_INDEX_MAP *)inter);
 	  if (status == NO_ERROR)
 	    {
 	      msg (D_TUNTAP_INFO, "TAP: DHCP address renewal succeeded");
@@ -2807,11 +2981,11 @@ open_tun (const char *dev, const char *dev_type, const char *dev_node, bool ipv6
 	       device_guid
 	       );
 	else
-	  msg (M_FATAL, "ERROR: AddIPAddress %s/%s failed on interface %s, index=%u, status=%u (windows error: '%s') -- %s",
+	  msg (M_FATAL, "ERROR: AddIPAddress %s/%s failed on interface %s, index=%d, status=%u (windows error: '%s') -- %s",
 	       print_in_addr_t (tt->local, 0, &gc),
 	       print_in_addr_t (tt->adapter_netmask, 0, &gc),
 	       device_guid,
-	       (unsigned int)index,
+	       (int)index,
 	       (unsigned int)status,
 	       strerror_win32 (status, &gc),
 	       error_suffix);

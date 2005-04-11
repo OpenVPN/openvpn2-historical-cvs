@@ -1,7 +1,12 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.127 2005/04/04 12:01:01 jimyonan Exp $
+$Id: ChangeLog,v 1.128 2005/04/11 04:16:14 jimyonan Exp $
+
+2005.04.10 -- Version 2.0-rc21
+
+* Change license description from "GPL Version 2 or (at your
+  option) any later version" to just "GPL Version 2".
 
 2005.04.04 -- Version 2.0-rc20
 

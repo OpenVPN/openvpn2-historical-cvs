@@ -1,7 +1,27 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.130 2005/04/30 22:21:13 jimyonan Exp $
+$Id: ChangeLog,v 1.131 2005/05/18 08:21:54 jimyonan Exp $
+
+2005.05.16 -- Version 2.0.1-rc2
+
+* Modified vendor test in openvpn.spec file to match against
+  "Mandrakesoft" in addition to "MandrakeSoft".
+* Using --iroute in a --client-config-dir file while in --dev tap
+  mode is not currently supported and will produce a warning
+  message. Fixed bug where in certain cases, in addition to
+  generating a warning message, this combination of options
+  would also produce a fatal assertion in mroute.c.
+* Pass --auth-user-pass username to server-side plugin without
+  performing any string remapping (plugins, unlike scripts,
+  don't get any security benefit from string remapping).
+  This is intended to fix an issue with openvpn-auth-pam/pam_winbind
+  where backslash characters in a username ('\') were being remapped
+  to underscore ('_').
+* Updated OpenSSL DLLs in Windows build to 0.9.7g.
+* Documented --explicit-exit-notify in man page.
+* --explicit-exit-notify seconds parameter defaults to 1 if
+  unspecified.
 
 2005.04.30 -- Version 2.0.1-rc1
 

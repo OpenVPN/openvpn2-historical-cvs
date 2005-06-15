@@ -1,9 +1,14 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.132 2005/06/12 08:01:15 jimyonan Exp $
+$Id: ChangeLog,v 1.133 2005/06/15 16:54:51 jimyonan Exp $
 
-2005.05.xx -- Version 2.0.1-rc3
+2005.06.xx -- Version 2.0.1-rc4
+
+* Support LZO 2.0, including changes to configure script to
+  autodetect LZO version.
+
+2005.06.12 -- Version 2.0.1-rc3
 
 * Fixed a bug which caused standard file handles to not be closed
   after daemonization when --plugin and --daemon are used together,

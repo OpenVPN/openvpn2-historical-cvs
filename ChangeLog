@@ -1,8 +1,12 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.104.2.6 2005/06/12 18:25:48 jimyonan Exp $
+$Id: ChangeLog,v 1.104.2.7 2005/06/21 06:42:14 jimyonan Exp $
 
+2005.06.21 -- Version 2.0.1_rc3MT1
+
+* Stripped out reentrancy-based thread model.
+	
 2005.06.12 -- Version 2.0.1_rc3MT
 
 * Merged with 2.0.1_rc3

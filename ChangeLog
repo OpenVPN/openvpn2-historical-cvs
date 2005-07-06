@@ -1,7 +1,12 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.104.2.10 2005/07/06 03:11:44 jimyonan Exp $
+$Id: ChangeLog,v 1.104.2.11 2005/07/06 06:53:49 jimyonan Exp $
+
+2005.07.05 -- Version 2.0.1_rc5MT1
+
+* Added IPv6 support (--udp6) and PF_UNIX (--unix-dgram)
+  See README.IPv6 and CHANGES.IPv6 for details (Juanjo Ciarlante)
 
 2005.07.05 -- Version 2.0.1_rc5MT
 

@@ -1,7 +1,14 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.134 2005/07/04 07:18:53 jimyonan Exp $
+$Id: ChangeLog,v 1.135 2005/07/15 18:54:00 jimyonan Exp $
+
+2005.07.15 -- Version 2.0.1-rc6
+
+* Commented out "user nobody" and "group nobody" in sample
+  client/server config files.
+* Allow '@' character to be used in --client-config-dir
+  file names.
 
 2005.07.04 -- Version 2.0.1-rc5
 

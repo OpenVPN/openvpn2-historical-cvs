@@ -1,7 +1,13 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.135 2005/07/15 18:54:00 jimyonan Exp $
+$Id: ChangeLog,v 1.136 2005/07/21 20:45:48 jimyonan Exp $
+
+2005.07.21 -- Version 2.0.1-rc7
+
+* Support LZO 2.01 which renamed its library to lzo2 (Matthias Andree).
+* Include linux/types.h before checking for linux/errqueue.h (Matthias
+  Andree).
 
 2005.07.15 -- Version 2.0.1-rc6
 
@@ -26,7 +32,7 @@ $Id: ChangeLog,v 1.135 2005/07/15 18:54:00 jimyonan Exp $
 
 2005.06.15 -- Version 2.0.1-rc4
 
-* Support LZO 2.0, including changes to configure script to
+* Support LZO 2.00, including changes to configure script to
   autodetect LZO version.
 
 2005.06.12 -- Version 2.0.1-rc3

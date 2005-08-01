@@ -1,7 +1,11 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.104.2.11.2.1 2005/07/06 07:57:44 jimyonan Exp $
+$Id: ChangeLog,v 1.104.2.11.2.2 2005/08/01 05:42:05 jimyonan Exp $
+
+2005.07.31 -- Version 2.1-alpha2
+
+* --fast-io efficiency improvements on UDP/Posix.
 
 2005.07.05 -- Version 2.1-alpha1
 

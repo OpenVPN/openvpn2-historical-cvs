@@ -1,7 +1,11 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.138 2005/08/24 09:08:54 jimyonan Exp $
+$Id: ChangeLog,v 1.139 2005/08/25 17:09:58 jimyonan Exp $
+
+2005.08.25 -- Version 2.0.2
+
+* No change from 2.0.2-rc1.
 
 2005.08.24 -- Version 2.0.2-rc1
 

@@ -1,7 +1,15 @@
 OpenVPN
 Copyright (C) 2002-2005 OpenVPN Solutions LLC <info@openvpn.net>
 
-$Id: ChangeLog,v 1.104.2.11.2.2 2005/08/01 05:42:05 jimyonan Exp $
+$Id: ChangeLog,v 1.104.2.11.2.3 2005/08/26 18:26:51 jimyonan Exp $
+
+2005.08.26 -- Version 2.1-alpha4
+
+* Beginning of refactoring of fast-io to cover all modes.
+	
+2005.08.01 -- Version 2.1-alpha3
+
+* --fast-io stable checkpoint
 
 2005.07.31 -- Version 2.1-alpha2
 
